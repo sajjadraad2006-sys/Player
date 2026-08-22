@@ -1,0 +1,2 @@
+-keep class androidx.media3.session.** { *; }
+-keep class * extends androidx.room.RoomDatabase
