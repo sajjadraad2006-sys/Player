@@ -1,8 +1,11 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.1.0"
 }
 
 android {
@@ -13,11 +16,19 @@ android {
         applicationId = "dev.auralis.studio"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
+
+        // Jamendo client ID — set JAMENDO_CLIENT_ID in local.properties (never commit the key)
+        val properties = Properties()
+        val localPropertiesFile = rootProject.file("local.properties")
+        if (localPropertiesFile.exists()) {
+            properties.load(localPropertiesFile.inputStream())
+        }
+        buildConfigField("String", "JAMENDO_CLIENT_ID", "\"${properties.getProperty("JAMENDO_CLIENT_ID") ?: ""}\"")
     }
 
     buildTypes {
@@ -46,6 +57,8 @@ android {
         "/META-INF/{AL2.0,LGPL2.1}",
         "/META-INF/LICENSE.md",
         "/META-INF/LICENSE-notice.md",
+        "/META-INF/INDEX.LIST",
+        "/META-INF/DEPENDENCIES",
     )
 
     testOptions.unitTests.isIncludeAndroidResources = true
@@ -67,6 +80,8 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.compose.animation:animation")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     implementation("androidx.media3:media3-common:1.5.1")
@@ -79,8 +94,17 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.concurrent:concurrent-futures:1.2.0")
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
+
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // HTTP client for LRCLIB lyrics and Jamendo (when configured)
+    implementation("io.ktor:ktor-client-core:3.0.3")
+    implementation("io.ktor:ktor-client-okhttp:3.0.3")
+    implementation("io.ktor:ktor-client-content-negotiation:3.0.3")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")

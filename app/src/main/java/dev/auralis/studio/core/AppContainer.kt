@@ -12,8 +12,11 @@ class AppContainer(context: Context) {
         context,
         AppDatabase::class.java,
         "auralis.db",
-    ).build()
-    val settings = SettingsRepository(context)
-    val library = MediaStoreMusicRepository(context)
-    val safLibrary = SafMusicRepository(context)
+    )
+        .addMigrations(AppDatabase.MIGRATION_1_2)
+        .build()
+
+    val settings    = SettingsRepository(context)
+    val library     = MediaStoreMusicRepository(context)
+    val safLibrary  = SafMusicRepository(context)
 }

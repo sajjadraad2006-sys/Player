@@ -1,7 +1,15 @@
 package dev.auralis.studio.ui.components
 
 import android.text.format.DateUtils
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
@@ -34,56 +43,118 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import dev.auralis.studio.R
 import dev.auralis.studio.core.database.PlaylistEntity
 import dev.auralis.studio.core.model.Track
+import dev.auralis.studio.designsystem.LocalAuralisTokens
 import dev.auralis.studio.designsystem.LocalThemeSettings
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GlassCard — primary card surface
+// ─────────────────────────────────────────────────────────────────────────────
 @Composable
 fun GlassCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
-    val settings = LocalThemeSettings.current
-    val shape = RoundedCornerShape(settings.cornerRadius.dp)
-    val cardModifier = if (onClick != null) modifier.clickable(onClick = onClick) else modifier
+    val tokens = LocalAuralisTokens.current
+    val colors = MaterialTheme.colorScheme
+    val shape  = RoundedCornerShape(tokens.cardCorner.dp)
+    val cardModifier = if (onClick != null) modifier.clip(shape).clickable(onClick = onClick) else modifier
     Card(
-        modifier = cardModifier,
-        shape = shape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = (1f - settings.glassAlpha).coerceIn(0.56f, 0.96f)),
+        modifier  = cardModifier,
+        shape     = shape,
+        colors    = CardDefaults.cardColors(
+            containerColor = colors.surface.copy(alpha = tokens.surfaceAlpha),
+            contentColor   = colors.onSurface,   // ← semantic — never hard-coded
         ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.09f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardElevation),
+        border    = if (tokens.cardBorderWidth > 0.dp) {
+            BorderStroke(tokens.cardBorderWidth, colors.outline.copy(alpha = tokens.cardBorderAlpha))
+        } else null,
     ) { content() }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GlassSurface — flat surface (no elevation, for full-screen layering)
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+fun GlassSurface(
+    modifier: Modifier = Modifier,
+    alpha: Float = LocalAuralisTokens.current.surfaceAlpha,
+    content: @Composable () -> Unit,
+) {
+    val tokens = LocalAuralisTokens.current
+    val color  = MaterialTheme.colorScheme.surface.copy(alpha = alpha)
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(tokens.cardCorner.dp))
+            .background(color),
+    ) { content() }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Contrast scrim used under glass surfaces over artwork backgrounds
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+fun ArtworkContrastScrim(modifier: Modifier = Modifier) {
+    val tokens = LocalAuralisTokens.current
+    Box(
+        modifier = modifier.background(
+            Brush.verticalGradient(
+                listOf(
+                    Color.Black.copy(alpha = tokens.glassContrastScrimAlpha * 0.4f),
+                    Color.Black.copy(alpha = tokens.glassContrastScrimAlpha * 0.8f),
+                    Color.Black.copy(alpha = tokens.glassContrastScrimAlpha),
+                ),
+            ),
+        ),
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TrackArtwork — album art with theme-dependent corner
+// ─────────────────────────────────────────────────────────────────────────────
 @Composable
 fun TrackArtwork(track: Track?, modifier: Modifier = Modifier) {
-    val shape = RoundedCornerShape(16.dp)
+    val tokens = LocalAuralisTokens.current
+    val shape  = RoundedCornerShape(tokens.cardCorner.dp)
     if (track?.artworkUri != null) {
         AsyncImage(
-            model = track.artworkUri,
+            model           = track.artworkUri,
             contentDescription = track.album,
-            contentScale = ContentScale.Crop,
-            modifier = modifier.clip(shape),
+            contentScale    = ContentScale.Crop,
+            modifier        = modifier.clip(shape),
         )
     } else {
         Box(
-            modifier = modifier.clip(shape),
+            modifier         = modifier
+                .clip(shape)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center,
         ) {
-            Text("♫", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
+            // ♫ uses onSurfaceVariant for proper contrast in both light & dark
+            Text(
+                "♫",
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TrackRow — compact list item
+// ─────────────────────────────────────────────────────────────────────────────
 @Composable
 fun TrackRow(
     track: Track,
@@ -104,30 +175,52 @@ fun TrackRow(
             .padding(horizontal = 16.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TrackArtwork(track, Modifier.size(54.dp))
+        TrackArtwork(track, Modifier.size(52.dp))
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+            Text(
+                track.title,
+                maxLines  = 1,
+                overflow  = TextOverflow.Ellipsis,
+                style     = MaterialTheme.typography.titleMedium,
+                color     = MaterialTheme.colorScheme.onSurface,
+            )
             Spacer(Modifier.height(2.dp))
             Text(
-                listOf(track.artist, track.album).filter(String::isNotBlank).joinToString(" • "),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
+                listOf(track.artist, track.album).filter(String::isNotBlank).joinToString(" · "),
+                maxLines  = 1,
+                overflow  = TextOverflow.Ellipsis,
+                style     = MaterialTheme.typography.bodySmall,
+                color     = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Text(DateUtils.formatElapsedTime(track.durationMs / 1000), style = MaterialTheme.typography.labelSmall)
-        IconButton(onClick = onToggleFavorite) {
-            Icon(
-                if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                contentDescription = stringResource(if (isFavorite) R.string.remove_favorite else R.string.favorite),
-                tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Text(
+            DateUtils.formatElapsedTime(track.durationMs / 1000),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        AnimatedContent(
+            targetState = isFavorite,
+            transitionSpec = {
+                (scaleIn(spring(Spring.DampingRatioMediumBouncy)) + fadeIn()) togetherWith fadeOut()
+            },
+            label = "favorite_icon",
+        ) { fav ->
+            IconButton(onClick = onToggleFavorite) {
+                Icon(
+                    if (fav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                    contentDescription = stringResource(if (fav) R.string.remove_favorite else R.string.favorite),
+                    tint = if (fav) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         Box {
             IconButton(onClick = { menuExpanded = true }) {
-                Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_actions))
+                Icon(
+                    Icons.Default.MoreVert,
+                    contentDescription = stringResource(R.string.more_actions),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                 DropdownMenuItem(
@@ -149,14 +242,55 @@ fun TrackRow(
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SectionHeader
+// ─────────────────────────────────────────────────────────────────────────────
 @Composable
-fun SectionHeader(title: String, modifier: Modifier = Modifier, action: (@Composable () -> Unit)? = null) {
+fun SectionHeader(
+    title: String,
+    modifier: Modifier = Modifier,
+    action: (@Composable () -> Unit)? = null,
+) {
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment     = Alignment.CenterVertically,
     ) {
-        Text(title, style = MaterialTheme.typography.titleLarge)
+        Text(title, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onBackground)
         action?.invoke()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Small dot page indicator for the 3-page Now Playing pager
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+fun PagerDotIndicator(
+    pageCount: Int,
+    currentPage: Int,
+    modifier: Modifier = Modifier,
+    dotSize: Dp = 6.dp,
+    selectedSize: Dp = 8.dp,
+) {
+    Row(
+        modifier              = modifier,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment     = Alignment.CenterVertically,
+    ) {
+        repeat(pageCount) { index ->
+            val isSelected = index == currentPage
+            val size       = if (isSelected) selectedSize else dotSize
+            val color      = if (isSelected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.30f)
+            }
+            Box(
+                modifier = Modifier
+                    .size(size)
+                    .clip(CircleShape)
+                    .background(color),
+            )
+        }
     }
 }

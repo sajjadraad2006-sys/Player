@@ -20,8 +20,14 @@ import kotlin.math.sqrt
 
 /**
  * Low-allocation PCM processing used only for local playback. Order:
- * preamp -> graphic EQ/tone -> stereo matrix -> smooth 8D orbit -> reverb -> safe limiter.
+ * preamp → graphic EQ/tone → stereo matrix → smooth 8D orbit → reverb → safe limiter.
  * Media3's Sonic processor performs pitch/time-stretch before this processor.
+ *
+ * Visualizer tap: After the output sample is ready, we copy a downsampled mono
+ * snapshot into [visualizerRingBuffer] using lock-free atomic writes.
+ * The ring buffer is pre-allocated and never causes GC in the audio thread.
+ * The visualizer reads it on a background thread — no synchronization needed
+ * because we use a simple power-of-two ring with atomic indices.
  */
 @UnstableApi
 class StudioAudioProcessor : BaseAudioProcessor() {
@@ -38,6 +44,14 @@ class StudioAudioProcessor : BaseAudioProcessor() {
     private var leftDelay = FloatArray(1)
     private var rightDelay = FloatArray(1)
     private var delayIndex = 0
+
+    // ── Visualizer tap ──────────────────────────────────────────────────────
+    // 4096-sample ring buffer for the visualizer (mono, -1..1 float).
+    // Power-of-two size for efficient masking. Written in queueInput() at ~1:8
+    // downsampled rate to keep write overhead tiny.
+    val visualizerRingBuffer  = FloatArray(4096)
+    @Volatile var visualizerWritePos = 0
+    private var tapDecimator = 0
 
     fun update(config: AudioConfig) {
         requestedConfig.set(config)
@@ -64,6 +78,12 @@ class StudioAudioProcessor : BaseAudioProcessor() {
         rebuildFilters(config)
 
         if (!config.dspEnabled) {
+            // Even when DSP is bypassed, still feed the visualizer tap cheaply
+            val savedPos = inputBuffer.position()
+            val savedLimit = inputBuffer.limit()
+            tapBypass(inputBuffer)
+            inputBuffer.position(savedPos)
+            inputBuffer.limit(savedLimit)
             output.put(inputBuffer)
             output.flip()
             return
@@ -131,8 +151,39 @@ class StudioAudioProcessor : BaseAudioProcessor() {
             output.putShort((left.coerceIn(-1f, 1f) * 32767f).toInt().toShort())
             if (channelCount > 1) output.putShort((right.coerceIn(-1f, 1f) * 32767f).toInt().toShort())
             repeat((channelCount - 2).coerceAtLeast(0)) { output.putShort(inputBuffer.short) }
+
+            // Visualizer tap — write every 8th frame to keep callback overhead minimal
+            tapDecimator++
+            if (tapDecimator >= 8) {
+                tapDecimator = 0
+                val mono = (left + right) * 0.5f
+                val pos = visualizerWritePos and (visualizerRingBuffer.size - 1)
+                visualizerRingBuffer[pos] = mono
+                visualizerWritePos = (pos + 1) and (visualizerRingBuffer.size - 1)
+            }
         }
         output.flip()
+    }
+
+    /** Tap bypass path — cheap downsampled mono read without DSP. */
+    private fun tapBypass(buf: ByteBuffer) {
+        val frameBytes = channelCount * 2
+        var decimator = tapDecimator
+        val readBuf = buf.duplicate().order(ByteOrder.nativeOrder())
+        while (readBuf.remaining() >= frameBytes) {
+            val left = readBuf.short / 32768f
+            val right = if (channelCount > 1) readBuf.short / 32768f else left
+            repeat((channelCount - 2).coerceAtLeast(0)) { readBuf.short }
+            decimator++
+            if (decimator >= 8) {
+                decimator = 0
+                val mono = (left + right) * 0.5f
+                val pos = visualizerWritePos and (visualizerRingBuffer.size - 1)
+                visualizerRingBuffer[pos] = mono
+                visualizerWritePos = (pos + 1) and (visualizerRingBuffer.size - 1)
+            }
+        }
+        tapDecimator = decimator
     }
 
     override fun onFlush() {
@@ -151,6 +202,8 @@ class StudioAudioProcessor : BaseAudioProcessor() {
         rightFilters = emptyList()
         leftDelay = FloatArray(1)
         rightDelay = FloatArray(1)
+        visualizerRingBuffer.fill(0f)
+        visualizerWritePos = 0
     }
 
     private fun rebuildFilters(config: AudioConfig, force: Boolean = false) {
@@ -161,23 +214,23 @@ class StudioAudioProcessor : BaseAudioProcessor() {
         val gains = config.eqBandsDb.toMutableList()
         gains[1] = (gains[1] + config.bassDb).coerceIn(-18f, 18f)
         gains[8] = (gains[8] + config.trebleDb).coerceIn(-18f, 18f)
-        leftFilters = frequencies.mapIndexed { index, frequency -> Biquad().apply { setPeaking(sampleRate, frequency, gains[index], 1.15f) } }
+        leftFilters  = frequencies.mapIndexed { index, frequency -> Biquad().apply { setPeaking(sampleRate, frequency, gains[index], 1.15f) } }
         rightFilters = frequencies.mapIndexed { index, frequency -> Biquad().apply { setPeaking(sampleRate, frequency, gains[index], 1.15f) } }
     }
 
     private fun rebuildDelays() {
         val delayFrames = (sampleRate * 0.043f).toInt().coerceAtLeast(1)
-        leftDelay = FloatArray(delayFrames)
+        leftDelay  = FloatArray(delayFrames)
         rightDelay = FloatArray(delayFrames)
         delayIndex = 0
     }
 
     private fun applyChannelMode(left: Float, right: Float, mode: ChannelMode): Pair<Float, Float> = when (mode) {
         ChannelMode.STEREO -> left to right
-        ChannelMode.MONO -> ((left + right) * 0.5f).let { it to it }
-        ChannelMode.LEFT -> left to left
-        ChannelMode.RIGHT -> right to right
-        ChannelMode.SWAP -> right to left
+        ChannelMode.MONO   -> ((left + right) * 0.5f).let { it to it }
+        ChannelMode.LEFT   -> left to left
+        ChannelMode.RIGHT  -> right to right
+        ChannelMode.SWAP   -> right to left
     }
 
     private fun softLimit(value: Float): Float {
