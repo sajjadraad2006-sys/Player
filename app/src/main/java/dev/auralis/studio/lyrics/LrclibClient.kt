@@ -186,7 +186,9 @@ class LrclibClient {
                 durationMs <= 0 -> 0.40
                 else -> 0.30
             }
-            val titleSim  = similarity(title.lowercase(), track.trackName.lowercase()) * titleWeight
+            val queryTitle = title.lowercase()
+            val candidateTitle = track.trackName.lowercase()
+            val titleSim  = similarity(queryTitle, candidateTitle) * titleWeight
             val artistSim = similarity(artist.lowercase(), track.artistName.lowercase()) * artistWeight
             val albumBonus = if (album.isBlank()) 0.0 else similarity(album.lowercase(), track.albumName.lowercase()) * 0.08
             val durDiff   = abs(durationSec - track.duration)
@@ -199,7 +201,11 @@ class LrclibClient {
                 else         -> 0.0
             }
             val syncBonus = if (!track.syncedLyrics.isNullOrBlank()) 0.05 else 0.0
-            val total = titleSim + artistSim + albumBonus + durScore + syncBonus
+            // A close duration must not make a studio recording beat an explicitly requested
+            // live/acoustic/remix version (or vice versa). These qualifiers are musically
+            // meaningful metadata, so unlike promotional suffixes the normalizer preserves them.
+            val versionPenalty = versionMismatchPenalty(queryTitle, candidateTitle)
+            val total = titleSim + artistSim + albumBonus + durScore + syncBonus - versionPenalty
             Scored(track, total)
         }
 
@@ -219,6 +225,33 @@ class LrclibClient {
         val trigramsB = trigrams(b)
         val intersection = (trigramsA intersect trigramsB).size
         return 2.0 * intersection / (trigramsA.size + trigramsB.size)
+    }
+
+    internal fun versionMismatchPenalty(queryTitle: String, candidateTitle: String): Double {
+        val query = versionTags(queryTitle)
+        val candidate = versionTags(candidateTitle)
+        if (query == candidate) return 0.0
+        // An explicit but different version is riskier than an unqualified candidate.
+        return when {
+            query.isNotEmpty() && candidate.isNotEmpty() -> 0.34
+            query.isNotEmpty() || candidate.isNotEmpty() -> 0.24
+            else -> 0.0
+        }
+    }
+
+    private fun versionTags(value: String): Set<String> {
+        val normalized = value.lowercase()
+            .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+            .trim()
+        val words = normalized.split(Regex("\\s+")).filter(String::isNotBlank).toSet()
+        val tags = linkedSetOf<String>()
+        if ("live" in words || "concert" in words) tags += "live"
+        if ("acoustic" in words || "unplugged" in words) tags += "acoustic"
+        if ("remix" in words || "mix" in words || "edit" in words) tags += "remix"
+        if ("instrumental" in words || "karaoke" in words) tags += "instrumental"
+        if ("demo" in words) tags += "demo"
+        if ("radio" in words && "edit" in words) tags += "radio_edit"
+        return tags
     }
 
     private fun trigrams(s: String): Set<String> =

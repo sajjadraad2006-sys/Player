@@ -4,7 +4,7 @@
 
 # Lyrune
 
-**A modern Android music player and audio laboratory built around real-time DSP, adaptive visual design, synchronized lyrics, and truthful audio visualization.**
+**A modern Android music player and audio laboratory built around real-time DSP, adaptive visual design, synchronized lyrics, truthful audio visualization, and optional on-device source separation.**
 
 [![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android)](https://developer.android.com/)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-7F52FF?logo=kotlin)](https://kotlinlang.org/)
@@ -56,9 +56,9 @@ Appearance luminance and visual style are independent. AMOLED is an appearance m
 
 ## Stem separation status
 
-Lyrune does **not** ship or download an unverified neural model. The old center-channel and frequency-filter approximation was removed because it was not real source separation.
+Lyrune offers real two-stem separation through the optional, user-downloaded `UVR-MDX-NET-Voc_FT.fp16acc.tflite` model. The 66,848,828-byte artifact is pinned to an immutable revision and SHA-256, stored privately, and loaded only when requested. It predicts vocals; instrumental is the complementary `original − vocals` residual from the same run.
 
-The codebase now defines a model/version/capability-aware separation-engine contract, checksum-verified optional-model manager, versioned cache identity, cancellation boundary, and clipping-safe mixer math. Actual vocal/instrumental/bass controls remain unavailable until a model with verified provenance, license, Android operators, memory use, and device benchmarks is selected. No filtering is marketed as AI separation.
+Tracks are decoded and resampled off the playback thread, separated in chunks with LiteRT CPU/XNNPACK, overlap-added, gain-staged, written as synchronized WAV files, and cached by source/model/version. Both generated files can be played through the normal Media3 → DSP → visualizer path. Bass, drums, and other stems are not exposed because this is a genuine two-stem model. No filtering is marketed as AI separation.
 
 ## Architecture
 
@@ -84,6 +84,7 @@ The legacy `dev.auralis.studio` namespace, application ID, database names, DataS
 - Room 2.6.1 and DataStore 1.1.1
 - Ktor 3.0.3 and Kotlin serialization
 - Coil 2.7.0 and AndroidX Palette
+- LiteRT 1.4.2 and JTransforms 3.1 for optional offline Voc_FT inference
 - JDK 17 and Gradle wrapper
 
 ## Build
@@ -106,19 +107,20 @@ CI runs unit tests, Android lint, and the debug build without signing credential
 
 ## Status and roadmap
 
-Working today: local library, queues, playlists, favorites, MediaSession controls, PCM DSP, real FFT visualization, offline-first lyrics lookup, synced lyric following, themes, and English/Arabic app locales.
+Working today: local library, queues, playlists, favorites, MediaSession controls, PCM DSP, real FFT visualization, offline-first lyrics lookup, synced lyric following, themes, English/Arabic app locales, and optional cached vocal/instrumental separation.
 
 Roadmap:
 
-- benchmark a legally redistributable mobile source-separation model on representative Android hardware;
-- add model-backed cached stem playback only after synchronization and thermal tests;
+- benchmark Voc_FT memory, thermal behavior, and ARM performance on representative physical devices;
+- evaluate GPU delegation and the Inst_HQ_4 conversion without weakening CPU reference parity;
+- investigate a genuine bass-capable model before exposing any bass stem controls;
 - expand device/emulator UI regression coverage, especially RTL and OEM adaptive-icon masks;
 - publish committed product screenshots after device capture.
 
 ## Known limitations
 
-- No neural stem inference model is bundled or downloadable in this release.
-- Neural inference speed, GPU/NPU delegation, blur performance, and headphone perception require physical-device measurement.
+- Voc_FT is an optional ~64 MB download and currently uses CPU/XNNPACK; low-memory devices may be unable to complete it.
+- Physical-device inference speed, thermal behavior, GPU/NPU delegation, blur performance, and headphone perception remain unmeasured.
 - Online search availability depends on third-party providers and their terms.
 
 ## License

@@ -29,8 +29,10 @@ The processor writes post-DSP stereo-to-mono samples (or unchanged samples while
 
 ## Stem separation
 
-No frequency-domain approximation is labeled as stem separation. This build has no bundled neural model, so stem controls remain unavailable and the processor leaves the original mix untouched.
+No frequency-domain approximation is labeled as stem separation. The optional production engine uses the checksum-pinned `UVR-MDX-NET-Voc_FT.fp16acc.tflite` model and LiteRT CPU/XNNPACK. It operates at 44.1 kHz with `dim_t=256`, `hop=1024`, `dim_f=3072`, `n_fft=6144`, and a float32 `[1,4,3072,256]` complex-as-channel tensor ordered `[L_re,L_im,R_re,R_im]`.
 
-`audio/stems` defines the offline boundary for a future implementation: engine/model/version capabilities, model availability, checksum-verified optional installation, cancellation, versioned cache identity, and clipping-safe gain math. A genuine engine must decode and chunk a track in a worker, run inference away from the Media3 audio thread, reconstruct complete synchronized files, atomically mark the cache complete, and only then expose stems for synchronous playback. The intended order after that work is:
+The engine decodes/resamples off the Media3 audio thread, applies the upstream periodic-Hann centered STFT, runs real model inference, reconstructs with iSTFT and weighted overlap-add, and writes vocal and complementary instrumental WAVs. Only completed caches are exposed. Playing either generated stem sends it through the ordinary Media3 path:
 
-`decoded cached stems → synchronized stem mixer → DSP → post-DSP PCM tap → visualizer → AudioTrack`
+`cached generated stem → Media3 → DSP → post-DSP PCM tap → visualizer → AudioTrack`
+
+The model is never silently downloaded. Bass/drums/other remain unsupported because Voc_FT produces only vocals plus its instrumental residual.

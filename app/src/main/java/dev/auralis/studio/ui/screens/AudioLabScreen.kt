@@ -25,6 +25,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
@@ -51,6 +52,11 @@ import dev.auralis.studio.core.model.ChannelMode
 import dev.auralis.studio.core.model.OrbitDirection
 import dev.auralis.studio.core.model.PitchTempoMode
 import dev.auralis.studio.core.model.PitchMath
+import dev.auralis.studio.core.model.Track
+import dev.auralis.studio.audio.stems.StemKind
+import dev.auralis.studio.audio.stems.StemErrorCode
+import dev.auralis.studio.audio.stems.StemProcessingStage
+import dev.auralis.studio.audio.stems.StemUiState
 import dev.auralis.studio.designsystem.AuralisFilterChip
 import dev.auralis.studio.designsystem.AuralisSlider
 import dev.auralis.studio.designsystem.AuralisSwitch
@@ -62,6 +68,13 @@ import kotlin.math.roundToInt
 fun AudioLabScreen(
     config: AudioConfig,
     onChange: (AudioConfig) -> Unit,
+    stemState: StemUiState,
+    currentTrack: Track?,
+    onDownloadStemModel: () -> Unit,
+    onDeleteStemModel: () -> Unit,
+    onPrepareStems: (Track) -> Unit,
+    onCancelStemWork: () -> Unit,
+    onPlayStem: (StemKind) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var eqExpanded by remember { mutableStateOf(false) }
@@ -95,7 +108,17 @@ fun AudioLabScreen(
             }
         }
         item { DspPanel(config, onChange) }
-        item { StemIsolationPanel(config, onChange) }
+        item {
+            StemIsolationPanel(
+                state = stemState,
+                currentTrack = currentTrack,
+                onDownloadModel = onDownloadStemModel,
+                onDeleteModel = onDeleteStemModel,
+                onPrepare = onPrepareStems,
+                onCancel = onCancelStemWork,
+                onPlayStem = onPlayStem,
+            )
+        }
         item { PitchTempoPanel(config, onChange) }
         item { EightDPanel(config, onChange) }
         item {
@@ -122,21 +145,112 @@ fun AudioLabScreen(
 }
 
 @Composable
-private fun StemIsolationPanel(config: AudioConfig, onChange: (AudioConfig) -> Unit) {
+private fun StemIsolationPanel(
+    state: StemUiState,
+    currentTrack: Track?,
+    onDownloadModel: () -> Unit,
+    onDeleteModel: () -> Unit,
+    onPrepare: (Track) -> Unit,
+    onCancel: () -> Unit,
+    onPlayStem: (StemKind) -> Unit,
+) {
     val colors = MaterialTheme.colorScheme
     GlassCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SettingSwitch(
-                title = stringResource(R.string.stem_isolator_unavailable),
-                description = stringResource(R.string.stem_unavailable_description),
-                checked = false,
-                enabled = false,
-            ) { }
+            Text(stringResource(R.string.stem_high_quality_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = colors.onSurface)
             Text(
-                stringResource(R.string.stem_future_description),
+                stringResource(R.string.stem_voc_ft_description),
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant,
             )
+            when (state) {
+                StemUiState.CheckingModel -> {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text(stringResource(R.string.stem_checking_model), color = colors.onSurfaceVariant)
+                }
+                is StemUiState.ModelRequired -> {
+                    Text(stringResource(R.string.stem_model_download_size, state.bytes / (1024 * 1024)), color = colors.onSurface)
+                    Button(onClick = onDownloadModel, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.stem_download_model))
+                    }
+                }
+                is StemUiState.DownloadingModel -> {
+                    LinearProgressIndicator(
+                        progress = { state.progress / 100f },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(stringResource(R.string.stem_downloading_model_progress, state.progress), color = colors.onSurfaceVariant)
+                    TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
+                }
+                StemUiState.ReadyForTrack -> {
+                    Text(
+                        stringResource(if (currentTrack == null) R.string.stem_load_track else R.string.stem_model_ready),
+                        color = colors.onSurfaceVariant,
+                    )
+                    Button(
+                        onClick = { currentTrack?.let(onPrepare) },
+                        enabled = currentTrack != null,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.stem_prepare_current_track)) }
+                    TextButton(onClick = onDeleteModel) { Text(stringResource(R.string.stem_delete_model)) }
+                }
+                is StemUiState.Processing -> {
+                    val stageLabel = stringResource(
+                        when (state.stage) {
+                            StemProcessingStage.COPYING_SOURCE -> R.string.stem_copying_source
+                            StemProcessingStage.DECODING -> R.string.stem_decoding_audio
+                            StemProcessingStage.SEPARATING -> R.string.stem_separating_audio
+                            StemProcessingStage.SAVING -> R.string.stem_saving_outputs
+                        },
+                    )
+                    if (state.progress == null) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    else LinearProgressIndicator(progress = { state.progress / 100f }, modifier = Modifier.fillMaxWidth())
+                    Text(
+                        state.progress?.let { stringResource(R.string.stem_processing_progress, stageLabel, it) } ?: stageLabel,
+                        color = colors.onSurfaceVariant,
+                    )
+                    TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
+                }
+                is StemUiState.Complete -> {
+                    Text(stringResource(R.string.stem_ready_to_listen), color = colors.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { onPlayStem(StemKind.VOCALS) }, modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.stem_play_vocals))
+                        }
+                        FilledTonalButton(onClick = { onPlayStem(StemKind.INSTRUMENTAL) }, modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.stem_play_instrumental))
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { currentTrack?.let(onPrepare) }, enabled = currentTrack != null) {
+                            Text(stringResource(R.string.stem_prepare_again))
+                        }
+                        TextButton(onClick = onDeleteModel) { Text(stringResource(R.string.stem_delete_model)) }
+                    }
+                }
+                is StemUiState.Error -> {
+                    Text(
+                        stringResource(
+                            when (state.code) {
+                                StemErrorCode.DOWNLOAD_FAILED -> R.string.stem_error_download
+                                StemErrorCode.MODEL_INTEGRITY -> R.string.stem_error_integrity
+                                StemErrorCode.MODEL_UNAVAILABLE -> R.string.stem_error_unavailable
+                                StemErrorCode.NOT_ENOUGH_STORAGE -> R.string.stem_error_storage
+                                StemErrorCode.SEPARATION_FAILED -> R.string.stem_error_separation
+                            },
+                        ),
+                        color = colors.error,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (state.modelInstalled) {
+                            Button(onClick = { currentTrack?.let(onPrepare) }, enabled = currentTrack != null) { Text(stringResource(R.string.retry)) }
+                        } else {
+                            Button(onClick = onDownloadModel) { Text(stringResource(R.string.retry)) }
+                        }
+                        TextButton(onClick = onDeleteModel) { Text(stringResource(R.string.stem_delete_model)) }
+                    }
+                }
+            }
         }
     }
 }

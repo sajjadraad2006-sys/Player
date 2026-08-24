@@ -108,6 +108,10 @@ dependencies {
     implementation("androidx.palette:palette-ktx:1.0.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
+    // Optional, user-downloaded UVR MDX-Net Voc_FT inference. Model weights are not bundled.
+    implementation("com.google.ai.edge.litert:litert:1.4.2")
+    implementation("com.github.wendykierp:JTransforms:3.1")
+
     // HTTP client for LRCLIB lyrics and Jamendo (when configured)
     implementation("io.ktor:ktor-client-core:3.0.3")
     implementation("io.ktor:ktor-client-okhttp:3.0.3")

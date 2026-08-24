@@ -8,13 +8,10 @@ import java.io.InputStream
 import java.security.MessageDigest
 import kotlin.coroutines.coroutineContext
 
-/**
- * Download/install primitive for a future verified model. The app currently
- * supplies no descriptor or URL, so it cannot silently fetch an unvetted model.
- */
+/** Installs an explicitly requested model into private storage and verifies its immutable contract. */
 class StemModelManager(private val modelDirectory: File) {
     fun modelFile(descriptor: StemEngineDescriptor): File =
-        File(modelDirectory, "${descriptor.engineId}-${descriptor.modelId}-${descriptor.modelVersion}.model")
+        File(modelDirectory, "${descriptor.engineId}-${descriptor.modelId}-${descriptor.modelVersion}.tflite")
 
     suspend fun availability(descriptor: StemEngineDescriptor): StemModelAvailability = withContext(Dispatchers.IO) {
         val file = modelFile(descriptor)

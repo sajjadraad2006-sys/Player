@@ -5,6 +5,7 @@ import android.app.DownloadManager
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
+import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -25,6 +26,15 @@ import dev.auralis.studio.online.ProviderResult
 import dev.auralis.studio.online.toStreamableTrack
 import dev.auralis.studio.playback.PlaybackConnection
 import dev.auralis.studio.audio.visualizer.VisualizerAnalyzer
+import dev.auralis.studio.audio.stems.StemKind
+import dev.auralis.studio.audio.stems.StemErrorCode
+import dev.auralis.studio.audio.stems.StemModelAvailability
+import dev.auralis.studio.audio.stems.StemModelManager
+import dev.auralis.studio.audio.stems.StemProcessingStage
+import dev.auralis.studio.audio.stems.StemSeparationRequest
+import dev.auralis.studio.audio.stems.StemUiState
+import dev.auralis.studio.audio.stems.VocFtLiteRtEngine
+import dev.auralis.studio.audio.stems.VocFtModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -44,6 +54,10 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 
 @OptIn(FlowPreview::class)
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -58,6 +72,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val visualizerWaveform = visualizerAnalyzer.waveform
     private val _lyricsState = MutableStateFlow<LyricsUiState>(LyricsUiState.NotFound)
     val lyricsState: StateFlow<LyricsUiState> = _lyricsState.asStateFlow()
+    private val stemModelManager = StemModelManager(File(application.filesDir, "stem_models"))
+    private val stemEngine = VocFtLiteRtEngine(stemModelManager)
+    private val _stemState = MutableStateFlow<StemUiState>(StemUiState.CheckingModel)
+    val stemState: StateFlow<StemUiState> = _stemState.asStateFlow()
+    private var stemJob: Job? = null
+    private val generatedStemTracks = ConcurrentHashMap<String, Track>()
+    private val generatedStemSources = ConcurrentHashMap<String, Track>()
     private var currentLyricsTrack: Track? = null
     val tracks: StateFlow<List<Track>> = container.library.tracks
     val favorites: StateFlow<Set<String>> = dao.observeFavoriteUris()
@@ -150,6 +171,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
         }
         refreshLibrary()
+        viewModelScope.launch { refreshStemModelState() }
     }
 
     val hasAudioPermission: Boolean get() = container.library.hasPermission
@@ -258,6 +280,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             try {
+                if (appContext.filesDir.usableSpace < VocFtModel.descriptor.modelBytes * 2L) {
+                    _stemState.value = StemUiState.Error(StemErrorCode.NOT_ENOUGH_STORAGE, false)
+                    return@launch
+                }
                 val dm = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
                 val uri = Uri.parse(downloadUrl)
                 val request = DownloadManager.Request(uri).apply {
@@ -306,6 +332,187 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             container.settings.setAudioConfig(config)
         }
     }
+
+    fun downloadStemModel() {
+        if (stemJob?.isActive == true) return
+        stemJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val connection = (URL(VocFtModel.DOWNLOAD_URL).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 20_000
+                    readTimeout = 60_000
+                    instanceFollowRedirects = true
+                    requestMethod = "GET"
+                }
+                try {
+                    connection.connect()
+                    if (connection.responseCode !in 200..299) error("Model download failed: HTTP ${connection.responseCode}")
+                    val availability = stemModelManager.install(
+                        VocFtModel.descriptor,
+                        connection.inputStream.buffered(),
+                    ) { progress -> _stemState.value = StemUiState.DownloadingModel(progress) }
+                    _stemState.value = when (availability) {
+                        is StemModelAvailability.Installed -> StemUiState.ReadyForTrack
+                        is StemModelAvailability.Invalid -> StemUiState.Error(StemErrorCode.MODEL_INTEGRITY, false)
+                        else -> StemUiState.Error(StemErrorCode.DOWNLOAD_FAILED, false)
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                _stemState.value = StemUiState.ModelRequired(VocFtModel.descriptor.modelBytes)
+                throw cancelled
+            } catch (error: Throwable) {
+                Log.e("StemSeparation", "Voc_FT model download failed", error)
+                _stemState.value = StemUiState.Error(StemErrorCode.DOWNLOAD_FAILED, false)
+            }
+        }
+    }
+
+    fun deleteStemModel() {
+        cancelStemWork()
+        stemModelManager.delete(VocFtModel.descriptor)
+        _stemState.value = StemUiState.ModelRequired(VocFtModel.descriptor.modelBytes)
+    }
+
+    fun prepareStems(track: Track) {
+        if (stemJob?.isActive == true) return
+        // "Prepare again" may be pressed while one generated WAV is playing. Always resolve that
+        // back to the original source instead of recursively separating an already separated stem.
+        val sourceTrack = generatedStemSources[track.uri] ?: track
+        val sourceIdentity = stemSourceIdentity(sourceTrack)
+        stemJob = viewModelScope.launch(Dispatchers.IO) {
+            val workDirectory = File(appContext.cacheDir, "stem_sources").apply { mkdirs() }
+            val materialized = File(workDirectory, "${sha256(sourceIdentity)}.source")
+            try {
+                val estimatedFrames = (sourceTrack.durationMs.coerceAtLeast(60_000L) * 44_100L) / 1_000L
+                val requiredBytes = sourceTrack.sizeBytes.coerceAtLeast(0L) + estimatedFrames * 32L
+                if (appContext.filesDir.usableSpace < requiredBytes) {
+                    _stemState.value = StemUiState.Error(StemErrorCode.NOT_ENOUGH_STORAGE, true)
+                    return@launch
+                }
+                _stemState.value = StemUiState.Processing(StemProcessingStage.COPYING_SOURCE, null, sourceIdentity)
+                materializeTrack(sourceTrack, materialized) { progress ->
+                    _stemState.value = StemUiState.Processing(StemProcessingStage.COPYING_SOURCE, progress, sourceIdentity)
+                }
+                val result = stemEngine.separate(
+                    StemSeparationRequest(
+                        sourceIdentity = sourceIdentity,
+                        sourceFile = materialized,
+                        outputDirectory = File(appContext.filesDir, "stem_cache"),
+                    ),
+                ) { engineProgress ->
+                    _stemState.value = when {
+                        engineProgress <= 20 -> StemUiState.Processing(
+                            StemProcessingStage.DECODING,
+                            (engineProgress * 5).coerceIn(0, 100),
+                            sourceIdentity,
+                        )
+                        engineProgress <= 90 -> StemUiState.Processing(
+                            StemProcessingStage.SEPARATING,
+                            (((engineProgress - 20) * 100) / 70).coerceIn(0, 100),
+                            sourceIdentity,
+                        )
+                        else -> StemUiState.Processing(
+                            StemProcessingStage.SAVING,
+                            (((engineProgress - 90) * 100) / 10).coerceIn(0, 100),
+                            sourceIdentity,
+                        )
+                    }
+                }
+                registerStemTracks(sourceTrack, result)
+                _stemState.value = StemUiState.Complete(result, sourceIdentity)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                _stemState.value = StemUiState.ReadyForTrack
+                throw cancelled
+            } catch (error: Throwable) {
+                Log.e("StemSeparation", "Voc_FT separation failed for ${sourceTrack.uri}", error)
+                _stemState.value = StemUiState.Error(StemErrorCode.SEPARATION_FAILED, true)
+            } finally {
+                materialized.delete()
+            }
+        }
+    }
+
+    fun cancelStemWork() {
+        stemEngine.cancel()
+        stemJob?.cancel()
+        stemJob = null
+    }
+
+    fun playStem(kind: StemKind) {
+        val result = (_stemState.value as? StemUiState.Complete)?.result ?: return
+        val uri = result.files[kind]?.toURI()?.toString() ?: return
+        val track = generatedStemTracks[uri] ?: return
+        playback.play(track, listOf(track))
+    }
+
+    fun generatedTrack(uri: String): Track? = generatedStemTracks[uri]
+
+    private suspend fun refreshStemModelState() {
+        _stemState.value = when (val availability = stemEngine.availability()) {
+            is StemModelAvailability.Installed -> StemUiState.ReadyForTrack
+            is StemModelAvailability.DownloadRequired -> StemUiState.ModelRequired(availability.bytes)
+            is StemModelAvailability.Invalid -> StemUiState.Error(StemErrorCode.MODEL_INTEGRITY, false)
+            StemModelAvailability.NotOffered -> StemUiState.Error(StemErrorCode.MODEL_UNAVAILABLE, false)
+        }
+    }
+
+    private fun registerStemTracks(source: Track, result: dev.auralis.studio.audio.stems.StemSeparationResult) {
+        result.files.forEach { (kind, file) ->
+            val uri = file.toURI().toString()
+            generatedStemTracks[uri] = source.copy(
+                id = -(kind.ordinal + 1L),
+                uri = uri,
+                title = appContext.getString(
+                    if (kind == StemKind.VOCALS) R.string.stem_track_title_vocals else R.string.stem_track_title_instrumental,
+                    source.title,
+                ),
+                album = source.album,
+                displayName = file.name,
+                mimeType = "audio/wav",
+                sizeBytes = file.length(),
+            )
+            generatedStemSources[uri] = source
+        }
+    }
+
+    private fun stemSourceIdentity(track: Track): String =
+        "${track.uri}|${track.sizeBytes}|${track.durationMs}|${track.dateAddedSeconds}"
+
+    private fun materializeTrack(track: Track, destination: File, onProgress: (Int?) -> Unit) {
+        val uri = Uri.parse(track.uri)
+        val directFile = when (uri.scheme?.lowercase()) {
+            "file" -> uri.path?.let(::File)
+            null -> File(track.uri)
+            else -> null
+        }
+        if (directFile?.isFile == true) {
+            directFile.inputStream().buffered().use { input -> copyMeasured(input, destination, directFile.length(), onProgress) }
+            return
+        }
+        val input = when (uri.scheme?.lowercase()) {
+            "http", "https" -> URL(track.uri).openStream()
+            else -> appContext.contentResolver.openInputStream(uri)
+        } ?: error("Unable to open source audio")
+        input.buffered().use { copyMeasured(it, destination, track.sizeBytes.takeIf { size -> size > 0L }, onProgress) }
+    }
+
+    private fun copyMeasured(input: java.io.InputStream, destination: File, totalBytes: Long?, onProgress: (Int?) -> Unit) {
+        destination.outputStream().buffered().use { output ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var copied = 0L
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                output.write(buffer, 0, count)
+                copied += count
+                onProgress(totalBytes?.let { ((copied * 100L) / it.coerceAtLeast(1L)).toInt().coerceIn(0, 100) })
+            }
+        }
+    }
+
+    private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(value.encodeToByteArray()).joinToString("") { "%02x".format(it) }
 
     fun updateTheme(settings: ThemeSettings) {
         themeSettings.value = settings

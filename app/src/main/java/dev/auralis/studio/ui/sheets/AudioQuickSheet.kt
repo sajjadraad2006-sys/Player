@@ -13,16 +13,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -36,14 +39,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import dev.auralis.studio.R
 import dev.auralis.studio.core.model.AudioConfig
 import dev.auralis.studio.core.model.PitchTempoMode
 import dev.auralis.studio.core.model.PitchMath
 import dev.auralis.studio.designsystem.AuralisFilterChip as FilterChip
-import dev.auralis.studio.designsystem.AuralisSlider as Slider
 import dev.auralis.studio.designsystem.AuralisSwitch as Switch
+import dev.auralis.studio.designsystem.LocalAuralisControlColors
 import dev.auralis.studio.designsystem.LocalAuralisTokens
 import kotlinx.coroutines.launch
 
@@ -86,9 +90,10 @@ fun AudioQuickSheet(
         Column(
             Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             // ── Header ─────────────────────────────────────────────────────
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -115,39 +120,54 @@ fun AudioQuickSheet(
                 }
             }
 
-            // ── Pitch stepper ─────────────────────────────────────────────
+            // ── Compact pitch controls ────────────────────────────────────
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.pitch), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
                 Text(
-                    stringResource(R.string.pitch_value, config.pitchSemitones),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.onSurface,
+                    stringResource(R.string.pitch_value_compact, config.effectivePitchSemitones),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = colors.primary,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            }
+            CompactAudioSlider(
+                value = config.effectivePitchSemitones,
+                onValueChange = { onConfigChange(setPitch(it)) },
+                valueRange = -12f..12f,
+            )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                item {
                     TextButton(onClick = { onConfigChange(setPitch(config.effectivePitchSemitones - 1f)) }) { Text("−1") }
+                }
+                item {
                     TextButton(onClick = { onConfigChange(setPitch(config.effectivePitchSemitones - 0.5f)) }) { Text("−½") }
+                }
+                item {
                     TextButton(onClick = { onConfigChange(setPitch(config.effectivePitchSemitones + 0.5f)) }) { Text("+½") }
+                }
+                item {
                     TextButton(onClick = { onConfigChange(setPitch(config.effectivePitchSemitones + 1f)) }) { Text("+1") }
+                }
+                item {
                     TextButton(onClick = { onConfigChange(setPitch(0f)) }) { Text(stringResource(R.string.reset)) }
                 }
             }
 
-            // ── Speed slider ──────────────────────────────────────────────
-            Text(
-                stringResource(R.string.speed_value, config.speed),
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.onSurface,
-            )
-            Slider(
+            // ── Compact speed controls ────────────────────────────────────
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.speed), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+                Text(stringResource(R.string.speed_value_compact, config.speed), style = MaterialTheme.typography.labelLarge, color = colors.primary)
+            }
+            CompactAudioSlider(
                 value       = config.speed,
                 onValueChange = { onConfigChange(config.copy(speed = it, dspEnabled = true)) },
                 valueRange  = 0.25f..2.5f,
             )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { spd ->
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)) { spd ->
                     FilterChip(
                         selected = kotlin.math.abs(config.speed - spd) < 0.01f,
                         onClick  = { onConfigChange(config.copy(speed = spd, dspEnabled = true)) },
-                        label    = { Text(stringResource(R.string.speed_value, spd)) },
+                        label    = { Text(stringResource(R.string.speed_value_compact, spd)) },
                     )
                 }
             }
@@ -168,7 +188,7 @@ fun AudioQuickSheet(
             AnimatedVisibility(visible = config.eightDEnabled, enter = expandVertically(), exit = shrinkVertically()) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(stringResource(R.string.strength_value, (config.eightDStrength * 100).toInt()), style = MaterialTheme.typography.labelMedium, color = colors.onSurface.copy(0.7f))
-                    Slider(
+                    CompactAudioSlider(
                         config.eightDStrength,
                         { onConfigChange(config.copy(eightDStrength = it, dspEnabled = true)) },
                         valueRange = 0f..1f,
@@ -190,7 +210,7 @@ fun AudioQuickSheet(
             AnimatedVisibility(visible = config.reverbMix > 0.01f, enter = expandVertically(), exit = shrinkVertically()) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(stringResource(R.string.wet_mix_value, (config.reverbMix * 100).toInt()), style = MaterialTheme.typography.labelMedium, color = colors.onSurface.copy(0.7f))
-                    Slider(
+                    CompactAudioSlider(
                         config.reverbMix,
                         { onConfigChange(config.copy(reverbMix = it, dspEnabled = true)) },
                         valueRange = 0f..0.6f,
@@ -227,6 +247,48 @@ fun AudioQuickSheet(
             Spacer(Modifier.height(8.dp))
         }
     }
+}
+
+/** Compact presentation used only by the Now Playing sheet. The full Audio Lab keeps its controls. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CompactAudioSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+) {
+    val semantic = LocalAuralisControlColors.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val sliderColors = SliderDefaults.colors(
+        thumbColor = semantic.sliderThumb,
+        activeTrackColor = semantic.sliderActive,
+        inactiveTrackColor = semantic.sliderInactive,
+        activeTickColor = semantic.onActive.copy(alpha = 0.70f),
+        inactiveTickColor = semantic.inactiveContent.copy(alpha = 0.75f),
+    )
+    androidx.compose.material3.Slider(
+        value = value.coerceIn(valueRange.start, valueRange.endInclusive),
+        onValueChange = onValueChange,
+        modifier = Modifier.fillMaxWidth(),
+        valueRange = valueRange,
+        interactionSource = interactionSource,
+        colors = sliderColors,
+        thumb = {
+            SliderDefaults.Thumb(
+                interactionSource = interactionSource,
+                colors = sliderColors,
+                thumbSize = DpSize(18.dp, 18.dp),
+            )
+        },
+        track = { sliderState ->
+            SliderDefaults.Track(
+                sliderState = sliderState,
+                colors = sliderColors,
+                modifier = Modifier.height(4.dp),
+                drawStopIndicator = null,
+            )
+        },
+    )
 }
 
 @Composable

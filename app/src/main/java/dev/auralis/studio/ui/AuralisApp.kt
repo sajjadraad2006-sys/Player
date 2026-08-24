@@ -97,6 +97,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     val visualizerBands by viewModel.visualizerBands.collectAsStateWithLifecycle()
     val visualizerWaveform by viewModel.visualizerWaveform.collectAsStateWithLifecycle()
     val lyricsState by viewModel.lyricsState.collectAsStateWithLifecycle()
+    val stemState by viewModel.stemState.collectAsStateWithLifecycle()
 
     var audioPermissionGranted by remember { mutableStateOf(viewModel.hasAudioPermission) }
     var notificationPermissionGranted by remember {
@@ -109,7 +110,9 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     var playerVisible by rememberSaveable { mutableStateOf(false) }
     var quickAudioVisible by rememberSaveable { mutableStateOf(false) }
     val destination = runCatching { MainDestination.valueOf(destinationName) }.getOrDefault(MainDestination.HOME)
-    val currentTrack = playback.currentMediaItem?.mediaId?.let { uri -> tracks.firstOrNull { it.uri == uri } }
+    val currentTrack = playback.currentMediaItem?.mediaId?.let { uri ->
+        tracks.firstOrNull { it.uri == uri } ?: viewModel.generatedTrack(uri)
+    }
     val artworkPalette = rememberArtworkPalette(currentTrack?.artworkUri)
     val snackbar = remember { SnackbarHostState() }
     val unknownError = stringResource(R.string.unknown_error)
@@ -298,7 +301,18 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                             onAddToPlaylist   = viewModel::addToPlaylist,
                             modifier          = commonModifier,
                         )
-                        MainDestination.AUDIO_LAB -> AudioLabScreen(config, viewModel::updateAudio, commonModifier)
+                        MainDestination.AUDIO_LAB -> AudioLabScreen(
+                            config = config,
+                            onChange = viewModel::updateAudio,
+                            stemState = stemState,
+                            currentTrack = currentTrack,
+                            onDownloadStemModel = viewModel::downloadStemModel,
+                            onDeleteStemModel = viewModel::deleteStemModel,
+                            onPrepareStems = viewModel::prepareStems,
+                            onCancelStemWork = viewModel::cancelStemWork,
+                            onPlayStem = viewModel::playStem,
+                            modifier = commonModifier,
+                        )
                         MainDestination.SETTINGS -> SettingsScreen(
                             theme = theme,
                             folders = folders,

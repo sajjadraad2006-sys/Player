@@ -896,7 +896,7 @@ private fun VisualizerPage(
             withFrameNanos { now ->
                 if (previousFrame != 0L) {
                     val deltaSeconds = ((now - previousFrame) / 1_000_000_000f).coerceIn(0f, 0.1f)
-                    discRotation = (discRotation + deltaSeconds * 200f) % 360f // 33 1/3 RPM
+                    discRotation = (discRotation + deltaSeconds * 48f) % 360f // calm 8 RPM visual rotation
                 }
                 previousFrame = now
             }

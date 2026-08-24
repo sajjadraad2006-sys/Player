@@ -32,6 +32,7 @@ data class StemSeparationResult(
     val files: Map<StemKind, File>,
     val sampleRateHz: Int,
     val durationFrames: Long,
+    val metadata: Map<String, String> = emptyMap(),
 )
 
 /** Neural inference belongs in a worker implementation, never a Media3 AudioProcessor callback. */
