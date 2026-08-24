@@ -45,7 +45,7 @@ import kotlinx.coroutines.launch
 @OptIn(UnstableApi::class)
 class PlaybackService : MediaLibraryService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val processor = StudioAudioProcessor()
+    private lateinit var processor: StudioAudioProcessor
     private lateinit var player: ExoPlayer
     private lateinit var librarySession: MediaLibrarySession
 
@@ -53,6 +53,7 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
+        processor = StudioAudioProcessor(container.pcmAudioTap)
         val renderersFactory = StudioRenderersFactory(this, processor)
         player = ExoPlayer.Builder(this, renderersFactory)
             .setSeekBackIncrementMs(10_000)
@@ -220,7 +221,7 @@ class PlaybackService : MediaLibraryService() {
                         LibraryResult.ofItemList(items.subList(start, end), params)
                     }.onSuccess(completer::set).onFailure(completer::setException)
                 }
-                "Auralis children: $parentId"
+                "Lyrune children: $parentId"
             }
         }
 

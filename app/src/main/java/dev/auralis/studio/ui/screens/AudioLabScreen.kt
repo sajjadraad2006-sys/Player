@@ -50,7 +50,10 @@ import dev.auralis.studio.core.model.BuiltInPresets
 import dev.auralis.studio.core.model.ChannelMode
 import dev.auralis.studio.core.model.OrbitDirection
 import dev.auralis.studio.core.model.PitchTempoMode
-import dev.auralis.studio.core.model.StemIsolationMode
+import dev.auralis.studio.core.model.PitchMath
+import dev.auralis.studio.designsystem.AuralisFilterChip
+import dev.auralis.studio.designsystem.AuralisSlider
+import dev.auralis.studio.designsystem.AuralisSwitch
 import dev.auralis.studio.ui.components.GlassCard
 import dev.auralis.studio.ui.components.SectionHeader
 import kotlin.math.roundToInt
@@ -123,150 +126,16 @@ private fun StemIsolationPanel(config: AudioConfig, onChange: (AudioConfig) -> U
     val colors = MaterialTheme.colorScheme
     GlassCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            // Header & Toggle
             SettingSwitch(
-                title = "Stem Isolator · عزل الصوت واللحن والبيس",
-                description = "عزل الصوت البشري أو اللحن (الموسيقى) أو البيس بشكل منفصل وبحرية تامة",
-                checked = config.stemIsolationEnabled,
-            ) {
-                onChange(
-                    if (it) config.copy(stemIsolationEnabled = true, dspEnabled = true)
-                    else config.withStemMode(StemIsolationMode.OFF)
-                )
-            }
-
-            // Quick Preset Modes Strip
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                item {
-                    StudioChip(
-                        selected = !config.stemIsolationEnabled || config.stemMode == StemIsolationMode.OFF,
-                        onClick = { onChange(config.withStemMode(StemIsolationMode.OFF)) },
-                        label = "الكل (كامل)",
-                    )
-                }
-                item {
-                    StudioChip(
-                        selected = config.stemIsolationEnabled && config.stemMode == StemIsolationMode.VOCAL_SOLO,
-                        onClick = { onChange(config.withStemMode(StemIsolationMode.VOCAL_SOLO)) },
-                        label = "🎤 عزل الصوت فقط",
-                    )
-                }
-                item {
-                    StudioChip(
-                        selected = config.stemIsolationEnabled && config.stemMode == StemIsolationMode.INSTRUMENTAL,
-                        onClick = { onChange(config.withStemMode(StemIsolationMode.INSTRUMENTAL)) },
-                        label = "🎹 كاريوكي / لحن فقط",
-                    )
-                }
-                item {
-                    StudioChip(
-                        selected = config.stemIsolationEnabled && config.stemMode == StemIsolationMode.BASS_SOLO,
-                        onClick = { onChange(config.withStemMode(StemIsolationMode.BASS_SOLO)) },
-                        label = "🎸 بيس Bass فقط",
-                    )
-                }
-            }
-
-            // 1. Vocal Volume Slider
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "🎤 حجم الصوت البشري (Vocals)",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.onSurface,
-                )
-                Text(
-                    "${(config.stemVocalVolume * 100).roundToInt()}%",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.primary,
-                )
-            }
-            StudioSlider(
-                value = config.stemVocalVolume,
-                onValueChange = {
-                    onChange(
-                        config.copy(
-                            stemVocalVolume = (it * 100f).roundToInt() / 100f,
-                            stemIsolationEnabled = true,
-                            stemMode = StemIsolationMode.CUSTOM,
-                            dspEnabled = true,
-                        ),
-                    )
-                },
-                valueRange = 0f..2f,
-            )
-
-            // 2. Melody / Instrumental Volume Slider
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "🎹 حجم اللحن والموسيقى (Melody)",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.onSurface,
-                )
-                Text(
-                    "${(config.stemMelodyVolume * 100).roundToInt()}%",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.primary,
-                )
-            }
-            StudioSlider(
-                value = config.stemMelodyVolume,
-                onValueChange = {
-                    onChange(
-                        config.copy(
-                            stemMelodyVolume = (it * 100f).roundToInt() / 100f,
-                            stemIsolationEnabled = true,
-                            stemMode = StemIsolationMode.CUSTOM,
-                            dspEnabled = true,
-                        ),
-                    )
-                },
-                valueRange = 0f..2f,
-            )
-
-            // 3. Bass Volume Slider
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "🎸 حجم البيس (Bassline)",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.onSurface,
-                )
-                Text(
-                    "${(config.stemBassVolume * 100).roundToInt()}%",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.primary,
-                )
-            }
-            StudioSlider(
-                value = config.stemBassVolume,
-                onValueChange = {
-                    onChange(
-                        config.copy(
-                            stemBassVolume = (it * 100f).roundToInt() / 100f,
-                            stemIsolationEnabled = true,
-                            stemMode = StemIsolationMode.CUSTOM,
-                            dspEnabled = true,
-                        ),
-                    )
-                },
-                valueRange = 0f..2f,
+                title = stringResource(R.string.stem_isolator_unavailable),
+                description = stringResource(R.string.stem_unavailable_description),
+                checked = false,
+                enabled = false,
+            ) { }
+            Text(
+                stringResource(R.string.stem_future_description),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
             )
         }
     }
@@ -280,8 +149,19 @@ private fun DspPanel(config: AudioConfig, onChange: (AudioConfig) -> Unit) {
             SettingSwitch(stringResource(R.string.dsp), stringResource(R.string.dsp_bypass_description), config.dspEnabled) {
                 onChange(config.copy(dspEnabled = it))
             }
+            Text(
+                stringResource(if (config.dspEnabled) R.string.dsp_on_effects_active else R.string.dsp_bypassed_pure_playback),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = if (config.dspEnabled) colors.primary else colors.onSurface,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (config.dspEnabled) colors.primaryContainer else colors.surfaceVariant)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            )
             Button(
                 onClick = { onChange(config.pure()) },
+                enabled = config.dspEnabled,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
@@ -303,6 +183,15 @@ private fun DspPanel(config: AudioConfig, onChange: (AudioConfig) -> Unit) {
 @Composable
 private fun PitchTempoPanel(config: AudioConfig, onChange: (AudioConfig) -> Unit) {
     val colors = MaterialTheme.colorScheme
+    val displayedPitch = config.effectivePitchSemitones
+    fun applyPitch(value: Float): AudioConfig {
+        val rounded = (value * 10f).roundToInt() / 10f
+        return if (config.mode == PitchTempoMode.VINYL) {
+            config.copy(speed = PitchMath.semitonesToFactor(rounded).coerceIn(0.25f, 3f), dspEnabled = true)
+        } else {
+            config.copy(pitchSemitones = rounded, mode = PitchTempoMode.INDEPENDENT, dspEnabled = true)
+        }
+    }
     GlassCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(stringResource(R.string.pitch_tempo), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = colors.onSurface)
@@ -310,7 +199,7 @@ private fun PitchTempoPanel(config: AudioConfig, onChange: (AudioConfig) -> Unit
                 items(PitchTempoMode.entries) { mode ->
                     StudioChip(
                         selected = config.mode == mode,
-                        onClick = { onChange(config.copy(mode = mode, pitchSemitones = if (mode == PitchTempoMode.TEMPO_LOCK) 0f else config.pitchSemitones, dspEnabled = true)) },
+                        onClick = { onChange(config.copy(mode = mode, dspEnabled = true)) },
                         label = modeLabel(mode),
                     )
                 }
@@ -324,32 +213,22 @@ private fun PitchTempoPanel(config: AudioConfig, onChange: (AudioConfig) -> Unit
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Pitch",
+                    stringResource(R.string.pitch),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = colors.onSurface,
                 )
                 Text(
-                    if (config.mode == PitchTempoMode.VINYL) stringResource(R.string.effective_pitch_value, config.effectivePitchSemitones)
-                    else stringResource(R.string.pitch_value, config.pitchSemitones),
+                    stringResource(R.string.effective_pitch_value, displayedPitch),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = colors.primary,
                 )
             }
 
-            // Always interactive Pitch Slider
             StudioSlider(
-                value = if (config.mode == PitchTempoMode.VINYL) config.effectivePitchSemitones else config.pitchSemitones,
-                onValueChange = {
-                    onChange(
-                        config.copy(
-                            pitchSemitones = (it * 10f).roundToInt() / 10f,
-                            mode = if (config.mode == PitchTempoMode.TEMPO_LOCK) PitchTempoMode.INDEPENDENT else config.mode,
-                            dspEnabled = true,
-                        ),
-                    )
-                },
+                value = displayedPitch.coerceIn(-12f, 12f),
+                onValueChange = { onChange(applyPitch(it)) },
                 valueRange = -12f..12f,
                 steps = 239,
             )
@@ -357,23 +236,11 @@ private fun PitchTempoPanel(config: AudioConfig, onChange: (AudioConfig) -> Unit
             // Fine Step Buttons: [-] [Reset] [+]
             FineControls(
                 onMinus = {
-                    onChange(
-                        config.copy(
-                            pitchSemitones = (config.pitchSemitones - 0.1f).coerceAtLeast(-12f),
-                            mode = PitchTempoMode.INDEPENDENT,
-                            dspEnabled = true,
-                        ),
-                    )
+                    onChange(applyPitch((displayedPitch - 0.1f).coerceAtLeast(-12f)))
                 },
-                onReset = { onChange(config.copy(pitchSemitones = 0f, dspEnabled = true)) },
+                onReset = { onChange(applyPitch(0f)) },
                 onPlus = {
-                    onChange(
-                        config.copy(
-                            pitchSemitones = (config.pitchSemitones + 0.1f).coerceAtMost(12f),
-                            mode = PitchTempoMode.INDEPENDENT,
-                            dspEnabled = true,
-                        ),
-                    )
+                    onChange(applyPitch((displayedPitch + 0.1f).coerceAtMost(12f)))
                 },
                 minusLabel = stringResource(R.string.decrease_pitch),
                 plusLabel = stringResource(R.string.increase_pitch),
@@ -382,30 +249,11 @@ private fun PitchTempoPanel(config: AudioConfig, onChange: (AudioConfig) -> Unit
             // Quick Semitone Buttons
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(listOf(-12f, -7f, -5f, -3f, -2f, -1f, 0f, 1f, 2f, 3f, 5f, 7f, 12f)) { value ->
-                    val isCur = kotlin.math.abs(config.pitchSemitones - value) < 0.05f
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (isCur) colors.primary else colors.surfaceVariant)
-                            .clickable {
-                                onChange(
-                                    config.copy(
-                                        pitchSemitones = value,
-                                        mode = PitchTempoMode.INDEPENDENT,
-                                        dspEnabled = true,
-                                    ),
-                                )
-                            }
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            if (value > 0) "+${value.toInt()}" else value.toInt().toString(),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isCur) colors.onPrimary else colors.onSurface,
-                        )
-                    }
+                    StudioChip(
+                        selected = kotlin.math.abs(displayedPitch - value) < 0.05f,
+                        onClick = { onChange(applyPitch(value)) },
+                        label = if (value > 0) "+${value.toInt()}" else value.toInt().toString(),
+                    )
                 }
             }
 
@@ -418,7 +266,7 @@ private fun PitchTempoPanel(config: AudioConfig, onChange: (AudioConfig) -> Unit
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Speed",
+                    stringResource(R.string.speed),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = colors.onSurface,
@@ -447,22 +295,11 @@ private fun PitchTempoPanel(config: AudioConfig, onChange: (AudioConfig) -> Unit
 
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(listOf(0.5f, 0.75f, 0.8f, 0.9f, 1f, 1.1f, 1.25f, 1.33f, 1.5f, 1.75f, 2f)) { value ->
-                    val isCur = kotlin.math.abs(config.speed - value) < 0.01f
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (isCur) colors.primary else colors.surfaceVariant)
-                            .clickable { onChange(config.copy(speed = value, dspEnabled = true)) }
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            stringResource(R.string.speed_value, value),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isCur) colors.onPrimary else colors.onSurface,
-                        )
-                    }
+                    StudioChip(
+                        selected = kotlin.math.abs(config.speed - value) < 0.01f,
+                        onClick = { onChange(config.copy(speed = value, dspEnabled = true)) },
+                        label = stringResource(R.string.speed_value, value),
+                    )
                 }
             }
         }
@@ -637,14 +474,14 @@ private fun GainSlider(label: String, value: Float, range: ClosedFloatingPointRa
 }
 
 @Composable
-private fun SettingSwitch(title: String, description: String?, checked: Boolean, onChecked: (Boolean) -> Unit) {
+private fun SettingSwitch(title: String, description: String?, checked: Boolean, enabled: Boolean = true, onChecked: (Boolean) -> Unit) {
     val colors = MaterialTheme.colorScheme
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = colors.onSurface)
             description?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant) }
         }
-        Switch(checked, onChecked)
+        AuralisSwitch(checked, onChecked, enabled = enabled)
     }
 }
 
@@ -696,21 +533,13 @@ fun StudioSlider(
     steps: Int = 0,
 ) {
     val colors = MaterialTheme.colorScheme
-    Slider(
+    AuralisSlider(
         value = value,
         onValueChange = onValueChange,
         modifier = modifier.fillMaxWidth(),
         enabled = enabled,
         valueRange = valueRange,
         steps = steps,
-        colors = SliderDefaults.colors(
-            thumbColor = colors.primary,
-            activeTrackColor = colors.primary,
-            inactiveTrackColor = colors.surfaceVariant,
-            disabledThumbColor = colors.primary,
-            disabledActiveTrackColor = colors.primary,
-            disabledInactiveTrackColor = colors.surfaceVariant,
-        ),
     )
 }
 
@@ -723,29 +552,11 @@ fun StudioChip(
     enabled: Boolean = true,
 ) {
     val colors = MaterialTheme.colorScheme
-    FilterChip(
+    AuralisFilterChip(
         selected = selected,
         onClick = onClick,
-        label = {
-            Text(
-                label,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                color = if (selected) colors.onPrimaryContainer else colors.onSurface,
-            )
-        },
+        label = label,
         enabled = enabled,
-        shape = RoundedCornerShape(16.dp),
-        colors = FilterChipDefaults.filterChipColors(
-            containerColor = colors.surfaceVariant,
-            selectedContainerColor = colors.primaryContainer,
-            disabledContainerColor = colors.surfaceVariant,
-        ),
-        border = FilterChipDefaults.filterChipBorder(
-            enabled = enabled,
-            selected = selected,
-            borderColor = colors.outline.copy(alpha = 0.5f),
-            selectedBorderColor = colors.primary,
-        ),
         modifier = modifier,
     )
 }

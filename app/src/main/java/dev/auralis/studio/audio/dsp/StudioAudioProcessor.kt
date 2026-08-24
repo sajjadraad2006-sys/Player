@@ -8,6 +8,8 @@ import androidx.media3.common.util.UnstableApi
 import dev.auralis.studio.core.model.AudioConfig
 import dev.auralis.studio.core.model.ChannelMode
 import dev.auralis.studio.core.model.OrbitDirection
+import dev.auralis.studio.core.model.OrbitMath
+import dev.auralis.studio.audio.visualizer.PcmAudioTap
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicReference
@@ -19,12 +21,14 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * Low-allocation PCM processing with Real-Time Audio Stem Separation / Vocal & Bass Isolation.
+ * Low-allocation PCM processing for tone, stereo, spatial and dynamics effects.
  * Order:
- * Preamp → Stem Isolator (Vocal / Melody / Bass) → Graphic EQ → Stereo matrix → 8D orbit → Reverb → Safe limiter.
+ * Preamp → Graphic EQ → Stereo matrix → 8D orbit → Reverb → Safe limiter.
  */
 @UnstableApi
-class StudioAudioProcessor : BaseAudioProcessor() {
+class StudioAudioProcessor(
+    private val pcmTap: PcmAudioTap = PcmAudioTap(),
+) : BaseAudioProcessor() {
     private val requestedConfig = AtomicReference(AudioConfig())
     private var activeConfig = AudioConfig()
     private var sampleRate = 44_100
@@ -39,16 +43,6 @@ class StudioAudioProcessor : BaseAudioProcessor() {
     private var rightDelay = FloatArray(1)
     private var delayIndex = 0
 
-    // Stem isolation dedicated filters
-    private val leftBassFilter = Biquad()
-    private val rightBassFilter = Biquad()
-    private val vocalBandFilter = Biquad()
-
-    // ── Visualizer tap ──────────────────────────────────────────────────────
-    val visualizerRingBuffer = FloatArray(4096)
-    @Volatile var visualizerWritePos = 0
-    private var tapDecimator = 0
-
     fun update(config: AudioConfig) {
         requestedConfig.set(config)
     }
@@ -59,16 +53,10 @@ class StudioAudioProcessor : BaseAudioProcessor() {
         }
         sampleRate = inputAudioFormat.sampleRate
         channelCount = inputAudioFormat.channelCount
+        pcmTap.configure(sampleRate)
         rebuildDelays()
         rebuildFilters(requestedConfig.get(), force = true)
-        initStemFilters()
         return inputAudioFormat
-    }
-
-    private fun initStemFilters() {
-        leftBassFilter.setLowPass(sampleRate, 220f, 0.7071f)
-        rightBassFilter.setLowPass(sampleRate, 220f, 0.7071f)
-        vocalBandFilter.setBandPass(sampleRate, 1300f, 0.65f)
     }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
@@ -101,31 +89,6 @@ class StudioAudioProcessor : BaseAudioProcessor() {
             left *= gain
             right *= gain
 
-            // ── Real-Time Audio Stem Separation & Vocal/Melody/Bass Isolator ──
-            if (config.stemIsolationEnabled) {
-                val bassL = leftBassFilter.process(left)
-                val bassR = rightBassFilter.process(right)
-                val nonBassL = left - bassL
-                val nonBassR = right - bassR
-
-                val mid = (nonBassL + nonBassR) * 0.5f
-                val sideL = nonBassL - mid
-                val sideR = nonBassR - mid
-
-                val vocal = vocalBandFilter.process(mid)
-                val otherMid = mid - vocal
-
-                left = (bassL * config.stemBassVolume) +
-                    (vocal * config.stemVocalVolume) +
-                    (sideL * config.stemMelodyVolume) +
-                    (otherMid * config.stemMelodyVolume)
-
-                right = (bassR * config.stemBassVolume) +
-                    (vocal * config.stemVocalVolume) +
-                    (sideR * config.stemMelodyVolume) +
-                    (otherMid * config.stemMelodyVolume)
-            }
-
             // Equalizer
             if (config.equalizerEnabled || config.bassDb != 0f || config.trebleDb != 0f) {
                 leftFilters.forEach { left = it.process(left) }
@@ -149,20 +112,26 @@ class StudioAudioProcessor : BaseAudioProcessor() {
             right *= balanceRight
 
             // 8D Audio
-            if (config.eightDEnabled && channelCount > 1) {
-                val direction = if (config.orbitDirection == OrbitDirection.COUNTER_CLOCKWISE) -1.0 else 1.0
-                phase += direction * 2.0 * PI * config.eightDRateHz / sampleRate
-                if (phase > 2.0 * PI || phase < -2.0 * PI) phase %= 2.0 * PI
-                val targetPan = sin(phase).toFloat() * config.eightDStrength
+            if (config.eightDEnabled && channelCount > 1 && config.eightDStrength > 0.0001f) {
+                phase = OrbitMath.advance(phase, config.eightDRateHz, sampleRate)
+                val strength = config.eightDStrength.coerceIn(0f, 1f)
+                val targetPan = OrbitMath.pan(phase, config.orbitDirection) * strength
                 smoothedPan += (targetPan - smoothedPan) * 0.0015f
                 val leftPan = sqrt(((1f - smoothedPan) * 0.5f).coerceIn(0f, 1f)) * 1.4142f
                 val rightPan = sqrt(((1f + smoothedPan) * 0.5f).coerceIn(0f, 1f)) * 1.4142f
-                val crossfeed = 0.035f * config.eightDStrength
+                // Circular modes get subtle phase-dependent crossfeed/depth;
+                // ping-pong remains a genuine lateral path, not an alias.
+                val crossfeed = if (config.orbitDirection == OrbitDirection.PING_PONG) {
+                    0f
+                } else {
+                    (0.018f + 0.018f * ((cos(phase) + 1.0) * 0.5).toFloat()) * strength
+                }
                 val originalLeft = left
                 left = (left * leftPan) + (right * crossfeed)
                 right = (right * rightPan) + (originalLeft * crossfeed)
             } else {
-                smoothedPan *= 0.995f
+                // Strength 0 is an actual bypass, including removal of residual pan.
+                smoothedPan = 0f
             }
 
             // Reverb
@@ -187,37 +156,20 @@ class StudioAudioProcessor : BaseAudioProcessor() {
             if (channelCount > 1) output.putShort((right.coerceIn(-1f, 1f) * 32767f).toInt().toShort())
             repeat((channelCount - 2).coerceAtLeast(0)) { output.putShort(inputBuffer.short) }
 
-            // Visualizer tap
-            tapDecimator++
-            if (tapDecimator >= 8) {
-                tapDecimator = 0
-                val mono = (left + right) * 0.5f
-                val pos = visualizerWritePos and (visualizerRingBuffer.size - 1)
-                visualizerRingBuffer[pos] = mono
-                visualizerWritePos = (pos + 1) and (visualizerRingBuffer.size - 1)
-            }
+            pcmTap.write((left + right) * 0.5f)
         }
         output.flip()
     }
 
     private fun tapBypass(buf: ByteBuffer) {
         val frameBytes = channelCount * 2
-        var decimator = tapDecimator
         val readBuf = buf.duplicate().order(ByteOrder.nativeOrder())
         while (readBuf.remaining() >= frameBytes) {
             val left = readBuf.short / 32768f
             val right = if (channelCount > 1) readBuf.short / 32768f else left
             repeat((channelCount - 2).coerceAtLeast(0)) { readBuf.short }
-            decimator++
-            if (decimator >= 8) {
-                decimator = 0
-                val mono = (left + right) * 0.5f
-                val pos = visualizerWritePos and (visualizerRingBuffer.size - 1)
-                visualizerRingBuffer[pos] = mono
-                visualizerWritePos = (pos + 1) and (visualizerRingBuffer.size - 1)
-            }
+            pcmTap.write((left + right) * 0.5f)
         }
-        tapDecimator = decimator
     }
 
     override fun onFlush() {
@@ -226,9 +178,6 @@ class StudioAudioProcessor : BaseAudioProcessor() {
         smoothedWet = 0f
         leftFilters.forEach(Biquad::reset)
         rightFilters.forEach(Biquad::reset)
-        leftBassFilter.reset()
-        rightBassFilter.reset()
-        vocalBandFilter.reset()
         leftDelay.fill(0f)
         rightDelay.fill(0f)
         delayIndex = 0
@@ -239,8 +188,7 @@ class StudioAudioProcessor : BaseAudioProcessor() {
         rightFilters = emptyList()
         leftDelay = FloatArray(1)
         rightDelay = FloatArray(1)
-        visualizerRingBuffer.fill(0f)
-        visualizerWritePos = 0
+        pcmTap.clear()
     }
 
     private fun rebuildFilters(config: AudioConfig, force: Boolean = false) {

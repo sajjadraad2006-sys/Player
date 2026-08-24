@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import dev.auralis.studio.R
 import dev.auralis.studio.core.model.Track
 import dev.auralis.studio.designsystem.LocalAuralisTokens
+import dev.auralis.studio.designsystem.LocalAuralisControlColors
 
 @Composable
 fun MiniPlayer(
@@ -56,15 +57,20 @@ fun MiniPlayer(
 ) {
     val tokens = LocalAuralisTokens.current
     val colors = MaterialTheme.colorScheme
+    val controls = LocalAuralisControlColors.current
 
-    GlassCard(modifier = modifier.fillMaxWidth()) {
+    GlassCard(
+        modifier = modifier.fillMaxWidth(),
+        surfaceAlpha = tokens.miniPlayerAlpha,
+        elevation = tokens.miniPlayerElevation,
+    ) {
         Column {
             // Playback progress bar at top
             LinearProgressIndicator(
                 progress        = { progress.coerceIn(0f, 1f) },
                 modifier        = Modifier.fillMaxWidth().height(2.5.dp),
                 color           = colors.primary,
-                trackColor      = colors.outline.copy(alpha = 0.15f),
+                trackColor      = controls.sliderInactive,
                 strokeCap       = StrokeCap.Round,
             )
             // Track info row
@@ -87,7 +93,7 @@ fun MiniPlayer(
                         color      = colors.onSurface,
                     )
                     Text(
-                        track.artist.ifBlank { track.album }.ifBlank { "Unknown" },
+                        track.artist.ifBlank { track.album }.ifBlank { stringResource(R.string.unknown_artist) },
                         maxLines   = 1,
                         overflow   = TextOverflow.Ellipsis,
                         style      = MaterialTheme.typography.bodySmall,

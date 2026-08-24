@@ -5,6 +5,7 @@ import androidx.media3.common.audio.AudioProcessor.AudioFormat
 import dev.auralis.studio.core.model.AudioConfig
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -25,6 +26,25 @@ class StudioAudioProcessorTest {
         val output = process(processor, samples)
         val peak = output.maxOf { kotlin.math.abs(it.toInt()) }
         assertTrue("Limiter peak was $peak", peak <= 32_113)
+    }
+
+    @Test
+    fun enabledDspChangesActualPcmWhileBypassDoesNot() {
+        val samples = ShortArray(4_096) { if (it % 2 == 0) 4_000 else -4_000 }
+        val bypass = process(configuredProcessor(AudioConfig(dspEnabled = false)), samples)
+        val boosted = process(configuredProcessor(AudioConfig(dspEnabled = true, preampDb = 6f)), samples)
+        assertArrayEquals(samples, bypass)
+        assertFalse("DSP output unexpectedly matched bypass", boosted.contentEquals(bypass))
+    }
+
+    @Test
+    fun eightDStrengthZeroIsRealBypassAndHighStrengthMovesPcm() {
+        val samples = ShortArray(48_000 * 2) { 5_000 }
+        val noSpatial = process(configuredProcessor(AudioConfig(eightDEnabled = false, limiterEnabled = false)), samples)
+        val zeroStrength = process(configuredProcessor(AudioConfig(eightDEnabled = true, eightDStrength = 0f, limiterEnabled = false)), samples)
+        val spatial = process(configuredProcessor(AudioConfig(eightDEnabled = true, eightDStrength = 1f, eightDRateHz = 0.5f, limiterEnabled = false)), samples)
+        assertArrayEquals(noSpatial, zeroStrength)
+        assertFalse("8D output unexpectedly matched dry PCM", spatial.contentEquals(noSpatial))
     }
 
     private fun configuredProcessor(config: AudioConfig): StudioAudioProcessor = StudioAudioProcessor().apply {

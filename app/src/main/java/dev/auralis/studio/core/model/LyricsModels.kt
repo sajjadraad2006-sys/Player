@@ -37,14 +37,53 @@ data class SyncedLyrics(
         val EMPTY = SyncedLyrics(emptyList(), synced = false, source = LyricsSource.EMBEDDED)
     }
 
-    /** Returns the index of the currently active line for [positionMs]. */
+    /**
+     * Returns the active timed line using a lower-bound binary search.
+     * [offsetMs] is playback-time correction only; source timestamps are never rewritten.
+     */
     fun activeIndex(positionMs: Long): Int {
         if (!synced || lines.isEmpty()) return -1
         val adjusted = positionMs - offsetMs
+        var low = 0
+        var high = lines.lastIndex
         var result = -1
-        for (i in lines.indices) {
-            if (lines[i].timeMs <= adjusted) result = i else break
+        while (low <= high) {
+            val middle = (low + high).ushr(1)
+            if (lines[middle].timeMs <= adjusted) {
+                result = middle
+                low = middle + 1
+            } else {
+                high = middle - 1
+            }
         }
         return result
     }
+
+    fun windowAt(positionMs: Long): LyricsWindow {
+        val active = activeIndex(positionMs)
+        return LyricsWindow(
+            previous = lines.getOrNull(active - 1),
+            current = lines.getOrNull(active),
+            next = lines.getOrNull(active + 1),
+            activeIndex = active,
+        )
+    }
+
+    /** Playback position at which a timed line should become active. */
+    fun seekPositionFor(line: LyricsLine): Long = (line.timeMs + offsetMs).coerceAtLeast(0L)
+}
+
+data class LyricsWindow(
+    val previous: LyricsLine?,
+    val current: LyricsLine?,
+    val next: LyricsLine?,
+    val activeIndex: Int,
+)
+
+sealed interface LyricsUiState {
+    data object Loading : LyricsUiState
+    data class Found(val lyrics: SyncedLyrics) : LyricsUiState
+    data object NotFound : LyricsUiState
+    data object Offline : LyricsUiState
+    data class Error(val message: String) : LyricsUiState
 }

@@ -146,7 +146,7 @@ fun HomeScreen(
                     ) {
                         Icon(Icons.Default.PlayArrow, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("Play All (${tracks.size})", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.play_all_count, tracks.size), fontWeight = FontWeight.Bold)
                     }
 
                     FilledTonalButton(
@@ -163,7 +163,7 @@ fun HomeScreen(
                     ) {
                         Icon(Icons.Default.Shuffle, contentDescription = null, tint = colors.primary)
                         Spacer(Modifier.width(6.dp))
-                        Text("Shuffle All", fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.shuffle_all), fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -234,7 +234,7 @@ fun HomeScreen(
                         }
                         Icon(
                             Icons.Default.PlayArrow,
-                            contentDescription = "Play",
+                            contentDescription = stringResource(R.string.play),
                             tint = colors.primary,
                             modifier = Modifier.size(32.dp),
                         )

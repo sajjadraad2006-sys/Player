@@ -1,116 +1,126 @@
 <div align="center">
 
-# 🎧 Aura Studio — Modern Android Music Player & Audio DSP Studio
+<img src="docs/assets/lyrune-logo.png" alt="Lyrune" width="420" />
 
-[![Platform](https://img.shields.io/badge/Platform-Android_8.0+_(API_26+)-blue.svg?style=for-the-badge&logo=android)](https://www.android.com)
-[![Kotlin](https://img.shields.io/badge/Kotlin-2.1.0-purple.svg?style=for-the-badge&logo=kotlin)](https://kotlinlang.org)
-[![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack_Compose_M3-4285F4.svg?style=for-the-badge&logo=jetpackcompose)](https://developer.android.com/jetpack/compose)
-[![Media3](https://img.shields.io/badge/Audio-Media3_ExoPlayer-green.svg?style=for-the-badge)](https://developer.android.com/guide/topics/media/media3)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
+# Lyrune
 
-**Aura Studio** is a state-of-the-art, high-performance Android music player and real-time audio engineering laboratory. Engineered with a pure Kotlin/Compose architecture, low-latency PCM DSP pipelines, real-time vocal & stem isolation, universal music discovery, high-contrast dynamic themes, and offline-first design.
+**A modern Android music player and audio laboratory built around real-time DSP, adaptive visual design, synchronized lyrics, and truthful audio visualization.**
 
----
-
-[ English ] · [ [العربية](#-باللغة-العربية) ]
+[![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android)](https://developer.android.com/)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-7F52FF?logo=kotlin)](https://kotlinlang.org/)
+[![CI](https://github.com/sajjadraad2006-sys/Player/actions/workflows/android.yml/badge.svg)](https://github.com/sajjadraad2006-sys/Player/actions/workflows/android.yml)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 </div>
 
----
+## What Lyrune does
 
-## ✨ Key Features
+- Plays an on-device music library through AndroidX Media3 and a media-session foreground service.
+- Applies pitch, tempo, EQ, tone, stereo, 8D orbit, reverb, and limiting to actual decoded PCM.
+- Renders a 24/48/64-band spectrum from a real post-DSP PCM tap—never from random or decorative data.
+- Resolves embedded, sidecar, cached, and LRCLIB lyrics and follows genuine LRC timestamps.
+- Offers independent System, Light, Dark, and true-black AMOLED appearance modes.
+- Provides Glass, Minimal, Material, Neon, Dynamic Art, and Classic visual languages through shared design tokens.
+- Supports in-app System Default, English, and Arabic locale selection with RTL resources.
+- Searches and downloads optional online music sources without making network access a playback requirement.
 
-### 🎛️ 1. Studio-Grade Real-Time DSP Audio Engine
-- **Independent Pitch & Tempo**: Shift pitch ($\pm 12$ semitones) and speed ($0.25\times - 3.0\times$) independently without acoustic distortion.
-- **Vinyl Emulation**: Mathematically coupled pitch-speed scaling.
-- **10-Band Graphic Equalizer**: Precise frequency shaping ($31\text{ Hz} - 16\text{ kHz}$) with dedicated Preamp, Bass, and Treble controls.
-- **8D Spatial Orbit Audio**: Smoothed equal-power binaural circular orbit with configurable rate and strength.
-- **Studio Reverb & Stereo Tools**: Room wet mix, stereo width expansion ($0\% - 200\%$), and channel balance.
-- **Safe Dynamic Limiter**: Hardware-grade soft limiter preventing clipping and digital distortion.
+## Audio Lab
 
-### 🎤 2. Real-Time Audio Stem Separation & Vocal Isolation
-- **🎤 Vocal Solo (Acapella)**: Extract human singing/recitation from any track in real time.
-- **🎹 Karaoke / Instrumental**: Cancel center vocals to isolate backing music and melodies.
-- **🎸 Bassline Solo**: Isolate sub-bass and bass instruments.
-- **🎚️ Custom Multi-Stem Mixer**: Free 3-channel volume sliders (Vocals, Melody, Bass: $0\% - 200\%$).
+The processing chain is:
 
-### 🔍 3. Universal Online Music Search & Free Downloads
-- **Open Discovery (SnapTube-Style)**: Search millions of global and Arabic songs, latmiyat, anasheed, adiyah, ziyarat, and recitations.
-- **Instant Background Streaming**: Stream any track directly with full DSP sound effects applied.
-- **One-Tap MP3 Downloads**: Download files directly to your device storage.
-- **Customizable Download Directory**: Choose any custom folder (e.g. `Music`, `Downloads`, or external SD card) via Android SAF.
-
-### 📊 4. Live Audio Spectrum Visualizer
-- **32-Band Frequency Analyzer**: Real-time bouncing EQ bars with dynamic neon gradients and peak response.
-- **Center Artwork Aura**: Pulsating ambient glow synchronized with playback tempo.
-
-### 🎨 5. Modern High-Contrast Design System
-- **Curated Themes**: Glassmorphism, AMOLED True Black, Minimal, Neon, and Dynamic Artwork.
-- **Full Dark & Light Mode Support**: High-contrast, crystal-clear buttons, sliders, and segmented pills.
-- **Full Arabic / RTL Support**: Complete native Arabic localization and mirror layouts.
-
----
-
-## 🌍 باللغة العربية
-
-**أورا ستوديو (Aura Studio)** هو تطبيق مشغل موسيقى واستوديو صوتي متقدم واحترافي للأندرويد:
-- **عزل الصوت واللحن والبيس (Stem Isolator)**: عزل صوت المنشد/المغني (Acapella)، أو عزل اللحن والموسيقى (كاريوكي)، أو عزل صوت البيس Bass في الوقت الفعلي مع 3 سلايدرز تحكم حر.
-- **استوديو المعالجة الصوتية (DSP Audio Lab)**: تحكم كامل في طبقة الصوت (Pitch)، تسريع وتبطيء الصوت، صوت ثلاثي الأبعاد 8D Audio، إيكوالايزر 10 نطاقات، صدى Reverb، وحماية من التشويش Safe Limiter.
-- **محرك بحث وتحميل مجاني شامل**: ابحث عن أي أغنية، لطمية، نشيد، دعاء، أو تلاوة واستمع فوراً مع إمكانية التحميل المباشر بضغطة زر.
-- **تحديد مسار ومجلد التنزيل**: اختيار أي مجلد تريده في ذاكرة الهاتف لحفظ الملفات الصوتية.
-- **محلل طيف صوتي تفاعلي (Visualizer)**: 32 شريط ترددي متحرك ومتفاعل مع إيقاع الصوت.
-- **واجهة عصرية وأنيقة**: دعم كامل للثيم الداكن والفاتح، زجاجية Glassmorphism، وتباين ألوان فائق الوضوح.
-
----
-
-## 🏗️ Architecture & Technology Stack
-
-```
-Aura Studio
-├── core/
-│   ├── database/       # Room Database (Playlists, Favorites, History, Downloads)
-│   └── model/          # Domain Models & AudioConfig DSP state
-├── audio/dsp/          # Biquad Filters, Stem Separation, 8D Orbit, Safe Limiter
-├── playback/           # Media3 / ExoPlayer MediaLibraryService, AudioFocus, Notifications
-├── online/             # Free Universal Discovery Provider (iTunes + Deezer + Ktor)
-├── designsystem/       # Material 3 Design Tokens, Dynamic Palettes, Glass UI
-└── ui/                 # Jetpack Compose UI (Screens, Sheets, Visualizer, MiniPlayer)
+```text
+Media source → decoder → Media3 Sonic pitch/tempo → PCM studio processor
+→ EQ/tone → stereo/8D → reverb → limiter → post-DSP PCM tap → AudioTrack
 ```
 
-- **Language**: Kotlin 2.1.0 (100% Coroutines & StateFlow)
-- **UI Framework**: Jetpack Compose with Material 3
-- **Audio Pipeline**: AndroidX Media3 1.5.0 + Custom Real-Time PCM AudioProcessors
-- **Networking**: Ktor Client with OkHttp & Kotlinx Serialization
-- **Image Loading**: Coil 3 with Compose integration
-- **Storage**: Room 2.6.1 + Storage Access Framework (SAF)
+DSP bypass immediately restores Media3 default playback parameters and copies PCM without studio effects; it does not restart the track. The 8D modes use smoothed equal-power panning and crossfeed, including genuinely reversed clockwise/counter-clockwise motion and triangular ping-pong motion.
 
----
+See [Audio engine notes](docs/AUDIO_ENGINE.md) for implementation details.
 
-## 🚀 Building & Running
+## Visualizer and synchronized lyrics
 
-### Prerequisites
-- JDK 17 or JDK 21
-- Android SDK Platform 35
-- Gradle 8.11.1+
+The visualizer analyzer runs away from the UI thread, reads the processor’s real sample rate, applies a Hann-windowed 2048-point FFT, maps logarithmic frequency bands, and emits real targets at a quality-dependent analysis rate. Compose interpolates those targets with elapsed frame time, so display refresh rate does not create or change spectrum energy.
 
-### Build Debug APK
+Synced lyrics use a binary timestamp lookup with a separately stored per-track timing offset. The current line auto-follows playback; manual scrolling suspends follow mode, and tapping a timed line seeks to its real timestamp. Plain lyrics remain plain and missing lyrics are never generated.
+
+## Themes
+
+- **Glass** — translucent layered surfaces, artwork bleed, light borders, soft highlights, and floating navigation.
+- **Minimal** — borderless cards, flat hierarchy, square artwork, restrained decoration, and quiet navigation.
+- **Material** — opaque tonal containers, Material elevation, familiar shapes, and native selection states.
+- **Neon** — dark surfaces with selective luminous edges and stronger active-control/visualizer emphasis.
+- **Dynamic Art** — a cached palette extracted from current album artwork drives ambient surfaces and accents.
+- **Classic** — compact outlined cards, traditional artwork corners, conventional separation, and restrained motion.
+
+Appearance luminance and visual style are independent. AMOLED is an appearance mode, not a style override.
+
+## Stem separation status
+
+Lyrune does **not** ship or download an unverified neural model. The old center-channel and frequency-filter approximation was removed because it was not real source separation.
+
+The codebase now defines a model/version/capability-aware separation-engine contract, checksum-verified optional-model manager, versioned cache identity, cancellation boundary, and clipping-safe mixer math. Actual vocal/instrumental/bass controls remain unavailable until a model with verified provenance, license, Android operators, memory use, and device benchmarks is selected. No filtering is marketed as AI separation.
+
+## Architecture
+
+```text
+app/src/main/java/dev/auralis/studio/
+├── audio/dsp/          # realtime PCM effects and limiter
+├── audio/visualizer/   # lock-free PCM tap, FFT, temporal smoothing
+├── audio/stems/        # pluggable offline separation/model contracts
+├── core/               # models, Room, DataStore, repositories
+├── lyrics/             # embedded/sidecar/cache/LRCLIB resolution
+├── playback/           # Media3 connection, service and session
+├── designsystem/       # luminance, semantic colors and style tokens
+└── ui/                 # Compose screens, player, lyrics and visualizer
+```
+
+The legacy `dev.auralis.studio` namespace, application ID, database names, DataStore names, and compatibility keys are intentionally retained so the public rebrand does not break installed data.
+
+## Technology
+
+- Kotlin 2.0.21, coroutines and StateFlow
+- Jetpack Compose and Material 3
+- AndroidX Media3 1.5.1 / ExoPlayer
+- Room 2.6.1 and DataStore 1.1.1
+- Ktor 3.0.3 and Kotlin serialization
+- Coil 2.7.0 and AndroidX Palette
+- JDK 17 and Gradle wrapper
+
+## Build
+
+Requirements: JDK 17 and Android SDK Platform 36 for the current checked-in configuration.
+
 ```bash
+./gradlew testDebugUnitTest
+./gradlew lintDebug
 ./gradlew assembleDebug
 ```
-The APK will be generated at:
+
+Debug output:
+
 ```text
-app/build/outputs/apk/debug/AuraStudio.apk
+app/build/outputs/apk/debug/Lyrune-debug.apk
 ```
 
-### Run Unit Tests
-```bash
-./gradlew test
-```
+CI runs unit tests, Android lint, and the debug build without signing credentials.
 
----
+## Status and roadmap
 
-## 📄 License & Copyright
+Working today: local library, queues, playlists, favorites, MediaSession controls, PCM DSP, real FFT visualization, offline-first lyrics lookup, synced lyric following, themes, and English/Arabic app locales.
 
-Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for more information.
+Roadmap:
 
-Developed with ❤️ by **[Sajjad Raad (sajjadraad2006-sys)](https://github.com/sajjadraad2006-sys)**.
+- benchmark a legally redistributable mobile source-separation model on representative Android hardware;
+- add model-backed cached stem playback only after synchronization and thermal tests;
+- expand device/emulator UI regression coverage, especially RTL and OEM adaptive-icon masks;
+- publish committed product screenshots after device capture.
+
+## Known limitations
+
+- No neural stem inference model is bundled or downloadable in this release.
+- Neural inference speed, GPU/NPU delegation, blur performance, and headphone perception require physical-device measurement.
+- Online search availability depends on third-party providers and their terms.
+
+## License
+
+Lyrune is distributed under the [MIT License](LICENSE).

@@ -1,0 +1,20 @@
+package dev.auralis.studio.lyrics
+
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class LyricsMetadataNormalizerTest {
+    @Test fun removesFilenameAndPromotionalNoise() {
+        assertEquals("Song Name", LyricsMetadataNormalizer.title("01 - Song_Name (Official Video).mp3"))
+        assertEquals("Song Name", LyricsMetadataNormalizer.title("Song Name [Lyrics]"))
+    }
+
+    @Test fun preservesLegitimateBracketedTitle() {
+        assertEquals("Song (Live at Home)", LyricsMetadataNormalizer.title("Song (Live at Home).flac"))
+    }
+
+    @Test fun unknownArtistBecomesAbsent() {
+        assertEquals("", LyricsMetadataNormalizer.artist("Unknown Artist"))
+        assertEquals("The Artist", LyricsMetadataNormalizer.artist("The Artist"))
+    }
+}

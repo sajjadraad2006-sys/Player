@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
@@ -31,6 +32,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -44,6 +46,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -53,10 +56,12 @@ import android.content.pm.PackageManager
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.auralis.studio.R
-import dev.auralis.studio.core.model.SyncedLyrics
+import dev.auralis.studio.core.model.LyricsUiState
 import dev.auralis.studio.designsystem.AuralisBackground
 import dev.auralis.studio.designsystem.AuralisTheme
 import dev.auralis.studio.designsystem.LocalAuralisTokens
+import dev.auralis.studio.designsystem.LocalAuralisControlColors
+import dev.auralis.studio.designsystem.rememberArtworkPalette
 import dev.auralis.studio.ui.components.GlassCard
 import dev.auralis.studio.ui.components.MiniPlayer
 import dev.auralis.studio.ui.screens.AudioLabScreen
@@ -89,6 +94,9 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     val sleepRemaining by viewModel.sleepTimerRemainingMs.collectAsStateWithLifecycle()
     val libraryError by viewModel.libraryError.collectAsStateWithLifecycle()
     val downloadLocation by viewModel.downloadFolderLocation.collectAsStateWithLifecycle()
+    val visualizerBands by viewModel.visualizerBands.collectAsStateWithLifecycle()
+    val visualizerWaveform by viewModel.visualizerWaveform.collectAsStateWithLifecycle()
+    val lyricsState by viewModel.lyricsState.collectAsStateWithLifecycle()
 
     var audioPermissionGranted by remember { mutableStateOf(viewModel.hasAudioPermission) }
     var notificationPermissionGranted by remember {
@@ -102,6 +110,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     var quickAudioVisible by rememberSaveable { mutableStateOf(false) }
     val destination = runCatching { MainDestination.valueOf(destinationName) }.getOrDefault(MainDestination.HOME)
     val currentTrack = playback.currentMediaItem?.mediaId?.let { uri -> tracks.firstOrNull { it.uri == uri } }
+    val artworkPalette = rememberArtworkPalette(currentTrack?.artworkUri)
     val snackbar = remember { SnackbarHostState() }
     val unknownError = stringResource(R.string.unknown_error)
 
@@ -132,6 +141,12 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         notificationPermissionGranted = granted
     }
+    val lyricsImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let {
+            runCatching { context.contentResolver.openInputStream(it)?.bufferedReader()?.use { reader -> reader.readText() } }
+                .getOrNull()?.takeIf(String::isNotBlank)?.let(viewModel::importLyrics)
+        }
+    }
     val requestMusicPermission = {
         permissionLauncher.launch(
             if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE,
@@ -143,7 +158,11 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
         (libraryError ?: playback.error)?.let { snackbar.showSnackbar(it.ifBlank { unknownError }) }
     }
 
-    AuralisTheme(theme) {
+    LaunchedEffect(playerVisible, theme.visualQuality) {
+        viewModel.setVisualizerActive(playerVisible)
+    }
+
+    AuralisTheme(theme, artworkPalette) {
         AuralisBackground(Modifier.fillMaxSize()) {
             if (!audioPermissionGranted && folders.isEmpty() && tracks.isEmpty()) {
                 PermissionGate(onGrant = requestMusicPermission, onChooseFolder = chooseFolder)
@@ -158,9 +177,9 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                     tracks              = tracks,
                     isFavorite          = currentTrack?.uri in favorites,
                     sleepRemainingMs    = sleepRemaining,
-                    lyrics              = SyncedLyrics.EMPTY,
-                    visualizerBands     = FloatArray(0),
-                    visualizerWaveform  = FloatArray(0),
+                    lyricsState         = lyricsState,
+                    visualizerBands     = visualizerBands,
+                    visualizerWaveform  = visualizerWaveform,
                     onBack              = { playerVisible = false },
                     onPlayPause         = viewModel.playback::playPause,
                     onNext              = viewModel.playback::next,
@@ -176,6 +195,10 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                     onOpenQuickAudio    = { quickAudioVisible = true },
                     onSleepTimer        = viewModel::startSleepTimer,
                     onCancelSleepTimer  = viewModel::cancelSleepTimer,
+                    onRetryLyrics       = viewModel::retryLyrics,
+                    onImportLyrics      = { lyricsImportLauncher.launch("*/*") },
+                    onManualLyricsSearch = viewModel::searchLyricsManually,
+                    onLyricsOffsetChange = viewModel::updateLyricsOffset,
                 )
                 // Audio quick sheet shown over the player
                 if (quickAudioVisible) {
@@ -193,6 +216,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                     snackbarHost        = { SnackbarHost(snackbar) },
                     bottomBar = {
                         val tokens = LocalAuralisTokens.current
+                        val controls = LocalAuralisControlColors.current
                         Column {
                             currentTrack?.let {
                                 val progressFraction = if (playback.durationMs > 0)
@@ -210,7 +234,14 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                                 )
                             }
                             NavigationBar(
+                                modifier = Modifier
+                                    .padding(
+                                        horizontal = if (tokens.navigationFloating) 10.dp else 0.dp,
+                                        vertical = if (tokens.navigationFloating) 5.dp else 0.dp,
+                                    )
+                                    .clip(RoundedCornerShape(tokens.navigationCorner.dp)),
                                 containerColor = MaterialTheme.colorScheme.surface.copy(alpha = tokens.navBarContainerAlpha),
+                                tonalElevation = tokens.navigationElevation,
                             ) {
                                 MainDestination.entries.forEach { item ->
                                     NavigationBarItem(
@@ -218,6 +249,15 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                                         onClick  = { destinationName = item.name },
                                         icon     = { DestinationIcon(item) },
                                         label    = { Text(destinationLabel(item)) },
+                                        colors   = NavigationBarItemDefaults.colors(
+                                            selectedIconColor = controls.selectedContent,
+                                            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                            indicatorColor = controls.selectedContainer,
+                                            unselectedIconColor = controls.inactiveContent,
+                                            unselectedTextColor = controls.inactiveContent,
+                                            disabledIconColor = controls.disabledContent,
+                                            disabledTextColor = controls.disabledContent,
+                                        ),
                                     )
                                 }
                             }

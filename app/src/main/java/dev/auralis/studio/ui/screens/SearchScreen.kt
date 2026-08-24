@@ -57,14 +57,14 @@ import dev.auralis.studio.ui.components.GlassCard
 import dev.auralis.studio.ui.components.TrackRow
 
 private val GENERAL_MUSIC_CATEGORIES = listOf(
-    "Top Hits" to "Top Hits",
-    "Pop" to "Pop",
-    "Arabic Pop" to "Arabic Pop",
-    "Hip-Hop" to "Hip-Hop",
-    "Rock" to "Rock",
-    "Acoustic" to "Acoustic",
-    "Lo-Fi" to "Lo-Fi",
-    "Electronic" to "EDM",
+    "Top Hits" to R.string.genre_top_hits,
+    "Pop" to R.string.genre_pop,
+    "Arabic Pop" to R.string.genre_arabic_pop,
+    "Hip-Hop" to R.string.genre_hip_hop,
+    "Rock" to R.string.genre_rock,
+    "Acoustic" to R.string.genre_acoustic,
+    "Lo-Fi" to R.string.genre_lofi,
+    "Electronic" to R.string.genre_edm,
 )
 
 @Composable
@@ -113,7 +113,7 @@ fun SearchScreen(
             placeholder = {
                 Text(
                     if (selectedTab == 0) stringResource(R.string.search_hint)
-                    else "ابحث عن أي أغنية، فنان، ألبوم، أو موسيقى..."
+                    else stringResource(R.string.search_online_hint)
                 )
             },
             leadingIcon = {
@@ -122,7 +122,7 @@ fun SearchScreen(
             trailingIcon = {
                 if (query.isNotBlank()) {
                     IconButton(onClick = { onQueryChange("") }) {
-                        Icon(Icons.Default.Clear, contentDescription = "Clear", tint = colors.onSurfaceVariant)
+                        Icon(Icons.Default.Clear, contentDescription = stringResource(R.string.clear), tint = colors.onSurfaceVariant)
                     }
                 }
             },
@@ -158,7 +158,7 @@ fun SearchScreen(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "على الجهاز (${results.size})",
+                    text = stringResource(R.string.on_device_count, results.size),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Medium,
                     color = if (selectedTab == 0) colors.onPrimary else colors.onSurface,
@@ -187,7 +187,7 @@ fun SearchScreen(
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = "بحث وتحميل أونلاين",
+                        text = stringResource(R.string.search_download_online),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Medium,
                         color = if (selectedTab == 1) colors.onPrimary else colors.onSurface,
@@ -203,7 +203,7 @@ fun SearchScreen(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(GENERAL_MUSIC_CATEGORIES) { (searchKeyword, label) ->
+                items(GENERAL_MUSIC_CATEGORIES) { (searchKeyword, labelResource) ->
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(16.dp))
@@ -216,7 +216,7 @@ fun SearchScreen(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            text = label,
+                            text = stringResource(labelResource),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = colors.primary,
@@ -266,7 +266,7 @@ fun SearchScreen(
                         CircularProgressIndicator(color = colors.primary)
                         Spacer(Modifier.height(12.dp))
                         Text(
-                            "جاري البحث...",
+                            stringResource(R.string.searching),
                             style = MaterialTheme.typography.bodyMedium,
                             color = colors.onSurfaceVariant,
                         )
@@ -283,8 +283,8 @@ fun SearchScreen(
                         )
                         Spacer(Modifier.height(16.dp))
                         Text(
-                            if (query.isBlank()) "ابحث عن أي أغنية أو فنان أو موسيقى للاستماع والتحميل مجاناً"
-                            else "لم يتم العثور على نتائج لـ \"$query\"، جرب كلمة أخرى",
+                            if (query.isBlank()) stringResource(R.string.online_search_empty)
+                            else stringResource(R.string.online_no_results, query),
                             style = MaterialTheme.typography.bodyMedium,
                             color = colors.onBackground.copy(alpha = 0.75f),
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -368,7 +368,7 @@ private fun OnlineTrackCard(
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    "استماع وتحميل مباشر مجاني",
+                    stringResource(R.string.free_stream_download),
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.primary,
                     fontWeight = FontWeight.Medium,
@@ -387,7 +387,7 @@ private fun OnlineTrackCard(
                     contentColor = colors.onPrimary,
                 ),
             ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = "Play", modifier = Modifier.size(22.dp))
+                Icon(Icons.Default.PlayArrow, contentDescription = stringResource(R.string.play), modifier = Modifier.size(22.dp))
             }
 
             Spacer(Modifier.width(6.dp))
@@ -401,7 +401,7 @@ private fun OnlineTrackCard(
                     contentColor = colors.onSurface,
                 ),
             ) {
-                Icon(Icons.Default.Download, contentDescription = "Download", tint = colors.primary, modifier = Modifier.size(20.dp))
+                Icon(Icons.Default.Download, contentDescription = stringResource(R.string.download), tint = colors.primary, modifier = Modifier.size(20.dp))
             }
         }
     }

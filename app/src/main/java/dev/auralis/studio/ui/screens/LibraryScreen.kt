@@ -87,6 +87,8 @@ fun LibraryScreen(
     var createDialog by remember { mutableStateOf(false) }
     val tabs = LibraryTab.entries
     val colors = MaterialTheme.colorScheme
+    val unknownAlbum = stringResource(R.string.unknown_album)
+    val unknownArtist = stringResource(R.string.unknown_artist)
 
     val selectedUrisFlow = remember(selectedPlaylist?.id) {
         selectedPlaylist?.let { playlistTrackUris(it.id) } ?: flowOf(emptyList())
@@ -187,7 +189,7 @@ fun LibraryScreen(
             )
             LibraryTab.ALBUMS -> GroupList(
                 icon = Icons.Default.Album,
-                groups = tracks.groupBy { it.album.ifBlank { "Unknown Album" } },
+                groups = tracks.groupBy { it.album.ifBlank { unknownAlbum } },
                 onOpen = { name, groupTracks ->
                     selectedGroupName = name
                     selectedGroup = groupTracks
@@ -195,7 +197,7 @@ fun LibraryScreen(
             )
             LibraryTab.ARTISTS -> GroupList(
                 icon = Icons.Default.Person,
-                groups = tracks.groupBy { it.artist.ifBlank { "Unknown Artist" } },
+                groups = tracks.groupBy { it.artist.ifBlank { unknownArtist } },
                 onOpen = { name, groupTracks ->
                     selectedGroupName = name
                     selectedGroup = groupTracks
@@ -270,7 +272,7 @@ private fun TrackList(
                             color = colors.onBackground,
                         )
                         if (onBack != null) {
-                            TextButton(onClick = onBack) { Text("← " + stringResource(R.string.close)) }
+                            TextButton(onClick = onBack) { Text(stringResource(R.string.close)) }
                         }
                     }
                     Spacer(Modifier.height(4.dp))
@@ -298,7 +300,7 @@ private fun TrackList(
                             ) {
                                 Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("Play All", style = MaterialTheme.typography.labelMedium)
+                                Text(stringResource(R.string.play_all), style = MaterialTheme.typography.labelMedium)
                             }
 
                             // Shuffle All
@@ -312,7 +314,7 @@ private fun TrackList(
                             ) {
                                 Icon(Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("Shuffle", style = MaterialTheme.typography.labelMedium)
+                                Text(stringResource(R.string.shuffle), style = MaterialTheme.typography.labelMedium)
                             }
                         }
                     }
@@ -324,7 +326,7 @@ private fun TrackList(
             item {
                 Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                     Text(
-                        "No tracks found",
+                        stringResource(R.string.no_music_found),
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onBackground.copy(alpha = 0.5f),
                     )
@@ -395,7 +397,7 @@ private fun GroupList(
                     }
                     Icon(
                         Icons.Default.PlayArrow,
-                        contentDescription = "Open",
+                        contentDescription = stringResource(R.string.open),
                         tint = colors.primary.copy(alpha = 0.7f),
                         modifier = Modifier.size(20.dp),
                     )

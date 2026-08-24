@@ -16,6 +16,9 @@ import dev.auralis.studio.core.model.OrbitDirection
 import dev.auralis.studio.core.model.PitchTempoMode
 import dev.auralis.studio.core.model.ThemeSettings
 import dev.auralis.studio.core.model.ThemeStyle
+import dev.auralis.studio.core.model.ThemeModeResolver
+import dev.auralis.studio.core.model.CornerStyle
+import dev.auralis.studio.core.model.AnimationStyle
 import dev.auralis.studio.core.model.VisualQuality
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -49,6 +52,12 @@ class SettingsRepository(private val context: Context) {
         val radius = floatPreferencesKey("radius")
         val animation = floatPreferencesKey("animation")
         val visualQuality = stringPreferencesKey("visual_quality")
+        val cornerStyle = stringPreferencesKey("corner_style")
+        val animationStyle = stringPreferencesKey("animation_style")
+        val blurStrength = floatPreferencesKey("blur_strength")
+        val backgroundDim = floatPreferencesKey("background_dim")
+        val backgroundArtwork = booleanPreferencesKey("background_artwork")
+        val hapticFeedback = booleanPreferencesKey("haptic_feedback")
         val minimumDuration = longPreferencesKey("minimum_duration")
         val musicFolders = stringSetPreferencesKey("music_folders")
         val queueUris = stringPreferencesKey("queue_uris")
@@ -100,6 +109,12 @@ class SettingsRepository(private val context: Context) {
             p[Keys.radius] = settings.cornerRadius
             p[Keys.animation] = settings.animationScale
             p[Keys.visualQuality] = settings.visualQuality.name
+            p[Keys.cornerStyle] = settings.cornerStyle.name
+            p[Keys.animationStyle] = settings.animationStyle.name
+            p[Keys.blurStrength] = settings.blurStrength
+            p[Keys.backgroundDim] = settings.backgroundDim
+            p[Keys.backgroundArtwork] = settings.backgroundArtwork
+            p[Keys.hapticFeedback] = settings.hapticFeedback
         }
     }
 
@@ -149,13 +164,22 @@ class SettingsRepository(private val context: Context) {
     )
 
     private fun Preferences.toThemeSettings(): ThemeSettings = ThemeSettings(
-        style = enumValue(this[Keys.theme], ThemeStyle.GLASS),
+        // `AMOLED` used to be a ThemeStyle. Map it to a neutral visual style while
+        // preserving the independently stored appearance; appearance is now the
+        // only source of luminance.
+        style = ThemeModeResolver.migrateLegacyStyle(this[Keys.theme]),
         appearance = enumValue(this[Keys.appearance], AppearanceMode.SYSTEM),
-        accentArgb = this[Keys.accent] ?: 0xFF70E1C1,
+        accentArgb = this[Keys.accent] ?: 0xFFA78BFA,
         glassAlpha = this[Keys.glassAlpha] ?: 0.16f,
         cornerRadius = this[Keys.radius] ?: 24f,
         animationScale = this[Keys.animation] ?: 1f,
         visualQuality = enumValue(this[Keys.visualQuality], VisualQuality.BALANCED),
+        cornerStyle = enumValue(this[Keys.cornerStyle], CornerStyle.BALANCED),
+        animationStyle = enumValue(this[Keys.animationStyle], AnimationStyle.SMOOTH),
+        blurStrength = this[Keys.blurStrength] ?: 0.7f,
+        backgroundDim = this[Keys.backgroundDim] ?: 0.55f,
+        backgroundArtwork = this[Keys.backgroundArtwork] ?: true,
+        hapticFeedback = this[Keys.hapticFeedback] ?: true,
     )
 
     private inline fun <reified T : Enum<T>> enumValue(value: String?, fallback: T): T =

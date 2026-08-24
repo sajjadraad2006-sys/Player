@@ -22,3 +22,15 @@ User preamp is capped at +6 dB, each EQ/tone control is bounded, intermediate re
 ## Real-time behavior
 
 Audio parameters are sent to the service through an app-only custom MediaSession command. DSP parameters use an atomic snapshot, pan/reverb values are smoothed sample-by-sample, and no song restart or seek is performed. Playback-parameter changes may cause Media3 to drain a short processor buffer, while the media position remains intact.
+
+## Visualizer tap
+
+The processor writes post-DSP stereo-to-mono samples (or unchanged samples while bypassed) to a lock-free ring buffer at the decoder's real sample rate. The analyzer reads that tap off the audio thread, applies a Hann-windowed 2048-point FFT and log-spaced dBFS bands, then exposes targets through `StateFlow` at 25/45/60 frames per second according to quality. Analyzer attack/release coefficients and the Compose display interpolator both use elapsed time, so 60/90/120 Hz displays converge consistently. Neither stage creates spectrum energy; silence converges to zero.
+
+## Stem separation
+
+No frequency-domain approximation is labeled as stem separation. This build has no bundled neural model, so stem controls remain unavailable and the processor leaves the original mix untouched.
+
+`audio/stems` defines the offline boundary for a future implementation: engine/model/version capabilities, model availability, checksum-verified optional installation, cancellation, versioned cache identity, and clipping-safe gain math. A genuine engine must decode and chunk a track in a worker, run inference away from the Media3 audio thread, reconstruct complete synchronized files, atomically mark the cache complete, and only then expose stems for synchronous playback. The intended order after that work is:
+
+`decoded cached stems → synchronized stem mixer → DSP → post-DSP PCM tap → visualizer → AudioTrack`

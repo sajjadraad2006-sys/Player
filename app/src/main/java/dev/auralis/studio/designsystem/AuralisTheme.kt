@@ -11,6 +11,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -22,9 +25,37 @@ import androidx.compose.ui.unit.sp
 import dev.auralis.studio.core.model.AppearanceMode
 import dev.auralis.studio.core.model.ThemeSettings
 import dev.auralis.studio.core.model.ThemeStyle
+import dev.auralis.studio.core.model.ThemeModeResolver
 
 val LocalThemeSettings = staticCompositionLocalOf { ThemeSettings() }
 val LocalAuralisTokens = staticCompositionLocalOf { defaultGlassTokens() }
+val LocalAuralisControlColors = staticCompositionLocalOf {
+    AuralisControlColors(
+        active = AccentPalette.MINT,
+        onActive = Color(0xFF071B14),
+        selectedContainer = Color(0xFF245B4B),
+        selectedContent = Color.White,
+        inactiveContainer = Color(0xFF262947),
+        inactiveContent = Color.White,
+        sliderActive = AccentPalette.MINT,
+        sliderInactive = Color(0xFF77738D),
+        sliderThumb = AccentPalette.MINT,
+        controlBorder = Color(0xFFA09BBD),
+        switchCheckedTrack = AccentPalette.MINT,
+        switchCheckedThumb = Color(0xFF071B14),
+        switchUncheckedTrack = Color(0xFF555269),
+        switchUncheckedThumb = Color.White,
+        disabledContainer = Color(0xFF343342),
+        disabledContent = Color(0xFFAAA7B5),
+    )
+}
+val LocalLyruneSemanticColors = staticCompositionLocalOf {
+    LyruneSemanticColors(
+        success = Color(0xFF52D99A), information = Color(0xFF60A5FA), warning = Color(0xFFFBBF24),
+        dspActive = Color(0xFF5EE6B8), spatialActive = Color(0xFF60A5FA), lyricsActive = Color(0xFFA78BFA),
+        visualizerBass = Color(0xFF6D8DFF), visualizerTreble = Color(0xFFE58BFF), artworkAccent = Color(0xFFA78BFA),
+    )
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // High-Contrast, Vibrant Color Palette for Dark & Light Modes
@@ -74,26 +105,30 @@ private object AuralisPalette {
  * Derives a complete M3 color scheme ensuring all text, sliders,
  * chips, and buttons are always clearly visible with high contrast.
  */
-private fun buildColorScheme(settings: ThemeSettings, dark: Boolean) = if (dark) {
-    val accent = Color(settings.accentArgb)
-    val amoled = settings.style == ThemeStyle.AMOLED || settings.appearance == AppearanceMode.AMOLED
+private fun buildColorScheme(settings: ThemeSettings, dark: Boolean, artwork: ArtworkPalette?) = if (dark) {
+    val isDynamic = settings.style == ThemeStyle.DYNAMIC_ART
+    val accent = accessibleAccent(if (isDynamic) artwork?.vibrant ?: Color(settings.accentArgb) else Color(settings.accentArgb), dark = true)
+    val amoled = ThemeModeResolver.isAmoled(settings.appearance)
     val isNeon = settings.style == ThemeStyle.NEON
     val isGlass = settings.style == ThemeStyle.GLASS || settings.style == ThemeStyle.DYNAMIC_ART
 
     val bg = when {
         amoled -> AuralisPalette.BgAmoled
+        isDynamic && artwork != null -> lerp(AuralisPalette.BgDeepDark, artwork.dark, 0.42f)
         isNeon -> Color(0xFF0C0C20)
         isGlass -> Color(0xFF101124)
         else -> AuralisPalette.BgDeepDark
     }
     val surf = when {
         amoled -> AuralisPalette.SurfAmoled
+        isDynamic && artwork != null -> lerp(AuralisPalette.SurfDark, artwork.muted, 0.24f)
         isNeon -> Color(0xFF161633)
         isGlass -> AuralisPalette.GlassSurfDark
         else -> AuralisPalette.SurfDark
     }
     val surfVar = when {
         amoled -> Color(0xFF1A1A24)
+        isDynamic && artwork != null -> lerp(AuralisPalette.SurfVarDark, artwork.dominant, 0.30f)
         isNeon -> Color(0xFF22224A)
         isGlass -> Color(0xFF2A2E52)
         else -> AuralisPalette.SurfVarDark
@@ -101,8 +136,9 @@ private fun buildColorScheme(settings: ThemeSettings, dark: Boolean) = if (dark)
 
     val secondary = when (settings.style) {
         ThemeStyle.NEON    -> Color(0xFFFF52BF)
+        ThemeStyle.DYNAMIC_ART -> artwork?.light ?: Color(0xFFB39DDB)
+        ThemeStyle.GLASS -> artwork?.muted ?: Color(0xFFB39DDB)
         ThemeStyle.CLASSIC -> Color(0xFFB5B0D8)
-        ThemeStyle.AMOLED  -> accent.copy(alpha = 0.90f)
         else               -> Color(0xFFB39DDB)
     }
 
@@ -133,11 +169,13 @@ private fun buildColorScheme(settings: ThemeSettings, dark: Boolean) = if (dark)
         inversePrimary     = lerp(AuralisPalette.BgLight, accent, 0.35f),
     )
 } else {
-    val accent = Color(settings.accentArgb)
+    val isDynamic = settings.style == ThemeStyle.DYNAMIC_ART
+    val accent = accessibleAccent(if (isDynamic) artwork?.vibrant ?: Color(settings.accentArgb) else Color(settings.accentArgb), dark = false)
     val isMinimal = settings.style == ThemeStyle.MINIMAL
     val isMaterial = settings.style == ThemeStyle.MATERIAL
 
     val bg = when {
+        isDynamic && artwork != null -> lerp(AuralisPalette.BgLight, artwork.light, 0.22f)
         isMinimal -> Color(0xFFFAFAFC)
         isMaterial -> Color(0xFFF7F5FE)
         else -> AuralisPalette.BgLight
@@ -148,7 +186,7 @@ private fun buildColorScheme(settings: ThemeSettings, dark: Boolean) = if (dark)
         onPrimary          = if (isColorDark(accent)) AuralisPalette.OnDark else AuralisPalette.OnLight,
         primaryContainer   = lerp(Color.White, accent, 0.18f),
         onPrimaryContainer = AuralisPalette.OnLight,
-        secondary          = Color(0xFF674FD8),
+        secondary          = if (isDynamic && artwork != null) accessibleAccent(artwork.muted, false) else Color(0xFF674FD8),
         onSecondary        = AuralisPalette.OnDark,
         secondaryContainer = Color(0xFFE8E4FA),
         onSecondaryContainer = AuralisPalette.OnLight,
@@ -182,15 +220,36 @@ fun isColorDark(color: Color): Boolean {
 private fun linearize(v: Float): Float =
     if (v <= 0.04045f) v / 12.92f else ((v + 0.055f) / 1.055f).let { it * it * it }
 
+private fun relativeLuminance(color: Color): Float =
+    0.2126f * linearize(color.red) + 0.7152f * linearize(color.green) + 0.0722f * linearize(color.blue)
+
+private fun contrastRatio(a: Color, b: Color): Float {
+    val lighter = maxOf(relativeLuminance(a), relativeLuminance(b))
+    val darker = minOf(relativeLuminance(a), relativeLuminance(b))
+    return (lighter + 0.05f) / (darker + 0.05f)
+}
+
+/** Keeps user accents identifiable while meeting non-text control contrast. */
+private fun accessibleAccent(raw: Color, dark: Boolean): Color {
+    val background = if (dark) AuralisPalette.BgDeepDark else AuralisPalette.BgLight
+    val target = if (dark) Color.White else Color.Black
+    var result = raw.copy(alpha = 1f)
+    repeat(12) {
+        if (contrastRatio(result, background) >= 3.1f) return result
+        result = lerp(result, target, 0.10f)
+    }
+    return result
+}
+
 /** Maps ThemeStyle → structural AuralisTokens for a given dark state. */
-private fun buildTokens(settings: ThemeSettings, dark: Boolean): AuralisTokens {
+internal fun buildTokens(settings: ThemeSettings, dark: Boolean): AuralisTokens {
     val corner = settings.effectiveCornerRadius
     return when (settings.style) {
         ThemeStyle.GLASS -> AuralisTokens(
             surfaceAlpha           = if (dark) 0.65f else 0.78f,
             backgroundUsesArtwork  = settings.backgroundArtwork,
             glassBlur              = settings.visualQuality != dev.auralis.studio.core.model.VisualQuality.REDUCED,
-            glassContrastScrimAlpha = settings.backgroundDim,
+            glassContrastScrimAlpha = settings.backgroundDim.coerceIn(0.50f, 0.92f),
             cardBorderWidth        = 1.2.dp,
             cardBorderAlpha        = 0.35f,
             cardElevation          = 0.dp,
@@ -204,25 +263,11 @@ private fun buildTokens(settings: ThemeSettings, dark: Boolean): AuralisTokens {
             springDamping          = 0.80f,
             accentGlowAlpha        = 0.12f,
             gradientOverlay        = true,
-        )
-        ThemeStyle.AMOLED -> AuralisTokens(
-            surfaceAlpha           = 0.94f,
-            backgroundUsesArtwork  = false,
-            glassBlur              = false,
-            glassContrastScrimAlpha = 0.85f,
-            cardBorderWidth        = 1.dp,
-            cardBorderAlpha        = 0.18f,
-            cardElevation          = 0.dp,
-            cardCorner             = corner,
-            buttonCorner           = corner * 0.7f,
-            chipCorner             = 32f,
-            navBarContainerAlpha   = 0.95f,
-            miniPlayerElevation    = 2.dp,
-            miniPlayerAlpha        = 0.96f,
-            springStiffness        = 500f,
-            springDamping          = 0.85f,
-            accentGlowAlpha        = 0f,
-            gradientOverlay        = false,
+            surfaceTreatment       = SurfaceTreatment.GLASS,
+            navigationFloating     = true,
+            navigationCorner       = 28f,
+            navigationElevation    = 3.dp,
+            artworkCorner          = corner,
         )
         ThemeStyle.MINIMAL -> AuralisTokens(
             surfaceAlpha           = if (dark) 0.96f else 1.0f,
@@ -242,6 +287,11 @@ private fun buildTokens(settings: ThemeSettings, dark: Boolean): AuralisTokens {
             springDamping          = 0.9f,
             accentGlowAlpha        = 0f,
             gradientOverlay        = false,
+            surfaceTreatment       = SurfaceTreatment.BORDERLESS,
+            navigationFloating     = false,
+            navigationCorner       = 0f,
+            navigationElevation    = 0.dp,
+            artworkCorner          = 4f,
         )
         ThemeStyle.MATERIAL -> AuralisTokens(
             surfaceAlpha           = 1.0f,
@@ -261,6 +311,11 @@ private fun buildTokens(settings: ThemeSettings, dark: Boolean): AuralisTokens {
             springDamping          = 0.95f,
             accentGlowAlpha        = 0f,
             gradientOverlay        = false,
+            surfaceTreatment       = SurfaceTreatment.MATERIAL_TONAL,
+            navigationFloating     = false,
+            navigationCorner       = 0f,
+            navigationElevation    = 3.dp,
+            artworkCorner          = 20f,
         )
         ThemeStyle.NEON -> AuralisTokens(
             surfaceAlpha           = 0.82f,
@@ -280,14 +335,19 @@ private fun buildTokens(settings: ThemeSettings, dark: Boolean): AuralisTokens {
             springDamping          = 0.75f,
             accentGlowAlpha        = 0.50f,
             gradientOverlay        = true,
+            surfaceTreatment       = SurfaceTreatment.NEON_EDGE,
+            navigationFloating     = true,
+            navigationCorner       = 12f,
+            navigationElevation    = 0.dp,
+            artworkCorner          = 12f,
         )
         ThemeStyle.DYNAMIC_ART -> AuralisTokens(
             surfaceAlpha           = 0.62f,
             backgroundUsesArtwork  = true,
             glassBlur              = settings.visualQuality != dev.auralis.studio.core.model.VisualQuality.REDUCED,
-            glassContrastScrimAlpha = settings.backgroundDim,
+            glassContrastScrimAlpha = settings.backgroundDim.coerceIn(0.50f, 0.92f),
             cardBorderWidth        = 1.2.dp,
-            cardBorderAlpha        = 0.25f,
+            cardBorderAlpha        = 0.38f,
             cardElevation          = 0.dp,
             cardCorner             = corner,
             buttonCorner           = corner * 0.7f,
@@ -299,6 +359,11 @@ private fun buildTokens(settings: ThemeSettings, dark: Boolean): AuralisTokens {
             springDamping          = 0.78f,
             accentGlowAlpha        = 0f,
             gradientOverlay        = true,
+            surfaceTreatment       = SurfaceTreatment.ARTWORK,
+            navigationFloating     = true,
+            navigationCorner       = 30f,
+            navigationElevation    = 2.dp,
+            artworkCorner          = 30f,
         )
         ThemeStyle.CLASSIC -> AuralisTokens(
             surfaceAlpha           = 0.98f,
@@ -306,7 +371,7 @@ private fun buildTokens(settings: ThemeSettings, dark: Boolean): AuralisTokens {
             glassBlur              = false,
             glassContrastScrimAlpha = 0f,
             cardBorderWidth        = 1.dp,
-            cardBorderAlpha        = 0.15f,
+            cardBorderAlpha        = 0.42f,
             cardElevation          = 2.dp,
             cardCorner             = 10f,
             buttonCorner           = 6f,
@@ -318,11 +383,62 @@ private fun buildTokens(settings: ThemeSettings, dark: Boolean): AuralisTokens {
             springDamping          = 0.90f,
             accentGlowAlpha        = 0f,
             gradientOverlay        = false,
+            surfaceTreatment       = SurfaceTreatment.CLASSIC_OUTLINE,
+            navigationFloating     = false,
+            navigationCorner       = 2f,
+            navigationElevation    = 5.dp,
+            artworkCorner          = 6f,
         )
     }
 }
 
 private fun defaultGlassTokens() = buildTokens(ThemeSettings(), dark = true)
+
+private fun buildControlColors(
+    scheme: androidx.compose.material3.ColorScheme,
+    dark: Boolean,
+): AuralisControlColors {
+    // Inactive controls deliberately use outline-derived colours instead of
+    // translucent surface colours. They remain legible over cards and artwork.
+    val inactiveTrack = if (dark) lerp(scheme.surfaceVariant, Color.White, 0.32f)
+    else lerp(scheme.surfaceVariant, Color.Black, 0.27f)
+    val uncheckedTrack = if (dark) lerp(scheme.surfaceVariant, Color.White, 0.25f)
+    else lerp(scheme.surfaceVariant, Color.Black, 0.22f)
+    return AuralisControlColors(
+        active = scheme.primary,
+        onActive = scheme.onPrimary,
+        selectedContainer = scheme.primaryContainer,
+        selectedContent = scheme.onPrimaryContainer,
+        inactiveContainer = scheme.surfaceVariant,
+        inactiveContent = scheme.onSurfaceVariant,
+        sliderActive = scheme.primary,
+        sliderInactive = inactiveTrack,
+        sliderThumb = scheme.primary,
+        controlBorder = scheme.outline,
+        switchCheckedTrack = scheme.primary,
+        switchCheckedThumb = scheme.onPrimary,
+        switchUncheckedTrack = uncheckedTrack,
+        switchUncheckedThumb = scheme.onSurface,
+        disabledContainer = scheme.surfaceVariant,
+        disabledContent = scheme.onSurfaceVariant.copy(alpha = 0.62f),
+    )
+}
+
+private fun buildSemanticColors(
+    scheme: androidx.compose.material3.ColorScheme,
+    dark: Boolean,
+    artwork: ArtworkPalette?,
+) = LyruneSemanticColors(
+    success = if (dark) Color(0xFF52D99A) else Color(0xFF087A55),
+    information = if (dark) Color(0xFF77B7FF) else Color(0xFF1769AA),
+    warning = if (dark) Color(0xFFFFC857) else Color(0xFF9A5A00),
+    dspActive = if (dark) Color(0xFF5EE6B8) else Color(0xFF087A55),
+    spatialActive = if (dark) Color(0xFF72B8FF) else Color(0xFF1769AA),
+    lyricsActive = scheme.primary,
+    visualizerBass = if (dark) Color(0xFF6D8DFF) else Color(0xFF3156C9),
+    visualizerTreble = if (dark) Color(0xFFE58BFF) else Color(0xFF9B3EBC),
+    artworkAccent = artwork?.vibrant ?: scheme.secondary,
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // M3 Typography
@@ -349,19 +465,27 @@ private val AuralisTypography = Typography(
 // Public composable entry point
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
-fun AuralisTheme(settings: ThemeSettings, content: @Composable () -> Unit) {
+fun AuralisTheme(settings: ThemeSettings, artworkPalette: ArtworkPalette? = null, content: @Composable () -> Unit) {
     val systemDark = isSystemInDarkTheme()
-    val dark = when (settings.appearance) {
-        AppearanceMode.SYSTEM  -> systemDark
-        AppearanceMode.LIGHT   -> false
-        AppearanceMode.DARK, AppearanceMode.AMOLED -> true
+    val dark = ThemeModeResolver.isDark(settings.appearance, systemDark)
+    val animatedArtwork = artworkPalette?.let { target ->
+        val dominant by animateColorAsState(target.dominant, tween(AuralisMotion.CONTAINER_MS), label = "art_dominant")
+        val vibrant by animateColorAsState(target.vibrant, tween(AuralisMotion.CONTAINER_MS), label = "art_vibrant")
+        val muted by animateColorAsState(target.muted, tween(AuralisMotion.CONTAINER_MS), label = "art_muted")
+        val darkColor by animateColorAsState(target.dark, tween(AuralisMotion.CONTAINER_MS), label = "art_dark")
+        val lightColor by animateColorAsState(target.light, tween(AuralisMotion.CONTAINER_MS), label = "art_light")
+        ArtworkPalette(dominant, vibrant, muted, darkColor, lightColor)
     }
-    val colorScheme = buildColorScheme(settings, dark)
+    val colorScheme = buildColorScheme(settings, dark, animatedArtwork)
     val tokens      = buildTokens(settings, dark)
+    val controls    = buildControlColors(colorScheme, dark)
+    val semantic    = buildSemanticColors(colorScheme, dark, animatedArtwork)
 
     CompositionLocalProvider(
         LocalThemeSettings provides settings,
         LocalAuralisTokens  provides tokens,
+        LocalAuralisControlColors provides controls,
+        LocalLyruneSemanticColors provides semantic,
     ) {
         MaterialTheme(colorScheme = colorScheme, typography = AuralisTypography, content = content)
     }
@@ -377,7 +501,9 @@ fun AuralisBackground(modifier: Modifier = Modifier, content: @Composable () -> 
     val accent   = MaterialTheme.colorScheme.primary
     val secondary= MaterialTheme.colorScheme.secondary
 
-    val brush = when (settings.style) {
+    val brush = if (ThemeModeResolver.isAmoled(settings.appearance)) {
+        Brush.linearGradient(listOf(Color.Black, Color.Black))
+    } else when (settings.style) {
         ThemeStyle.GLASS, ThemeStyle.DYNAMIC_ART -> Brush.verticalGradient(
             colors = listOf(
                 lerp(base, accent, 0.16f),
@@ -396,7 +522,6 @@ fun AuralisBackground(modifier: Modifier = Modifier, content: @Composable () -> 
             ),
         )
         ThemeStyle.MINIMAL, ThemeStyle.MATERIAL -> Brush.linearGradient(listOf(base, base))
-        ThemeStyle.AMOLED  -> Brush.linearGradient(listOf(Color.Black, Color.Black))
         ThemeStyle.CLASSIC -> Brush.verticalGradient(
             listOf(base, lerp(base, accent, 0.04f), base),
         )

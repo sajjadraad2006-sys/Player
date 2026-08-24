@@ -1,6 +1,5 @@
 package dev.auralis.studio.audio.visualizer
 
-import dev.auralis.studio.audio.dsp.StudioAudioProcessor
 import dev.auralis.studio.core.model.VisualQuality
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,7 +32,7 @@ import kotlin.math.pow
  * - Respects [VisualQuality] tiers for target FPS and band count.
  */
 class VisualizerAnalyzer(
-    private val processor: StudioAudioProcessor,
+    private val tap: PcmAudioTap,
 ) {
     // ── Configuration ────────────────────────────────────────────────────────
     private val fftSize = 2048
@@ -59,11 +58,13 @@ class VisualizerAnalyzer(
     // ── Lifecycle ────────────────────────────────────────────────────────────
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var analysisJob: Job? = null
-    private var lastReadPos = 0
+    private var lastReadPos = -1L
+    private var lastAnalysisNanos = 0L
 
     fun start(quality: VisualQuality = VisualQuality.BALANCED) {
         applyQuality(quality)
         if (analysisJob?.isActive == true) return
+        lastAnalysisNanos = 0L
         analysisJob = scope.launch { analysisLoop() }
     }
 
@@ -74,6 +75,7 @@ class VisualizerAnalyzer(
         _bands.value = FloatArray(bandCount)
         _waveform.value = FloatArray(128)
         smooth.fill(0f)
+        lastAnalysisNanos = 0L
     }
 
     fun setQuality(quality: VisualQuality) {
@@ -101,25 +103,35 @@ class VisualizerAnalyzer(
     private suspend fun analysisLoop() {
         while (currentCoroutineContext().isActive) {
             val frameStart = System.currentTimeMillis()
-            analyze()
+            analyzeFrame()
             val elapsed = System.currentTimeMillis() - frameStart
             val wait = targetIntervalMs - elapsed
             if (wait > 0) delay(wait)
         }
     }
 
-    private fun analyze() {
+    internal fun analyzeFrame() {
+        val nowNanos = System.nanoTime()
+        val deltaSeconds = if (lastAnalysisNanos == 0L) {
+            targetIntervalMs / 1_000f
+        } else {
+            ((nowNanos - lastAnalysisNanos) / 1_000_000_000f).coerceIn(0.001f, 0.25f)
+        }
+        lastAnalysisNanos = nowNanos
         // Grab a snapshot from the ring buffer — lock-free read
-        val writePos = processor.visualizerWritePos
-        val buf = processor.visualizerRingBuffer
+        val writePos = tap.writePosition
+        val buf = tap.samples
         val bufSize = buf.size
 
-        if (writePos == lastReadPos) return // no new data
+        if (writePos == lastReadPos) {
+            decayWithoutAudio(deltaSeconds)
+            return
+        }
 
         // Fill FFT real array with windowed samples from ring buffer (newest fftSize samples)
-        val startPos = (writePos - fftSize + bufSize) and (bufSize - 1)
+        val startPos = writePos - fftSize
         for (i in 0 until fftSize) {
-            real[i] = buf[(startPos + i) and (bufSize - 1)] * window[i]
+            real[i] = buf[((startPos + i).toInt() and (bufSize - 1))] * window[i]
         }
         imag.fill(0f)
         lastReadPos = writePos
@@ -128,9 +140,10 @@ class VisualizerAnalyzer(
         fftInPlace(real, imag, fftSize)
 
         // Compute log-spaced magnitude bands
-        val binToHz = 44100f / fftSize.toFloat()
+        val sampleRate = tap.sampleRateHz.toFloat()
+        val binToHz = sampleRate / fftSize.toFloat()
         val minFreq  = 20f
-        val maxFreq  = 18000f
+        val maxFreq  = minOf(20_000f, sampleRate * 0.48f).coerceAtLeast(minFreq * 2f)
         val logMin   = log10(minFreq)
         val logMax   = log10(maxFreq)
 
@@ -139,29 +152,27 @@ class VisualizerAnalyzer(
             val freqHi = 10.0.pow((logMin + (logMax - logMin) * (band + 1) / bandCount).toDouble()).toFloat()
             val binLo  = (freqLo / binToHz).toInt().coerceIn(1, fftSize / 2 - 1)
             val binHi  = (freqHi / binToHz).toInt().coerceIn(binLo + 1, fftSize / 2)
-            var sum = 0f
-            var count = 0
+            var peak = 0f
             for (b in binLo until binHi) {
-                val mag = sqrt(real[b] * real[b] + imag[b] * imag[b])
-                sum += mag
-                count++
+                val amplitude = 2f * sqrt(real[b] * real[b] + imag[b] * imag[b]) / WINDOW_SUM
+                if (amplitude > peak) peak = amplitude
             }
-            val avg = if (count > 0) sum / count else 0f
-            // Convert to dB, normalise to 0..1 range (roughly -80..0 dB → 0..1)
-            val db = 20f * log10(max(avg, 1e-6f))
-            val norm = ((db + 80f) / 80f).coerceIn(0f, 1f)
-            bandMags[band] = norm
+            // dBFS mapping keeps low-level musical detail without manufacturing a floor.
+            val db = 20f * log10(max(peak, 0.00000025f))
+            val norm = ((db + 78f) / 78f).coerceIn(0f, 1f)
+            // A gentle perceptual curve expands genuine low-level detail. Zero stays zero.
+            bandMags[band] = if (norm <= 0f) 0f else norm.pow(0.82f)
         }
 
-        // Exponential smoothing (attack fast, release slow)
-        val alpha = 0.35f
-        val release = 0.85f
+        // Time-correct analysis smoothing: fast transient attack, musical release.
         for (band in 0 until bandCount) {
-            smooth[band] = if (bandMags[band] > smooth[band]) {
-                smooth[band] + (bandMags[band] - smooth[band]) * alpha
-            } else {
-                smooth[band] * release
-            }
+            smooth[band] = TemporalSmoothing.next(
+                current = smooth[band],
+                target = bandMags[band],
+                deltaSeconds = deltaSeconds,
+                attackSeconds = 0.040f,
+                releaseSeconds = 0.190f,
+            )
         }
 
         // Emit snapshot — copy to avoid sharing mutable state
@@ -170,10 +181,21 @@ class VisualizerAnalyzer(
         // Waveform: emit 128 evenly spaced samples from the ring buffer
         val wave = FloatArray(128)
         for (i in 0 until 128) {
-            val idx = (writePos - 128 + i + bufSize) and (bufSize - 1)
+            val idx = ((writePos - 128 + i).toInt() and (bufSize - 1))
             wave[i] = buf[idx]
         }
         _waveform.value = wave
+    }
+
+    private fun decayWithoutAudio(deltaSeconds: Float) {
+        var changed = false
+        for (band in 0 until bandCount) {
+            val nextValue = TemporalSmoothing.next(smooth[band], 0f, deltaSeconds, 0.04f, 0.16f)
+            val next = if (nextValue < 0.002f) 0f else nextValue
+            changed = changed || next != smooth[band]
+            smooth[band] = next
+        }
+        if (changed) _bands.value = smooth.copyOf(bandCount)
     }
 
     // ── Iterative Cooley-Tukey FFT ────────────────────────────────────────────
@@ -219,4 +241,9 @@ class VisualizerAnalyzer(
         (0.5 * (1.0 - cos(2.0 * PI * i / (n - 1)))).toFloat()
 
     private fun Double.pow(exp: Double): Double = Math.pow(this, exp)
+
+    private companion object {
+        // Hann window sum for fftSize=2048. Kept explicit to avoid hot-loop work.
+        const val WINDOW_SUM = 1023.5f
+    }
 }

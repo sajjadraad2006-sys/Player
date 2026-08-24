@@ -48,6 +48,49 @@ data class AuralisTokens(
 
     // Gradient overlay on glass cards for depth
     val gradientOverlay: Boolean = false,
+
+    // Coherent style language consumed by shared surfaces/navigation/artwork.
+    val surfaceTreatment: SurfaceTreatment = SurfaceTreatment.GLASS,
+    val navigationFloating: Boolean = true,
+    val navigationCorner: Float = 24f,
+    val navigationElevation: Dp = 0.dp,
+    val artworkCorner: Float = 20f,
+)
+
+enum class SurfaceTreatment { GLASS, BORDERLESS, MATERIAL_TONAL, NEON_EDGE, ARTWORK, CLASSIC_OUTLINE }
+
+/** Semantic interactive colours shared by every control in the app. */
+@Immutable
+data class AuralisControlColors(
+    val active: Color,
+    val onActive: Color,
+    val selectedContainer: Color,
+    val selectedContent: Color,
+    val inactiveContainer: Color,
+    val inactiveContent: Color,
+    val sliderActive: Color,
+    val sliderInactive: Color,
+    val sliderThumb: Color,
+    val controlBorder: Color,
+    val switchCheckedTrack: Color,
+    val switchCheckedThumb: Color,
+    val switchUncheckedTrack: Color,
+    val switchUncheckedThumb: Color,
+    val disabledContainer: Color,
+    val disabledContent: Color,
+)
+
+@Immutable
+data class LyruneSemanticColors(
+    val success: Color,
+    val information: Color,
+    val warning: Color,
+    val dspActive: Color,
+    val spatialActive: Color,
+    val lyricsActive: Color,
+    val visualizerBass: Color,
+    val visualizerTreble: Color,
+    val artworkAccent: Color,
 )
 
 /** Motion timing constants shared across all themes. */

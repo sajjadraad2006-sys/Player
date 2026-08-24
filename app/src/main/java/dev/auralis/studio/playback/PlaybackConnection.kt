@@ -19,6 +19,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import androidx.media3.session.SessionResult
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -46,6 +47,8 @@ class PlaybackConnection(
     private var controller: MediaController? = null
     private var ticker: Job? = null
     private var pendingConfig: AudioConfig? = null
+    private val _appliedAudioConfig = MutableStateFlow<AudioConfig?>(null)
+    val appliedAudioConfig: StateFlow<AudioConfig?> = _appliedAudioConfig.asStateFlow()
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) = publish(player)
@@ -126,7 +129,21 @@ class PlaybackConnection(
 
     fun applyAudioConfig(config: AudioConfig) {
         pendingConfig = config
-        controller?.sendCustomCommand(PlaybackCommands.setAudioConfigCommand, config.toBundle())
+        val future = controller?.sendCustomCommand(PlaybackCommands.setAudioConfigCommand, config.toBundle()) ?: return
+        future.addListener(
+            {
+                runCatching { future.get() }
+                    .onSuccess { result ->
+                        if (result.resultCode == SessionResult.RESULT_SUCCESS && pendingConfig == config) {
+                            _appliedAudioConfig.value = config
+                        } else if (result.resultCode != SessionResult.RESULT_SUCCESS) {
+                            _state.value = _state.value.copy(error = "Audio settings were not applied")
+                        }
+                    }
+                    .onFailure { _state.value = _state.value.copy(error = it.localizedMessage) }
+            },
+            ContextCompat.getMainExecutor(appContext),
+        )
     }
 
     fun release() {

@@ -25,18 +25,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -53,21 +51,27 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
 import dev.auralis.studio.BuildConfig
 import dev.auralis.studio.R
 import dev.auralis.studio.core.model.AppearanceMode
+import dev.auralis.studio.core.model.AppLanguage
 import dev.auralis.studio.core.model.CornerStyle
 import dev.auralis.studio.core.model.ThemeSettings
 import dev.auralis.studio.core.model.ThemeStyle
 import dev.auralis.studio.core.model.VisualQuality
 import dev.auralis.studio.designsystem.AccentPalette
+import dev.auralis.studio.designsystem.AuralisFilterChip as FilterChip
+import dev.auralis.studio.designsystem.AuralisSlider as Slider
+import dev.auralis.studio.designsystem.AuralisSwitch as Switch
 import dev.auralis.studio.designsystem.isColorDark
 import dev.auralis.studio.ui.components.GlassCard
 import dev.auralis.studio.ui.components.SectionHeader
 import kotlin.math.roundToInt
 
 // ─── Sub-screen navigation ────────────────────────────────────────────────────
-private enum class SettingsSection { ROOT, APPEARANCE, LIBRARY, PROVIDERS, PRIVACY, ABOUT }
+private enum class SettingsSection { ROOT, APPEARANCE, LANGUAGE, LIBRARY, PROVIDERS, PRIVACY, ABOUT }
 
 @Composable
 fun SettingsScreen(
@@ -96,6 +100,10 @@ fun SettingsScreen(
         SettingsSection.APPEARANCE -> AppearanceSection(
             theme = theme,
             onThemeChange = onThemeChange,
+            onBack = { section = SettingsSection.ROOT },
+            modifier = modifier,
+        )
+        SettingsSection.LANGUAGE -> LanguageSection(
             onBack = { section = SettingsSection.ROOT },
             modifier = modifier,
         )
@@ -140,15 +148,17 @@ private fun SettingsRoot(
         item {
             GlassCard(Modifier.fillMaxWidth()) {
                 Column {
-                    NavRow(Icons.Default.Palette, stringResource(R.string.appearance), "Themes, colours, corner style") { onNavigate(SettingsSection.APPEARANCE) }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(0.12f))
-                    NavRow(Icons.Default.Storage, stringResource(R.string.library_settings), "Folders, scan filters") { onNavigate(SettingsSection.LIBRARY) }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(0.12f))
-                    NavRow(Icons.Default.Tune, "Online Providers", "Lyrics, Jamendo status") { onNavigate(SettingsSection.PROVIDERS) }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(0.12f))
-                    NavRow(Icons.Default.PrivacyTip, stringResource(R.string.privacy), "Permissions & data") { onNavigate(SettingsSection.PRIVACY) }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(0.12f))
-                    NavRow(Icons.Default.Info, stringResource(R.string.about), "Version, licenses") { onNavigate(SettingsSection.ABOUT) }
+                    NavRow(Icons.Default.Palette, stringResource(R.string.appearance), stringResource(R.string.appearance_summary)) { onNavigate(SettingsSection.APPEARANCE) }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(0.42f))
+                    NavRow(Icons.Default.Language, stringResource(R.string.language), stringResource(R.string.language_summary)) { onNavigate(SettingsSection.LANGUAGE) }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(0.42f))
+                    NavRow(Icons.Default.Storage, stringResource(R.string.library_settings), stringResource(R.string.library_summary)) { onNavigate(SettingsSection.LIBRARY) }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(0.42f))
+                    NavRow(Icons.Default.Tune, stringResource(R.string.online_providers), stringResource(R.string.online_providers_summary)) { onNavigate(SettingsSection.PROVIDERS) }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(0.42f))
+                    NavRow(Icons.Default.PrivacyTip, stringResource(R.string.privacy), stringResource(R.string.privacy_summary)) { onNavigate(SettingsSection.PRIVACY) }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(0.42f))
+                    NavRow(Icons.Default.Info, stringResource(R.string.about), stringResource(R.string.about_summary)) { onNavigate(SettingsSection.ABOUT) }
                 }
             }
         }
@@ -167,6 +177,46 @@ private fun SettingsRoot(
             }
         }
     }
+}
+
+@Composable
+private fun LanguageSection(onBack: () -> Unit, modifier: Modifier = Modifier) {
+    val selected = AppLanguage.fromLanguageTags(AppCompatDelegate.getApplicationLocales().toLanguageTags())
+    LazyColumn(
+        modifier,
+        contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 40.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onBack) { Text(stringResource(R.string.back)) }
+                Text(stringResource(R.string.language), style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onBackground)
+            }
+        }
+        item {
+            SettingsCard(stringResource(R.string.app_language)) {
+                Text(stringResource(R.string.language_change_description), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                AppLanguage.entries.forEach { language ->
+                    FilterChip(
+                        selected = selected == language,
+                        onClick = {
+                            AppCompatDelegate.setApplicationLocales(
+                                LocaleListCompat.forLanguageTags(language.languageTag),
+                            )
+                        },
+                        label = { Text(stringResource(language.labelResource())) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun AppLanguage.labelResource(): Int = when (this) {
+    AppLanguage.SYSTEM -> R.string.system_default
+    AppLanguage.ENGLISH -> R.string.english
+    AppLanguage.ARABIC -> R.string.arabic
 }
 
 @Composable
@@ -197,7 +247,7 @@ private fun AppearanceSection(
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 40.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack) { Text("← Back") }
+                TextButton(onClick = onBack) { Text(stringResource(R.string.back)) }
                 Text(stringResource(R.string.appearance), style = MaterialTheme.typography.headlineMedium, color = colors.onBackground)
             }
         }
@@ -205,7 +255,7 @@ private fun AppearanceSection(
         // Theme Style
         item {
             SettingsCard(stringResource(R.string.theme_style)) {
-                Text("Each style changes the visual language — not just the colour.", style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.65f))
+                Text(stringResource(R.string.theme_style_description), style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.65f))
                 Spacer(Modifier.height(4.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(ThemeStyle.entries) { style ->
@@ -222,7 +272,7 @@ private fun AppearanceSection(
         // Appearance Mode (separate from theme style)
         item {
             SettingsCard(stringResource(R.string.appearance_mode)) {
-                Text("Light/Dark mode is separate from the theme visual style.", style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.65f))
+                Text(stringResource(R.string.appearance_mode_description), style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.65f))
                 Spacer(Modifier.height(4.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(AppearanceMode.entries) { mode ->
@@ -281,7 +331,7 @@ private fun AppearanceSection(
                         FilterChip(
                             selected = theme.cornerStyle == style,
                             onClick  = { onThemeChange(theme.copy(cornerStyle = style)) },
-                            label    = { Text(style.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                            label    = { Text(cornerLabel(style)) },
                         )
                     }
                 }
@@ -291,7 +341,7 @@ private fun AppearanceSection(
         // Visual quality
         item {
             SettingsCard(stringResource(R.string.visual_quality)) {
-                Text("Controls visualizer FPS and glass blur quality.", style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.65f))
+                Text(stringResource(R.string.visual_quality_description), style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.65f))
                 Spacer(Modifier.height(4.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(VisualQuality.entries) { quality ->
@@ -307,11 +357,11 @@ private fun AppearanceSection(
 
         // Background artwork toggle
         item {
-            SettingsCard("Background artwork") {
+            SettingsCard(stringResource(R.string.background_artwork)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Album art background", style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
-                        Text("Blurred artwork fills the Now Playing background.", style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.6f))
+                        Text(stringResource(R.string.album_art_background), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+                        Text(stringResource(R.string.album_art_background_description), style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.6f))
                     }
                     Switch(
                         checked         = theme.backgroundArtwork,
@@ -320,17 +370,17 @@ private fun AppearanceSection(
                 }
                 if (theme.backgroundArtwork) {
                     Spacer(Modifier.height(4.dp))
-                    Text("Background dim · ${(theme.backgroundDim * 100).roundToInt()}%", style = MaterialTheme.typography.labelMedium, color = colors.onSurface.copy(0.7f))
-                    Slider(theme.backgroundDim, { onThemeChange(theme.copy(backgroundDim = it)) }, valueRange = 0.25f..0.90f)
+                    Text(stringResource(R.string.background_dim_value, (theme.backgroundDim * 100).roundToInt()), style = MaterialTheme.typography.labelMedium, color = colors.onSurface.copy(0.7f))
+                    Slider(theme.backgroundDim.coerceAtLeast(0.50f), { onThemeChange(theme.copy(backgroundDim = it)) }, valueRange = 0.50f..0.90f)
                 }
             }
         }
 
         // Haptics
         item {
-            SettingsCard("Haptic feedback") {
+            SettingsCard(stringResource(R.string.haptic_feedback)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Vibrate on interactive elements", style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+                    Text(stringResource(R.string.haptic_feedback_description), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
                     Switch(
                         checked         = theme.hapticFeedback,
                         onCheckedChange = { onThemeChange(theme.copy(hapticFeedback = it)) },
@@ -361,16 +411,16 @@ private fun LibrarySection(
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 40.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack) { Text("← Back") }
+                TextButton(onClick = onBack) { Text(stringResource(R.string.back)) }
                 Text(stringResource(R.string.library_settings), style = MaterialTheme.typography.headlineMedium, color = colors.onBackground)
             }
         }
 
         // ── Download Folder Location Card ──
         item {
-            SettingsCard("مسار تنزيل الموسيقى (Download Location)") {
+            SettingsCard(stringResource(R.string.download_location)) {
                 Text(
-                    "المجلد الحالي: $downloadLocation",
+                    stringResource(R.string.current_download_folder, downloadLocation),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = colors.primary,
@@ -385,14 +435,14 @@ private fun LibrarySection(
                         modifier = Modifier.weight(1.2f),
                         shape = RoundedCornerShape(12.dp),
                     ) {
-                        Text("تغيير المجلد")
+                        Text(stringResource(R.string.change_folder))
                     }
                     androidx.compose.material3.FilledTonalButton(
                         onClick = onResetDownloadFolder,
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp),
                     ) {
-                        Text("الافتراضي")
+                        Text(stringResource(R.string.use_default))
                     }
                 }
             }
@@ -422,7 +472,7 @@ private fun LibrarySection(
                         }
                     }
                 } else {
-                    Text("No extra folders selected. Auralis will use MediaStore if you granted music access.", style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.55f))
+                    Text(stringResource(R.string.no_extra_folders), style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.55f))
                 }
             }
         }
@@ -446,38 +496,38 @@ private fun ProvidersSection(onBack: () -> Unit, modifier: Modifier = Modifier) 
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 40.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack) { Text("← Back") }
-                Text("Online Providers", style = MaterialTheme.typography.headlineMedium, color = colors.onBackground)
+                TextButton(onClick = onBack) { Text(stringResource(R.string.back)) }
+                Text(stringResource(R.string.online_providers), style = MaterialTheme.typography.headlineMedium, color = colors.onBackground)
             }
         }
         item {
-            SettingsCard("Provider Status") {
-                Text("These providers are optional. Local playback and DSP never require network access.", style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.65f))
+            SettingsCard(stringResource(R.string.provider_status)) {
+                Text(stringResource(R.string.provider_status_description), style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.65f))
                 Spacer(Modifier.height(8.dp))
-                ProviderRow("LRCLIB", "Lyrics provider", ready = true, note = "No API key required · LRCLIB.net")
-                HorizontalDivider(color = colors.outline.copy(0.10f), modifier = Modifier.padding(vertical = 4.dp))
+                ProviderRow("LRCLIB", stringResource(R.string.lyrics_provider), ready = true, note = stringResource(R.string.no_api_key_lrclib))
+                HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
                 ProviderRow(
                     name  = "Jamendo",
-                    role  = "Online music (search + stream + download)",
+                    role  = stringResource(R.string.online_music_role),
                     ready = jamendoConfigured,
-                    note  = if (jamendoConfigured) "client_id configured" else "Set JAMENDO_CLIENT_ID in local.properties",
+                    note  = stringResource(if (jamendoConfigured) R.string.client_id_configured else R.string.client_id_not_configured),
                 )
-                HorizontalDivider(color = colors.outline.copy(0.10f), modifier = Modifier.padding(vertical = 4.dp))
-                ProviderRow("MusicBrainz", "Metadata lookup", ready = true, note = "No API key required · musicbrainz.org")
+                HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
+                ProviderRow("MusicBrainz", stringResource(R.string.metadata_lookup), ready = true, note = stringResource(R.string.no_api_key_musicbrainz))
             }
         }
         item {
             GlassCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("How to enable Jamendo", style = MaterialTheme.typography.titleSmall, color = colors.onSurface)
+                    Text(stringResource(R.string.enable_jamendo), style = MaterialTheme.typography.titleSmall, color = colors.onSurface)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "1. Register at developer.jamendo.com\n2. Obtain a client_id\n3. Add JAMENDO_CLIENT_ID=your_key to local.properties\n4. Rebuild the app",
+                        stringResource(R.string.enable_jamendo_steps),
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.onSurface.copy(0.70f),
                     )
                     Spacer(Modifier.height(4.dp))
-                    Text("Your client_id is never committed to source control.", style = MaterialTheme.typography.labelSmall, color = colors.primary)
+                    Text(stringResource(R.string.client_id_safety), style = MaterialTheme.typography.labelSmall, color = colors.primary)
                 }
             }
         }
@@ -506,7 +556,7 @@ private fun PrivacySection(onBack: () -> Unit, modifier: Modifier = Modifier) {
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 40.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack) { Text("← Back") }
+                TextButton(onClick = onBack) { Text(stringResource(R.string.back)) }
                 Text(stringResource(R.string.privacy), style = MaterialTheme.typography.headlineMedium, color = colors.onBackground)
             }
         }
@@ -515,12 +565,12 @@ private fun PrivacySection(onBack: () -> Unit, modifier: Modifier = Modifier) {
                 Text(stringResource(R.string.privacy_description), color = colors.onSurface.copy(0.72f))
                 Spacer(Modifier.height(4.dp))
                 listOf(
-                    "No user account required",
-                    "No analytics or telemetry",
-                    "No cloud sync",
-                    "Local playback works with no internet",
-                    "Online features (lyrics, Jamendo) are user-initiated only",
-                    "No audio uploaded or streamed without your action",
+                    stringResource(R.string.privacy_no_account),
+                    stringResource(R.string.privacy_no_analytics),
+                    stringResource(R.string.privacy_no_cloud),
+                    stringResource(R.string.privacy_offline_playback),
+                    stringResource(R.string.privacy_lyrics_network),
+                    stringResource(R.string.privacy_no_upload),
                 ).forEach { point ->
                     Row(verticalAlignment = Alignment.Top, modifier = Modifier.padding(vertical = 3.dp)) {
                         Text("·  ", color = colors.primary, style = MaterialTheme.typography.bodyMedium)
@@ -539,14 +589,14 @@ private fun AboutSection(onBack: () -> Unit, modifier: Modifier = Modifier) {
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 40.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack) { Text("← Back") }
+                TextButton(onClick = onBack) { Text(stringResource(R.string.back)) }
                 Text(stringResource(R.string.about), style = MaterialTheme.typography.headlineMedium, color = colors.onBackground)
             }
         }
         item {
             SettingsCard(stringResource(R.string.about)) {
                 Text(stringResource(R.string.version_value, BuildConfig.VERSION_NAME), style = MaterialTheme.typography.bodyLarge, color = colors.onSurface)
-                Text("Package: ${BuildConfig.APPLICATION_ID}", style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.60f))
+                Text(stringResource(R.string.package_name, BuildConfig.APPLICATION_ID), style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.60f))
                 Spacer(Modifier.height(2.dp))
                 Text(stringResource(R.string.android_version, Build.VERSION.RELEASE, Build.VERSION.SDK_INT), style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
             }
@@ -563,19 +613,6 @@ private fun AboutSection(onBack: () -> Unit, modifier: Modifier = Modifier) {
         item {
             SettingsCard(stringResource(R.string.open_source_licenses)) {
                 Text(stringResource(R.string.licenses_summary), color = colors.onSurface.copy(0.72f), style = MaterialTheme.typography.bodySmall)
-                Spacer(Modifier.height(4.dp))
-                listOf(
-                    "AndroidX libraries — Apache 2.0",
-                    "Kotlin — Apache 2.0",
-                    "Media3 (ExoPlayer) — Apache 2.0",
-                    "Coil — Apache 2.0",
-                    "Ktor — Apache 2.0",
-                    "Guava — Apache 2.0",
-                    "LRCLIB — Public API, attribution appreciated",
-                    "Jamendo — Developer API, CC-licensed content",
-                ).forEach { license ->
-                    Text("• $license", style = MaterialTheme.typography.labelMedium, color = colors.onSurface.copy(0.65f), modifier = Modifier.padding(vertical = 1.dp))
-                }
             }
         }
     }
@@ -597,7 +634,6 @@ private fun SettingsCard(title: String, content: @Composable ColumnScope.() -> U
 private fun themeLabel(style: ThemeStyle): String = stringResource(
     when (style) {
         ThemeStyle.GLASS       -> R.string.glass
-        ThemeStyle.AMOLED      -> R.string.amoled
         ThemeStyle.MINIMAL     -> R.string.minimal
         ThemeStyle.MATERIAL    -> R.string.material
         ThemeStyle.NEON        -> R.string.neon
@@ -622,5 +658,14 @@ private fun qualityLabel(quality: VisualQuality): String = stringResource(
         VisualQuality.FULL     -> R.string.full
         VisualQuality.BALANCED -> R.string.balanced
         VisualQuality.REDUCED  -> R.string.reduced
+    },
+)
+
+@Composable
+private fun cornerLabel(style: CornerStyle): String = stringResource(
+    when (style) {
+        CornerStyle.COMPACT -> R.string.compact
+        CornerStyle.BALANCED -> R.string.balanced
+        CornerStyle.ROUND -> R.string.round
     },
 )

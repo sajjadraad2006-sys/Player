@@ -9,6 +9,7 @@ import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.auralis.studio.AuralisApplication
+import dev.auralis.studio.R
 import dev.auralis.studio.core.database.DownloadEntity
 import dev.auralis.studio.core.database.DownloadStatus
 import dev.auralis.studio.core.database.PlaylistEntity
@@ -16,12 +17,14 @@ import dev.auralis.studio.core.database.PlaylistTrackEntity
 import dev.auralis.studio.core.model.AudioConfig
 import dev.auralis.studio.core.model.ThemeSettings
 import dev.auralis.studio.core.model.Track
+import dev.auralis.studio.core.model.LyricsUiState
 import dev.auralis.studio.online.ArchiveOrgMusicProvider
 import dev.auralis.studio.online.FreeMusicDiscoveryProvider
 import dev.auralis.studio.online.OnlineTrack
 import dev.auralis.studio.online.ProviderResult
 import dev.auralis.studio.online.toStreamableTrack
 import dev.auralis.studio.playback.PlaybackConnection
+import dev.auralis.studio.audio.visualizer.VisualizerAnalyzer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -37,16 +40,25 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import java.io.File
 
 @OptIn(FlowPreview::class)
 class MainViewModel(application: Application) : AndroidViewModel(application) {
+    private val appContext = application
     private val container = (application as AuralisApplication).container
     private val dao = container.database.dao()
     private val downloadsDao = container.database.downloadsDao()
     val playback = PlaybackConnection(application, viewModelScope)
     val playbackState = playback.state
+    private val visualizerAnalyzer = VisualizerAnalyzer(container.pcmAudioTap)
+    val visualizerBands = visualizerAnalyzer.bands
+    val visualizerWaveform = visualizerAnalyzer.waveform
+    private val _lyricsState = MutableStateFlow<LyricsUiState>(LyricsUiState.NotFound)
+    val lyricsState: StateFlow<LyricsUiState> = _lyricsState.asStateFlow()
+    private var currentLyricsTrack: Track? = null
     val tracks: StateFlow<List<Track>> = container.library.tracks
     val favorites: StateFlow<Set<String>> = dao.observeFavoriteUris()
         .map { it.toSet() }
@@ -72,7 +84,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── Online Search & Downloads ─────────────────────────────────────────────
     private val prefs = application.getSharedPreferences("aura_studio_prefs", Context.MODE_PRIVATE)
-    val downloadFolderLocation = MutableStateFlow(prefs.getString("download_folder_name", "Music/AuraStudio/") ?: "Music/AuraStudio/")
+    val downloadFolderLocation = MutableStateFlow(prefs.getString("download_folder_name", "Music/Lyrune/") ?: "Music/Lyrune/")
     val downloadFolderUri = MutableStateFlow(prefs.getString("download_folder_uri", null))
 
     fun setDownloadLocation(uri: Uri, folderName: String) {
@@ -87,10 +99,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun resetDownloadLocation() {
         prefs.edit()
             .remove("download_folder_uri")
-            .putString("download_folder_name", "Music/AuraStudio/")
+            .putString("download_folder_name", "Music/Lyrune/")
             .apply()
         downloadFolderUri.value = null
-        downloadFolderLocation.value = "Music/AuraStudio/"
+        downloadFolderLocation.value = "Music/Lyrune/"
     }
 
     private val onlineProvider = FreeMusicDiscoveryProvider()
@@ -119,6 +131,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             audioConfig.value = container.settings.audioConfig.first()
             playback.applyAudioConfig(audioConfig.value)
             themeSettings.value = container.settings.themeSettings.first()
+        }
+        viewModelScope.launch {
+            playback.appliedAudioConfig.collect { applied ->
+                if (applied != null && applied == audioConfig.value) {
+                    container.settings.setAudioConfig(applied)
+                }
+            }
+        }
+        viewModelScope.launch {
+            playbackState.map { it.currentMediaItem?.mediaId }
+                .distinctUntilChanged()
+                .collectLatest { mediaId ->
+                    val track = mediaId?.let(::trackForLyrics)
+                    currentLyricsTrack = track
+                    if (track == null) _lyricsState.value = LyricsUiState.NotFound
+                    else resolveLyrics(track)
+                }
         }
         refreshLibrary()
     }
@@ -218,7 +247,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             input.use { i -> output.use { o -> i.copyTo(o) } }
                             downloadsDao.updateStatus(rowId, DownloadStatus.COMPLETED.name, "")
                             launch(Dispatchers.Main) {
-                                Toast.makeText(app, "تم التنزيل بنجاح في: ${downloadFolderLocation.value}", Toast.LENGTH_LONG).show()
+                                Toast.makeText(app, app.getString(R.string.download_complete_location, downloadFolderLocation.value), Toast.LENGTH_LONG).show()
                             }
                             return@launch
                         }
@@ -233,19 +262,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val uri = Uri.parse(downloadUrl)
                 val request = DownloadManager.Request(uri).apply {
                     setTitle(resolved.title)
-                    setDescription("Downloading via Aura Studio")
+                    setDescription(app.getString(R.string.downloading_via_lyrune))
                     setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    setDestinationInExternalPublicDir(Environment.DIRECTORY_MUSIC, "AuraStudio/$fileName")
+                    setDestinationInExternalPublicDir(Environment.DIRECTORY_MUSIC, "Lyrune/$fileName")
                     setAllowedOverMetered(true)
                     setAllowedOverRoaming(true)
                 }
                 dm.enqueue(request)
 
                 launch(Dispatchers.Main) {
-                    Toast.makeText(app, "جارٍ التنزيل في: ${downloadFolderLocation.value}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(app, app.getString(R.string.downloading_location, downloadFolderLocation.value), Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
-                downloadsDao.updateStatus(rowId, DownloadStatus.FAILED.name, e.localizedMessage ?: "Failed")
+                downloadsDao.updateStatus(rowId, DownloadStatus.FAILED.name, e.localizedMessage ?: app.getString(R.string.download_failed))
             }
         }
     }
@@ -280,11 +309,85 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateTheme(settings: ThemeSettings) {
         themeSettings.value = settings
+        visualizerAnalyzer.setQuality(settings.visualQuality)
         themeSaveJob?.cancel()
         themeSaveJob = viewModelScope.launch {
             delay(120)
             container.settings.setTheme(settings)
         }
+    }
+
+    fun setVisualizerActive(active: Boolean) {
+        if (active) visualizerAnalyzer.start(themeSettings.value.visualQuality)
+        else visualizerAnalyzer.stop()
+    }
+
+    fun retryLyrics() {
+        currentLyricsTrack?.let { track -> viewModelScope.launch { resolveLyrics(track, forceRefresh = true) } }
+    }
+
+    fun updateLyricsOffset(offsetMs: Long) {
+        val track = currentLyricsTrack ?: return
+        val found = _lyricsState.value as? LyricsUiState.Found ?: return
+        val safeOffset = offsetMs.coerceIn(-5_000L, 5_000L)
+        _lyricsState.value = LyricsUiState.Found(found.lyrics.copy(offsetMs = safeOffset))
+        viewModelScope.launch { container.lyrics.updateOffset(track, safeOffset) }
+    }
+
+    fun importLyrics(lrcContent: String) {
+        val track = currentLyricsTrack ?: return
+        viewModelScope.launch {
+            runCatching { container.lyrics.importLrc(track, lrcContent) }
+                .onSuccess { _lyricsState.value = LyricsUiState.Found(container.lyrics.resolve(track)) }
+                .onFailure { _lyricsState.value = LyricsUiState.Error(it.localizedMessage ?: appContext.getString(R.string.lyrics_import_failed)) }
+        }
+    }
+
+    fun searchLyricsManually(title: String) {
+        val track = currentLyricsTrack ?: return
+        val cleanTitle = title.trim()
+        if (cleanTitle.isBlank()) return
+        viewModelScope.launch {
+            resolveLyrics(track.copy(title = cleanTitle, artist = ""), forceRefresh = true)
+        }
+    }
+
+    private suspend fun resolveLyrics(track: Track, forceRefresh: Boolean = false) {
+        _lyricsState.value = LyricsUiState.Loading
+        try {
+            val resolved = container.lyrics.resolve(track, forceRefresh)
+            _lyricsState.value = when {
+                resolved.lines.isNotEmpty() -> LyricsUiState.Found(resolved)
+                !container.lyrics.isNetworkAvailable() -> LyricsUiState.Offline
+                container.lyrics.lastLookupWasRateLimited -> LyricsUiState.Error(appContext.getString(R.string.lyrics_rate_limited))
+                container.lyrics.lastLookupError != null -> LyricsUiState.Error(container.lyrics.lastLookupError ?: appContext.getString(R.string.lyrics_search_failed))
+                else -> LyricsUiState.NotFound
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            _lyricsState.value = LyricsUiState.Error(error.localizedMessage ?: appContext.getString(R.string.lyrics_search_failed))
+        }
+    }
+
+    private fun trackForLyrics(mediaId: String): Track? {
+        tracks.value.firstOrNull { it.uri == mediaId }?.let { return it }
+        val item = playbackState.value.currentMediaItem ?: return null
+        return Track(
+            id = mediaId.hashCode().toLong(),
+            uri = mediaId,
+            title = item.mediaMetadata.title?.toString().orEmpty(),
+            artist = item.mediaMetadata.artist?.toString().orEmpty(),
+            album = item.mediaMetadata.albumTitle?.toString().orEmpty(),
+            albumId = null,
+            durationMs = playbackState.value.durationMs,
+            dateAddedSeconds = 0,
+            displayName = item.mediaMetadata.title?.toString().orEmpty(),
+            mimeType = null,
+            sizeBytes = 0,
+            trackNumber = null,
+            year = null,
+        )
     }
 
     fun createPlaylist(name: String) {
@@ -352,6 +455,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        visualizerAnalyzer.stop()
         playback.release()
         super.onCleared()
     }

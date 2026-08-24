@@ -57,6 +57,8 @@ import dev.auralis.studio.core.database.PlaylistEntity
 import dev.auralis.studio.core.model.Track
 import dev.auralis.studio.designsystem.LocalAuralisTokens
 import dev.auralis.studio.designsystem.LocalThemeSettings
+import dev.auralis.studio.designsystem.SurfaceTreatment
+import dev.auralis.studio.designsystem.isColorDark
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GlassCard — primary card surface with proper glass/frosted appearance
@@ -65,6 +67,8 @@ import dev.auralis.studio.designsystem.LocalThemeSettings
 fun GlassCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
+    surfaceAlpha: Float? = null,
+    elevation: Dp? = null,
     content: @Composable () -> Unit,
 ) {
     val tokens = LocalAuralisTokens.current
@@ -73,10 +77,13 @@ fun GlassCard(
     val accent = colors.primary
 
     // Build gradient overlay for glass depth
-    val containerColor = if (tokens.gradientOverlay) {
-        colors.surface.copy(alpha = tokens.surfaceAlpha)
-    } else {
-        colors.surface.copy(alpha = tokens.surfaceAlpha)
+    val requestedAlpha = surfaceAlpha ?: tokens.surfaceAlpha
+    val containerColor = when (tokens.surfaceTreatment) {
+        SurfaceTreatment.BORDERLESS -> Color.Transparent
+        SurfaceTreatment.MATERIAL_TONAL -> colors.surfaceVariant
+        SurfaceTreatment.CLASSIC_OUTLINE -> colors.surface
+        SurfaceTreatment.NEON_EDGE -> colors.surface.copy(alpha = requestedAlpha)
+        SurfaceTreatment.ARTWORK, SurfaceTreatment.GLASS -> colors.surface.copy(alpha = requestedAlpha)
     }
 
     // Border color — use accent tint for glass/neon, neutral for others
@@ -95,7 +102,7 @@ fun GlassCard(
             containerColor = containerColor,
             contentColor   = colors.onSurface,
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardElevation),
+        elevation = CardDefaults.cardElevation(defaultElevation = elevation ?: tokens.cardElevation),
         border    = if (tokens.cardBorderWidth > 0.dp) {
             BorderStroke(tokens.cardBorderWidth, borderColor)
         } else null,
@@ -105,11 +112,11 @@ fun GlassCard(
             Box(
                 Modifier.background(
                     Brush.verticalGradient(
-                        listOf(
-                            accent.copy(alpha = 0.03f),
-                            Color.Transparent,
-                            colors.secondary.copy(alpha = 0.02f),
-                        ),
+                        when (tokens.surfaceTreatment) {
+                            SurfaceTreatment.NEON_EDGE -> listOf(accent.copy(alpha = 0.13f), Color.Transparent, colors.secondary.copy(alpha = 0.08f))
+                            SurfaceTreatment.ARTWORK -> listOf(colors.secondary.copy(alpha = 0.12f), Color.Transparent, accent.copy(alpha = 0.08f))
+                            else -> listOf(Color.White.copy(alpha = 0.07f), Color.Transparent, accent.copy(alpha = 0.035f))
+                        },
                     ),
                 ),
             ) { content() }
@@ -143,13 +150,14 @@ fun GlassSurface(
 @Composable
 fun ArtworkContrastScrim(modifier: Modifier = Modifier) {
     val tokens = LocalAuralisTokens.current
+    val scrim = if (isColorDark(MaterialTheme.colorScheme.background)) Color.Black else Color.White
     Box(
         modifier = modifier.background(
             Brush.verticalGradient(
                 listOf(
-                    Color.Black.copy(alpha = tokens.glassContrastScrimAlpha * 0.4f),
-                    Color.Black.copy(alpha = tokens.glassContrastScrimAlpha * 0.8f),
-                    Color.Black.copy(alpha = tokens.glassContrastScrimAlpha),
+                    scrim.copy(alpha = tokens.glassContrastScrimAlpha * 0.4f),
+                    scrim.copy(alpha = tokens.glassContrastScrimAlpha * 0.8f),
+                    scrim.copy(alpha = tokens.glassContrastScrimAlpha),
                 ),
             ),
         ),
@@ -162,7 +170,7 @@ fun ArtworkContrastScrim(modifier: Modifier = Modifier) {
 @Composable
 fun TrackArtwork(track: Track?, modifier: Modifier = Modifier) {
     val tokens = LocalAuralisTokens.current
-    val shape  = RoundedCornerShape(tokens.cardCorner.dp)
+    val shape  = RoundedCornerShape(tokens.artworkCorner.dp)
     if (track?.artworkUri != null) {
         AsyncImage(
             model           = track.artworkUri,

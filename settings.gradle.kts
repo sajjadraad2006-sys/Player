@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AuralisStudio"
+rootProject.name = "Lyrune"
 include(":app")
