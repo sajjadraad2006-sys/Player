@@ -134,6 +134,11 @@ fun AudioQuickSheet(
                 value       = config.speed,
                 onValueChange = { onConfigChange(config.copy(speed = it)) },
                 valueRange  = 0.25f..2.5f,
+                colors      = androidx.compose.material3.SliderDefaults.colors(
+                    thumbColor = colors.primary,
+                    activeTrackColor = colors.primary,
+                    inactiveTrackColor = colors.surfaceVariant,
+                ),
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { spd ->
@@ -161,7 +166,16 @@ fun AudioQuickSheet(
             AnimatedVisibility(visible = config.eightDEnabled, enter = expandVertically(), exit = shrinkVertically()) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Strength · ${(config.eightDStrength * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, color = colors.onSurface.copy(0.7f))
-                    Slider(config.eightDStrength, { onConfigChange(config.copy(eightDStrength = it)) }, valueRange = 0.1f..1f)
+                    Slider(
+                        config.eightDStrength,
+                        { onConfigChange(config.copy(eightDStrength = it)) },
+                        valueRange = 0.1f..1f,
+                        colors = androidx.compose.material3.SliderDefaults.colors(
+                            thumbColor = colors.primary,
+                            activeTrackColor = colors.primary,
+                            inactiveTrackColor = colors.surfaceVariant,
+                        ),
+                    )
                 }
             }
 
@@ -179,7 +193,16 @@ fun AudioQuickSheet(
             AnimatedVisibility(visible = config.reverbMix > 0.01f, enter = expandVertically(), exit = shrinkVertically()) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Wet mix · ${(config.reverbMix * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, color = colors.onSurface.copy(0.7f))
-                    Slider(config.reverbMix, { onConfigChange(config.copy(reverbMix = it)) }, valueRange = 0f..0.6f)
+                    Slider(
+                        config.reverbMix,
+                        { onConfigChange(config.copy(reverbMix = it)) },
+                        valueRange = 0f..0.6f,
+                        colors = androidx.compose.material3.SliderDefaults.colors(
+                            thumbColor = colors.primary,
+                            activeTrackColor = colors.primary,
+                            inactiveTrackColor = colors.surfaceVariant,
+                        ),
+                    )
                 }
             }
 
@@ -223,6 +246,9 @@ private fun modeLabel(mode: PitchTempoMode): String = when (mode) {
 // ── Quick presets ─────────────────────────────────────────────────────────────
 private enum class AudioQuickPreset(val label: String) {
     ORIGINAL("Original"),
+    VOCAL_ONLY("🎤 Vocal Only"),
+    KARAOKE("🎹 Karaoke"),
+    BASS_ONLY("🎸 Bass Only"),
     SLOWED("Slowed"),
     SLOWED_REVERB("Slowed+Reverb"),
     NIGHTCORE("Nightcore"),
@@ -230,20 +256,26 @@ private enum class AudioQuickPreset(val label: String) {
     DEEP_BASS("Deep Bass");
 
     fun apply(base: AudioConfig): AudioConfig = when (this) {
-        ORIGINAL     -> AudioConfig(mode = base.mode)
-        SLOWED       -> AudioConfig(speed = 0.8f, pitchSemitones = -2f, mode = PitchTempoMode.INDEPENDENT)
+        ORIGINAL      -> AudioConfig(mode = base.mode)
+        VOCAL_ONLY    -> base.withStemMode(dev.auralis.studio.core.model.StemIsolationMode.VOCAL_SOLO)
+        KARAOKE       -> base.withStemMode(dev.auralis.studio.core.model.StemIsolationMode.INSTRUMENTAL)
+        BASS_ONLY     -> base.withStemMode(dev.auralis.studio.core.model.StemIsolationMode.BASS_SOLO)
+        SLOWED        -> AudioConfig(speed = 0.8f, pitchSemitones = -2f, mode = PitchTempoMode.INDEPENDENT)
         SLOWED_REVERB -> AudioConfig(speed = 0.8f, pitchSemitones = -2f, reverbMix = 0.30f, mode = PitchTempoMode.INDEPENDENT)
-        NIGHTCORE    -> AudioConfig(speed = 1.25f, pitchSemitones = 3f, mode = PitchTempoMode.INDEPENDENT)
-        EIGHT_D      -> AudioConfig(eightDEnabled = true, eightDStrength = 0.85f, mode = base.mode)
-        DEEP_BASS    -> AudioConfig(eqBandsDb = AudioConfig().eqBandsDb.toMutableList().also { it[0] = 6f; it[1] = 4f }.toList(), mode = base.mode)
+        NIGHTCORE     -> AudioConfig(speed = 1.25f, pitchSemitones = 3f, mode = PitchTempoMode.INDEPENDENT)
+        EIGHT_D       -> AudioConfig(eightDEnabled = true, eightDStrength = 0.85f, mode = base.mode)
+        DEEP_BASS     -> AudioConfig(eqBandsDb = AudioConfig().eqBandsDb.toMutableList().also { it[0] = 6f; it[1] = 4f }.toList(), mode = base.mode)
     }
 
     fun matches(c: AudioConfig): Boolean = when (this) {
-        ORIGINAL     -> c.speed == 1f && c.pitchSemitones == 0f && !c.eightDEnabled && c.reverbMix < 0.01f
-        SLOWED       -> kotlin.math.abs(c.speed - 0.8f) < 0.01f && kotlin.math.abs(c.pitchSemitones - (-2f)) < 0.1f
+        ORIGINAL      -> c.speed == 1f && c.pitchSemitones == 0f && !c.eightDEnabled && c.reverbMix < 0.01f && !c.stemIsolationEnabled
+        VOCAL_ONLY    -> c.stemIsolationEnabled && c.stemMode == dev.auralis.studio.core.model.StemIsolationMode.VOCAL_SOLO
+        KARAOKE       -> c.stemIsolationEnabled && c.stemMode == dev.auralis.studio.core.model.StemIsolationMode.INSTRUMENTAL
+        BASS_ONLY     -> c.stemIsolationEnabled && c.stemMode == dev.auralis.studio.core.model.StemIsolationMode.BASS_SOLO
+        SLOWED        -> kotlin.math.abs(c.speed - 0.8f) < 0.01f && kotlin.math.abs(c.pitchSemitones - (-2f)) < 0.1f
         SLOWED_REVERB -> kotlin.math.abs(c.speed - 0.8f) < 0.01f && c.reverbMix > 0.01f
-        NIGHTCORE    -> kotlin.math.abs(c.speed - 1.25f) < 0.01f && c.pitchSemitones > 0
-        EIGHT_D      -> c.eightDEnabled && kotlin.math.abs(c.speed - 1f) < 0.01f
-        DEEP_BASS    -> false // complex match not needed
+        NIGHTCORE     -> kotlin.math.abs(c.speed - 1.25f) < 0.01f && c.pitchSemitones > 0
+        EIGHT_D       -> c.eightDEnabled && kotlin.math.abs(c.speed - 1f) < 0.01f
+        DEEP_BASS     -> false
     }
 }

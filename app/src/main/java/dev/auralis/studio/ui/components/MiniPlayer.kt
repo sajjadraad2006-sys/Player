@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -35,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.auralis.studio.R
@@ -49,23 +51,31 @@ fun MiniPlayer(
     onOpen: () -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
+    onPrevious: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalAuralisTokens.current
     val colors = MaterialTheme.colorScheme
-    val shape  = RoundedCornerShape(tokens.miniPlayerAlpha.dp.coerceAtLeast(12.dp))
 
     GlassCard(modifier = modifier.fillMaxWidth()) {
         Column {
+            // Playback progress bar at top
+            LinearProgressIndicator(
+                progress        = { progress.coerceIn(0f, 1f) },
+                modifier        = Modifier.fillMaxWidth().height(2.5.dp),
+                color           = colors.primary,
+                trackColor      = colors.outline.copy(alpha = 0.15f),
+                strokeCap       = StrokeCap.Round,
+            )
             // Track info row
             Row(
                 Modifier
                     .fillMaxWidth()
                     .clickable(onClick = onOpen)
-                    .padding(start = 8.dp, top = 8.dp, bottom = 4.dp, end = 0.dp),
+                    .padding(start = 10.dp, top = 8.dp, bottom = 8.dp, end = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TrackArtwork(track, Modifier.size(48.dp))
+                TrackArtwork(track, Modifier.size(46.dp))
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -73,6 +83,7 @@ fun MiniPlayer(
                         maxLines   = 1,
                         overflow   = TextOverflow.Ellipsis,
                         style      = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
                         color      = colors.onSurface,
                     )
                     Text(
@@ -83,6 +94,16 @@ fun MiniPlayer(
                         color      = colors.onSurfaceVariant,
                     )
                 }
+                // Previous button
+                IconButton(onClick = onPrevious, modifier = Modifier.size(36.dp)) {
+                    Icon(
+                        Icons.Default.SkipPrevious,
+                        contentDescription = stringResource(R.string.previous),
+                        tint = colors.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                // Play/Pause
                 AnimatedContent(
                     targetState = isPlaying,
                     transitionSpec = {
@@ -96,29 +117,20 @@ fun MiniPlayer(
                             if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = stringResource(if (playing) R.string.pause else R.string.play),
                             tint = colors.primary,
+                            modifier = Modifier.size(28.dp),
                         )
                     }
                 }
-                IconButton(onClick = onNext) {
+                // Next button
+                IconButton(onClick = onNext, modifier = Modifier.size(36.dp)) {
                     Icon(
                         Icons.Default.SkipNext,
                         contentDescription = stringResource(R.string.next),
                         tint = colors.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
                     )
                 }
             }
-            // Playback progress bar
-            LinearProgressIndicator(
-                progress        = { progress.coerceIn(0f, 1f) },
-                modifier        = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp)
-                    .height(3.dp),
-                color           = colors.primary,
-                trackColor      = colors.outline.copy(alpha = 0.25f),
-                strokeCap       = StrokeCap.Round,
-            )
-            Spacer(Modifier.height(8.dp))
         }
     }
 }

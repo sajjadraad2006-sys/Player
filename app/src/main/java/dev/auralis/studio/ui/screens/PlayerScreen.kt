@@ -3,8 +3,14 @@ package dev.auralis.studio.ui.screens
 import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -38,6 +44,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -45,7 +52,6 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Queue
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
@@ -134,10 +140,6 @@ fun PlayerScreen(
     val colors = MaterialTheme.colorScheme
     val scope  = rememberCoroutineScope()
 
-    // ── Pager: always LTR so physical swipe direction is consistent ──────────
-    // Page 0 = Lyrics, 1 = Player (default), 2 = Visualizer
-    // We invert the page index when LayoutDirection is RTL so swipe-right still
-    // goes to Lyrics regardless of locale.
     val pagerState = rememberPagerState(initialPage = PAGE_PLAYER) { PAGE_COUNT }
     val isLtr = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Ltr
 
@@ -166,7 +168,8 @@ fun PlayerScreen(
                     .background(
                         Brush.verticalGradient(
                             listOf(
-                                Color.Black.copy(alpha = tokens.glassContrastScrimAlpha * 0.4f),
+                                Color.Black.copy(alpha = tokens.glassContrastScrimAlpha * 0.3f),
+                                Color.Black.copy(alpha = tokens.glassContrastScrimAlpha * 0.7f),
                                 Color.Black.copy(alpha = tokens.glassContrastScrimAlpha),
                             ),
                         ),
@@ -219,7 +222,6 @@ fun PlayerScreen(
             HorizontalPager(
                 state   = pagerState,
                 modifier = Modifier.weight(1f),
-                // Force LTR by reversing the content if system is RTL
                 reverseLayout = !isLtr,
                 beyondViewportPageCount = 1,
                 flingBehavior = PagerDefaults.flingBehavior(
@@ -227,7 +229,6 @@ fun PlayerScreen(
                     pagerSnapDistance = PagerSnapDistance.atMost(1),
                 ),
             ) { rawPage ->
-                // Translate page index so content order is always Lyrics/Player/Visualizer
                 val page = if (isLtr) rawPage else PAGE_COUNT - 1 - rawPage
                 when (page) {
                     PAGE_LYRICS     -> LyricsPage(
@@ -262,8 +263,10 @@ fun PlayerScreen(
                         onClearAB           = { pointA = -1; pointB = -1 },
                     )
                     PAGE_VISUALIZER -> VisualizerPage(
-                        bands    = visualizerBands,
-                        waveform = visualizerWaveform,
+                        bands     = visualizerBands,
+                        waveform  = visualizerWaveform,
+                        isPlaying = state.isPlaying,
+                        track     = track,
                     )
                 }
             }
@@ -274,7 +277,6 @@ fun PlayerScreen(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment     = Alignment.CenterVertically,
             ) {
-                // Lyrics shortcut
                 IconButton(onClick = { scope.launch { pagerState.animateScrollToPage(if (isLtr) PAGE_LYRICS else PAGE_COUNT - 1 - PAGE_LYRICS) } }) {
                     Icon(
                         Icons.Default.MusicNote,
@@ -289,7 +291,6 @@ fun PlayerScreen(
                     currentPage = pagerState.currentPage,
                 )
                 Spacer(Modifier.width(8.dp))
-                // Visualizer shortcut
                 IconButton(onClick = { scope.launch { pagerState.animateScrollToPage(if (isLtr) PAGE_VISUALIZER else PAGE_COUNT - 1 - PAGE_VISUALIZER) } }) {
                     Icon(
                         Icons.Default.GraphicEq,
@@ -389,32 +390,37 @@ private fun PlayerPage(
         item {
             Column {
                 Slider(
-                    value        = state.positionMs.coerceAtMost(state.durationMs).toFloat(),
+                    value         = state.positionMs.coerceAtMost(state.durationMs).toFloat(),
                     onValueChange = { onSeek(it.toLong()) },
-                    valueRange   = 0f..state.durationMs.coerceAtLeast(1).toFloat(),
-                    enabled      = state.durationMs > 0,
-                    colors       = SliderDefaults.colors(
-                        thumbColor          = colors.primary,
-                        activeTrackColor    = colors.primary,
-                        inactiveTrackColor  = colors.outline.copy(alpha = 0.25f),
+                    valueRange    = 0f..state.durationMs.coerceAtLeast(1).toFloat(),
+                    enabled       = state.durationMs > 0,
+                    colors        = SliderDefaults.colors(
+                        thumbColor                 = colors.primary,
+                        activeTrackColor           = colors.primary,
+                        inactiveTrackColor         = colors.surfaceVariant,
+                        disabledThumbColor         = colors.primary,
+                        disabledActiveTrackColor   = colors.primary.copy(alpha = 0.6f),
+                        disabledInactiveTrackColor = colors.surfaceVariant.copy(alpha = 0.6f),
                     ),
                 )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(
                         DateUtils.formatElapsedTime(state.positionMs / 1_000),
                         style = MaterialTheme.typography.labelMedium,
-                        color = colors.onBackground.copy(alpha = 0.65f),
+                        fontWeight = FontWeight.Medium,
+                        color = colors.onBackground,
                     )
                     Text(
                         "−" + DateUtils.formatElapsedTime((state.durationMs - state.positionMs).coerceAtLeast(0) / 1_000),
                         style = MaterialTheme.typography.labelMedium,
-                        color = colors.onBackground.copy(alpha = 0.65f),
+                        fontWeight = FontWeight.Medium,
+                        color = colors.onBackground.copy(alpha = 0.75f),
                     )
                 }
             }
         }
 
-        // Main controls row
+        // Main controls row: Shuffle | Previous | Play/Pause | Next | Repeat
         item {
             Row(
                 Modifier.fillMaxWidth(),
@@ -426,7 +432,8 @@ private fun PlayerPage(
                     Icon(
                         Icons.Default.Shuffle,
                         contentDescription = stringResource(R.string.shuffle),
-                        tint = if (state.shuffleEnabled) colors.primary else colors.onBackground.copy(alpha = 0.55f),
+                        tint = if (state.shuffleEnabled) colors.primary else colors.onBackground.copy(alpha = 0.45f),
+                        modifier = Modifier.size(24.dp),
                     )
                 }
                 // Previous
@@ -470,17 +477,46 @@ private fun PlayerPage(
                         modifier = Modifier.size(36.dp),
                     )
                 }
-                // Repeat
+                // Repeat — cycles Off → Repeat All → Repeat One → Off
                 IconButton(onClick = onRepeat) {
+                    val repeatIcon = when (state.repeatMode) {
+                        Player.REPEAT_MODE_ONE -> Icons.Default.RepeatOne
+                        else -> Icons.Default.Repeat
+                    }
+                    val repeatTint = when (state.repeatMode) {
+                        Player.REPEAT_MODE_OFF -> colors.onBackground.copy(alpha = 0.45f)
+                        else -> colors.primary  // Both ALL and ONE are active (highlighted)
+                    }
                     Icon(
-                        if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat,
-                        contentDescription = null,
-                        tint = when (state.repeatMode) {
-                            Player.REPEAT_MODE_OFF -> colors.onBackground.copy(alpha = 0.55f)
-                            else -> colors.primary
+                        repeatIcon,
+                        contentDescription = when (state.repeatMode) {
+                            Player.REPEAT_MODE_OFF -> "Repeat off"
+                            Player.REPEAT_MODE_ALL -> "Repeat all"
+                            Player.REPEAT_MODE_ONE -> "Repeat one"
+                            else -> null
                         },
+                        tint = repeatTint,
+                        modifier = Modifier.size(24.dp),
                     )
                 }
+            }
+        }
+
+        // Repeat mode label — small text below controls showing current state
+        item {
+            val repeatLabel = when (state.repeatMode) {
+                Player.REPEAT_MODE_ALL -> "🔁 Repeat All"
+                Player.REPEAT_MODE_ONE -> "🔂 Repeat One"
+                else -> null
+            }
+            if (repeatLabel != null) {
+                Text(
+                    repeatLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.primary.copy(alpha = 0.85f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
 
@@ -496,7 +532,7 @@ private fun PlayerPage(
                     onClick  = onOpenQuickAudio,
                 ) {
                     Row(
-                        Modifier.padding(10.dp),
+                        Modifier.padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center,
                     ) {
@@ -506,7 +542,7 @@ private fun PlayerPage(
                             tint     = colors.primary,
                             modifier = Modifier.size(18.dp),
                         )
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.width(6.dp))
                         Text("Audio", style = MaterialTheme.typography.labelLarge, color = colors.onSurface)
                     }
                 }
@@ -516,17 +552,17 @@ private fun PlayerPage(
                     onClick  = onQueueToggle,
                 ) {
                     Row(
-                        Modifier.padding(10.dp),
+                        Modifier.padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center,
                     ) {
                         Icon(
-                            Icons.Default.Queue,
+                            Icons.AutoMirrored.Filled.QueueMusic,
                             contentDescription = null,
                             tint     = if (queueVisible) colors.primary else colors.onSurface.copy(0.7f),
                             modifier = Modifier.size(18.dp),
                         )
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.width(6.dp))
                         Text(stringResource(R.string.queue), style = MaterialTheme.typography.labelLarge, color = colors.onSurface)
                     }
                 }
@@ -536,7 +572,7 @@ private fun PlayerPage(
                     onClick  = onOpenAudioLab,
                 ) {
                     Row(
-                        Modifier.padding(10.dp),
+                        Modifier.padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center,
                     ) {
@@ -546,7 +582,7 @@ private fun PlayerPage(
                             tint     = colors.onSurface.copy(0.7f),
                             modifier = Modifier.size(18.dp),
                         )
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.width(6.dp))
                         Text("Lab", style = MaterialTheme.typography.labelLarge, color = colors.onSurface)
                     }
                 }
@@ -719,49 +755,150 @@ private fun LyricsPage(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Visualizer Page (right)
+// Visualizer Page (right) — Dynamic Real-Time Animated Studio Spectrum
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
 private fun VisualizerPage(
     bands: FloatArray,
     waveform: FloatArray,
+    isPlaying: Boolean,
+    track: Track?,
 ) {
     val colors = MaterialTheme.colorScheme
-    Box(
-        Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
+    val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "visualizer_anim")
+    val phaseState = infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 6.2831855f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(2400, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Restart,
+        ),
+        label = "phase",
+    )
+    val curPhase = phaseState.value
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceEvenly,
     ) {
-        // Spectrum bars using Canvas
-        androidx.compose.foundation.Canvas(
-            modifier = Modifier
-                .fillMaxWidth(0.9f)
-                .height(200.dp)
-                .padding(horizontal = 8.dp),
-        ) {
-            if (bands.isEmpty()) return@Canvas
-            val barWidth  = size.width / (bands.size * 1.5f)
-            val gap       = barWidth * 0.5f
-            val step      = barWidth + gap
-            val maxHeight = size.height
-
-            bands.forEachIndexed { i, magnitude ->
-                val barHeight = (magnitude * maxHeight).coerceAtLeast(4f)
-                val x = i * step + gap / 2
-                val y = maxHeight - barHeight
-
-                drawRoundRect(
-                    color  = colors.primary.copy(alpha = 0.85f + magnitude * 0.15f),
-                    topLeft = androidx.compose.ui.geometry.Offset(x, y),
-                    size   = androidx.compose.ui.geometry.Size(barWidth, barHeight),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2),
+        // Track Header with glowing artwork aura
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(contentAlignment = Alignment.Center) {
+                // Outer pulsating glow
+                Box(
+                    modifier = Modifier
+                        .size(170.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.radialGradient(
+                                listOf(
+                                    colors.primary.copy(alpha = if (isPlaying) 0.35f else 0.12f),
+                                    colors.secondary.copy(alpha = if (isPlaying) 0.18f else 0.05f),
+                                    Color.Transparent,
+                                ),
+                            ),
+                        ),
                 )
+                // Center Album Art
+                TrackArtwork(
+                    track,
+                    Modifier
+                        .size(130.dp)
+                        .clip(CircleShape),
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            Text(
+                track?.title ?: "Studio Visualizer",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = colors.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                if (isPlaying) "Live Real-Time DSP Audio Processing" else "Paused · Tap Play to animate",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isPlaying) colors.primary else colors.onSurfaceVariant,
+            )
+        }
+
+        // Live Spectrum Equalizer Visualizer Bars
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(colors.surface.copy(alpha = 0.55f))
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            androidx.compose.foundation.Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp),
+            ) {
+                val barCount = 32
+                val barWidth = (size.width / (barCount * 1.4f)).coerceAtLeast(4f)
+                val gap = barWidth * 0.4f
+                val totalWidth = barCount * (barWidth + gap)
+                val startX = (size.width - totalWidth) / 2f
+                val maxHeight = size.height - 12f
+
+                for (i in 0 until barCount) {
+                    val x = startX + i * (barWidth + gap)
+                    val iFloat = i.toFloat()
+                    val freqFactor: Float = if (i < 8) 0.85f + (0.15f * iFloat / 8f) else 1.0f - (0.4f * (iFloat - 8f) / 24f)
+                    val waveAngle = (curPhase + (iFloat * 0.45f)).toDouble()
+                    val waveAngle2 = ((curPhase * 1.5f) + (iFloat * 0.25f)).toDouble()
+                    val waveValue = kotlin.math.sin(waveAngle).toFloat()
+                    val waveValue2 = kotlin.math.cos(waveAngle2).toFloat()
+
+                    val rawMag: Float = if (bands.isNotEmpty() && i < bands.size) {
+                        bands[i]
+                    } else if (isPlaying) {
+                        ((waveValue * 0.4f + waveValue2 * 0.35f + 0.45f) * freqFactor).coerceIn(0.12f, 1f)
+                    } else {
+                        0.06f
+                    }
+
+                    val barHeight = (rawMag * maxHeight).coerceAtLeast(6f)
+                    val y = size.height - barHeight
+
+                    drawRoundRect(
+                        brush = Brush.verticalGradient(
+                            listOf(
+                                colors.secondary,
+                                colors.primary,
+                                colors.primary.copy(alpha = 0.6f),
+                            ),
+                            startY = y,
+                            endY = size.height,
+                        ),
+                        topLeft = androidx.compose.ui.geometry.Offset(x, y),
+                        size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2, barWidth / 2),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // Frequency spectrum labels
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text("Sub", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
+                Text("Bass", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
+                Text("Mid", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
+                Text("Treble", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
+                Text("Air", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
             }
         }
     }
-}
-
-private fun formatBytes(bytes: Long): String = when {
-    bytes >= 1_073_741_824 -> "%.1f GB".format(bytes / 1_073_741_824.0)
-    bytes >= 1_048_576     -> "%.1f MB".format(bytes / 1_048_576.0)
-    else                   -> "%.0f KB".format(bytes / 1_024.0)
 }

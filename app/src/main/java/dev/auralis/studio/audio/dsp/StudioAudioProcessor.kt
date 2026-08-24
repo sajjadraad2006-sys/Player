@@ -19,15 +19,9 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * Low-allocation PCM processing used only for local playback. Order:
- * preamp → graphic EQ/tone → stereo matrix → smooth 8D orbit → reverb → safe limiter.
- * Media3's Sonic processor performs pitch/time-stretch before this processor.
- *
- * Visualizer tap: After the output sample is ready, we copy a downsampled mono
- * snapshot into [visualizerRingBuffer] using lock-free atomic writes.
- * The ring buffer is pre-allocated and never causes GC in the audio thread.
- * The visualizer reads it on a background thread — no synchronization needed
- * because we use a simple power-of-two ring with atomic indices.
+ * Low-allocation PCM processing with Real-Time Audio Stem Separation / Vocal & Bass Isolation.
+ * Order:
+ * Preamp → Stem Isolator (Vocal / Melody / Bass) → Graphic EQ → Stereo matrix → 8D orbit → Reverb → Safe limiter.
  */
 @UnstableApi
 class StudioAudioProcessor : BaseAudioProcessor() {
@@ -45,11 +39,13 @@ class StudioAudioProcessor : BaseAudioProcessor() {
     private var rightDelay = FloatArray(1)
     private var delayIndex = 0
 
+    // Stem isolation dedicated filters
+    private val leftBassFilter = Biquad()
+    private val rightBassFilter = Biquad()
+    private val vocalBandFilter = Biquad()
+
     // ── Visualizer tap ──────────────────────────────────────────────────────
-    // 4096-sample ring buffer for the visualizer (mono, -1..1 float).
-    // Power-of-two size for efficient masking. Written in queueInput() at ~1:8
-    // downsampled rate to keep write overhead tiny.
-    val visualizerRingBuffer  = FloatArray(4096)
+    val visualizerRingBuffer = FloatArray(4096)
     @Volatile var visualizerWritePos = 0
     private var tapDecimator = 0
 
@@ -65,7 +61,14 @@ class StudioAudioProcessor : BaseAudioProcessor() {
         channelCount = inputAudioFormat.channelCount
         rebuildDelays()
         rebuildFilters(requestedConfig.get(), force = true)
+        initStemFilters()
         return inputAudioFormat
+    }
+
+    private fun initStemFilters() {
+        leftBassFilter.setLowPass(sampleRate, 220f, 0.7071f)
+        rightBassFilter.setLowPass(sampleRate, 220f, 0.7071f)
+        vocalBandFilter.setBandPass(sampleRate, 1300f, 0.65f)
     }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
@@ -78,7 +81,7 @@ class StudioAudioProcessor : BaseAudioProcessor() {
         rebuildFilters(config)
 
         if (!config.dspEnabled) {
-            // Even when DSP is bypassed, still feed the visualizer tap cheaply
+            // Even when DSP is bypassed, feed visualizer cheaply
             val savedPos = inputBuffer.position()
             val savedLimit = inputBuffer.limit()
             tapBypass(inputBuffer)
@@ -97,6 +100,33 @@ class StudioAudioProcessor : BaseAudioProcessor() {
             val gain = 10f.pow(config.preampDb / 20f)
             left *= gain
             right *= gain
+
+            // ── Real-Time Audio Stem Separation & Vocal/Melody/Bass Isolator ──
+            if (config.stemIsolationEnabled) {
+                val bassL = leftBassFilter.process(left)
+                val bassR = rightBassFilter.process(right)
+                val nonBassL = left - bassL
+                val nonBassR = right - bassR
+
+                val mid = (nonBassL + nonBassR) * 0.5f
+                val sideL = nonBassL - mid
+                val sideR = nonBassR - mid
+
+                val vocal = vocalBandFilter.process(mid)
+                val otherMid = mid - vocal
+
+                left = (bassL * config.stemBassVolume) +
+                    (vocal * config.stemVocalVolume) +
+                    (sideL * config.stemMelodyVolume) +
+                    (otherMid * config.stemMelodyVolume)
+
+                right = (bassR * config.stemBassVolume) +
+                    (vocal * config.stemVocalVolume) +
+                    (sideR * config.stemMelodyVolume) +
+                    (otherMid * config.stemMelodyVolume)
+            }
+
+            // Equalizer
             if (config.equalizerEnabled || config.bassDb != 0f || config.trebleDb != 0f) {
                 leftFilters.forEach { left = it.process(left) }
                 rightFilters.forEach { right = it.process(right) }
@@ -106,16 +136,19 @@ class StudioAudioProcessor : BaseAudioProcessor() {
             left = channelPair.first
             right = channelPair.second
 
+            // Stereo Width
             val mid = (left + right) * 0.5f
             val side = (left - right) * 0.5f * config.stereoWidth
             left = mid + side
             right = mid - side
 
+            // Balance
             val balanceLeft = if (config.balance > 0f) 1f - config.balance else 1f
             val balanceRight = if (config.balance < 0f) 1f + config.balance else 1f
             left *= balanceLeft
             right *= balanceRight
 
+            // 8D Audio
             if (config.eightDEnabled && channelCount > 1) {
                 val direction = if (config.orbitDirection == OrbitDirection.COUNTER_CLOCKWISE) -1.0 else 1.0
                 phase += direction * 2.0 * PI * config.eightDRateHz / sampleRate
@@ -132,6 +165,7 @@ class StudioAudioProcessor : BaseAudioProcessor() {
                 smoothedPan *= 0.995f
             }
 
+            // Reverb
             smoothedWet += (config.reverbMix - smoothedWet) * 0.0008f
             if (smoothedWet > 0.0001f) {
                 val delayedLeft = leftDelay[delayIndex]
@@ -143,6 +177,7 @@ class StudioAudioProcessor : BaseAudioProcessor() {
                 delayIndex = (delayIndex + 1) % leftDelay.size
             }
 
+            // Limiter
             if (config.limiterEnabled) {
                 left = softLimit(left)
                 right = softLimit(right)
@@ -152,7 +187,7 @@ class StudioAudioProcessor : BaseAudioProcessor() {
             if (channelCount > 1) output.putShort((right.coerceIn(-1f, 1f) * 32767f).toInt().toShort())
             repeat((channelCount - 2).coerceAtLeast(0)) { output.putShort(inputBuffer.short) }
 
-            // Visualizer tap — write every 8th frame to keep callback overhead minimal
+            // Visualizer tap
             tapDecimator++
             if (tapDecimator >= 8) {
                 tapDecimator = 0
@@ -165,7 +200,6 @@ class StudioAudioProcessor : BaseAudioProcessor() {
         output.flip()
     }
 
-    /** Tap bypass path — cheap downsampled mono read without DSP. */
     private fun tapBypass(buf: ByteBuffer) {
         val frameBytes = channelCount * 2
         var decimator = tapDecimator
@@ -192,6 +226,9 @@ class StudioAudioProcessor : BaseAudioProcessor() {
         smoothedWet = 0f
         leftFilters.forEach(Biquad::reset)
         rightFilters.forEach(Biquad::reset)
+        leftBassFilter.reset()
+        rightBassFilter.reset()
+        vocalBandFilter.reset()
         leftDelay.fill(0f)
         rightDelay.fill(0f)
         delayIndex = 0

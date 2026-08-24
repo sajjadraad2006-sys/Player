@@ -1,6 +1,9 @@
 package dev.auralis.studio.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -8,17 +11,32 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ElevatedFilterChip
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.auralis.studio.R
 import dev.auralis.studio.core.database.PlaylistEntity
@@ -50,28 +68,108 @@ fun HomeScreen(
 ) {
     val recent = historyUris.mapNotNull { uri -> tracks.firstOrNull { it.uri == uri } }.take(8)
     val recentlyAdded = tracks.sortedByDescending(Track::dateAddedSeconds).take(8)
+    val colors = MaterialTheme.colorScheme
+
     LazyColumn(
         modifier = modifier,
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        // App Title / Welcome
         item {
-            Text(stringResource(R.string.welcome_title), style = MaterialTheme.typography.headlineLarge)
-            Text(
-                stringResource(R.string.welcome_body),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f),
-            )
+            Column {
+                Text(
+                    stringResource(R.string.welcome_title),
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.onBackground,
+                )
+                Text(
+                    stringResource(R.string.welcome_body),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = colors.onBackground.copy(alpha = 0.70f),
+                )
+            }
         }
+
+        // Quick Presets Carousel
         item {
-            SectionHeader(stringResource(R.string.quick_presets))
-            Spacer(Modifier.height(8.dp))
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(BuiltInPresets.all) { preset ->
-                    TextButton(onClick = { onPreset(preset) }) { Text(presetLabel(preset.name)) }
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Tune, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        stringResource(R.string.quick_presets),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.onBackground,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(BuiltInPresets.all) { preset ->
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(colors.surfaceVariant.copy(alpha = 0.85f))
+                                .clickable { onPreset(preset) }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = presetLabel(preset.name),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.onSurface,
+                            )
+                        }
+                    }
                 }
             }
         }
+
+        // Action Bar when music is present: Play All / Shuffle
+        if (tracks.isNotEmpty()) {
+            item {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Button(
+                        onClick = { onPlay(tracks.first(), tracks) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colors.primary,
+                            contentColor = colors.onPrimary,
+                        ),
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Play All (${tracks.size})", fontWeight = FontWeight.Bold)
+                    }
+
+                    FilledTonalButton(
+                        onClick = {
+                            val shuffled = tracks.shuffled()
+                            onPlay(shuffled.first(), shuffled)
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = colors.surfaceVariant,
+                            contentColor = colors.onSurface,
+                        ),
+                    ) {
+                        Icon(Icons.Default.Shuffle, contentDescription = null, tint = colors.primary)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Shuffle All", fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+
+        // Empty State
         if (tracks.isEmpty()) {
             item {
                 GlassCard(Modifier.fillMaxWidth()) {
@@ -79,33 +177,73 @@ fun HomeScreen(
                         Text(
                             if (isScanning) stringResource(R.string.scanning) else stringResource(R.string.no_music_found),
                             style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.onSurface,
                         )
-                        Text(stringResource(R.string.no_music_body), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                        Row {
-                            Button(onClick = onRefresh, enabled = !isScanning) { Text(stringResource(R.string.scan_again)) }
-                            Spacer(Modifier.width(8.dp))
-                            TextButton(onClick = onChooseFolder) { Text(stringResource(R.string.choose_folder)) }
+                        Text(
+                            stringResource(R.string.no_music_body),
+                            color = colors.onSurface.copy(alpha = 0.7f),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = onRefresh, enabled = !isScanning) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(stringResource(R.string.scan_again))
+                            }
+                            TextButton(onClick = onChooseFolder) {
+                                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(stringResource(R.string.choose_folder))
+                            }
                         }
                     }
                 }
             }
         }
+
+        // Continue Listening Card
         currentTrack?.let { track ->
             item {
                 SectionHeader(stringResource(R.string.continue_listening))
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
                 GlassCard(onClick = { onPlay(track, tracks) }) {
-                    Row(Modifier.padding(14.dp)) {
-                        TrackArtwork(track, Modifier.width(82.dp).height(82.dp))
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TrackArtwork(track, Modifier.size(72.dp))
                         Spacer(Modifier.width(14.dp))
-                        Column {
-                            Text(track.title, style = MaterialTheme.typography.titleLarge, maxLines = 2)
-                            Text(track.artist, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                track.title,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                color = colors.onSurface,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                track.artist,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurface.copy(alpha = 0.65f),
+                                maxLines = 1,
+                            )
                         }
+                        Icon(
+                            Icons.Default.PlayArrow,
+                            contentDescription = "Play",
+                            tint = colors.primary,
+                            modifier = Modifier.size(32.dp),
+                        )
                     }
                 }
             }
         }
+
+        // Recently Played
         if (recent.isNotEmpty()) {
             item { SectionHeader(stringResource(R.string.recently_played)) }
             items(recent, key = { "recent:${it.uri}" }) { track ->
@@ -121,6 +259,8 @@ fun HomeScreen(
                 )
             }
         }
+
+        // Recently Added
         if (recentlyAdded.isNotEmpty()) {
             item { SectionHeader(stringResource(R.string.recently_added)) }
             items(recentlyAdded, key = { "added:${it.uri}" }) { track ->

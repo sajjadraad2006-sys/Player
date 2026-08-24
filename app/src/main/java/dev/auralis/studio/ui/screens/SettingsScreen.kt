@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.auralis.studio.BuildConfig
 import dev.auralis.studio.R
@@ -74,11 +75,14 @@ fun SettingsScreen(
     folders: Set<String>,
     minimumDurationMs: Long,
     notificationPermissionGranted: Boolean,
+    downloadLocation: String,
     onThemeChange: (ThemeSettings) -> Unit,
     onMinimumDuration: (Long) -> Unit,
     onChooseFolder: () -> Unit,
     onRemoveFolder: (String) -> Unit,
     onRequestNotifications: () -> Unit,
+    onChooseDownloadFolder: () -> Unit,
+    onResetDownloadFolder: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var section by remember { mutableStateOf(SettingsSection.ROOT) }
@@ -98,11 +102,14 @@ fun SettingsScreen(
         SettingsSection.LIBRARY -> LibrarySection(
             folders = folders,
             minimumDurationMs = minimumDurationMs,
+            downloadLocation = downloadLocation,
             onMinimumDuration = onMinimumDuration,
             onChooseFolder = onChooseFolder,
             onRemoveFolder = onRemoveFolder,
             notificationPermissionGranted = notificationPermissionGranted,
             onRequestNotifications = onRequestNotifications,
+            onChooseDownloadFolder = onChooseDownloadFolder,
+            onResetDownloadFolder = onResetDownloadFolder,
             onBack = { section = SettingsSection.ROOT },
             modifier = modifier,
         )
@@ -234,25 +241,25 @@ private fun AppearanceSection(
             SettingsCard(stringResource(R.string.accent_color)) {
                 val accents = listOf(
                     AccentPalette.MINT, AccentPalette.PURPLE, AccentPalette.PINK,
-                    AccentPalette.BLUE, AccentPalette.ORANGE, AccentPalette.TEAL, AccentPalette.GOLD,
+                    AccentPalette.BLUE, AccentPalette.ORANGE, AccentPalette.TEAL,
+                    AccentPalette.GOLD, AccentPalette.CORAL, AccentPalette.LIME,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    accents.forEach { color ->
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(accents) { color ->
                         val isSelected = theme.accentArgb == color.value.toLong()
                         Box(
                             Modifier
-                                .size(38.dp)
+                                .size(42.dp)
                                 .clip(CircleShape)
                                 .background(color)
                                 .then(
-                                    if (isSelected) Modifier.border(2.dp, colors.onSurface, CircleShape)
+                                    if (isSelected) Modifier.border(2.5.dp, colors.onSurface, CircleShape)
                                     else Modifier,
                                 )
                                 .clickable { onThemeChange(theme.copy(accentArgb = color.value.toLong())) },
                             contentAlignment = Alignment.Center,
                         ) {
                             if (isSelected) {
-                                // Use semantic contrast color — never hard-coded Color.Black
                                 Icon(
                                     Icons.Default.Check,
                                     contentDescription = null,
@@ -339,11 +346,14 @@ private fun AppearanceSection(
 private fun LibrarySection(
     folders: Set<String>,
     minimumDurationMs: Long,
+    downloadLocation: String,
     onMinimumDuration: (Long) -> Unit,
     onChooseFolder: () -> Unit,
     onRemoveFolder: (String) -> Unit,
     notificationPermissionGranted: Boolean,
     onRequestNotifications: () -> Unit,
+    onChooseDownloadFolder: () -> Unit,
+    onResetDownloadFolder: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -353,6 +363,38 @@ private fun LibrarySection(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onBack) { Text("← Back") }
                 Text(stringResource(R.string.library_settings), style = MaterialTheme.typography.headlineMedium, color = colors.onBackground)
+            }
+        }
+
+        // ── Download Folder Location Card ──
+        item {
+            SettingsCard("مسار تنزيل الموسيقى (Download Location)") {
+                Text(
+                    "المجلد الحالي: $downloadLocation",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.primary,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = onChooseDownloadFolder,
+                        modifier = Modifier.weight(1.2f),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text("تغيير المجلد")
+                    }
+                    androidx.compose.material3.FilledTonalButton(
+                        onClick = onResetDownloadFolder,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text("الافتراضي")
+                    }
+                }
             }
         }
         item {

@@ -45,6 +45,9 @@ data class AuralisTokens(
 
     // Neon glow
     val accentGlowAlpha: Float,        // 0 = no glow; >0 = neon accent glow
+
+    // Gradient overlay on glass cards for depth
+    val gradientOverlay: Boolean = false,
 )
 
 /** Motion timing constants shared across all themes. */
@@ -54,13 +57,15 @@ object AuralisMotion {
     const val CONTAINER_MS = 380
 }
 
-/** Accent palette (seven named presets + dynamic). */
+/** Accent palette — premium curated colours. */
 object AccentPalette {
-    val MINT    = Color(0xFF70E1C1)
-    val PURPLE  = Color(0xFF9F91FF)
-    val PINK    = Color(0xFFFF6FAE)
-    val BLUE    = Color(0xFF57B7FF)
-    val ORANGE  = Color(0xFFFFB85C)
-    val TEAL    = Color(0xFF4DCFCF)
-    val GOLD    = Color(0xFFE7B76A)
+    val MINT    = Color(0xFF5EE6B8)    // Vibrant mint
+    val PURPLE  = Color(0xFFA78BFA)    // Rich violet
+    val PINK    = Color(0xFFFF6FAE)    // Vivid pink
+    val BLUE    = Color(0xFF60A5FA)    // Sky blue
+    val ORANGE  = Color(0xFFFBBF24)    // Warm amber
+    val TEAL    = Color(0xFF2DD4BF)    // Modern teal
+    val GOLD    = Color(0xFFF59E0B)    // Rich gold
+    val CORAL   = Color(0xFFFB7185)    // Soft coral
+    val LIME    = Color(0xFF84CC16)    // Fresh lime
 }

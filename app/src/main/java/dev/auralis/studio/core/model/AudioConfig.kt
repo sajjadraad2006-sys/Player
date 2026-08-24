@@ -7,6 +7,15 @@ enum class PitchTempoMode { INDEPENDENT, TEMPO_LOCK, VINYL }
 enum class OrbitDirection { CLOCKWISE, COUNTER_CLOCKWISE, PING_PONG }
 enum class ChannelMode { STEREO, MONO, LEFT, RIGHT, SWAP }
 
+/** Modes for real-time audio stem isolation & vocal/music/bass separation. */
+enum class StemIsolationMode {
+    OFF,           // Full mix (no isolation)
+    VOCAL_SOLO,    // عزل الصوت البشري فقط (Acapella / Vocals only)
+    INSTRUMENTAL,  // عزل اللحن والموسيقى (كاريوكي - بدون صوت بشري)
+    BASS_SOLO,     // عزل البيس فقط (Bassline only)
+    CUSTOM,        // تحكم حر بجميع المسارات (Custom multi-slider mixer)
+}
+
 data class AudioConfig(
     val dspEnabled: Boolean = true,
     val pitchSemitones: Float = 0f,
@@ -26,6 +35,12 @@ data class AudioConfig(
     val orbitDirection: OrbitDirection = OrbitDirection.CLOCKWISE,
     val reverbMix: Float = 0f,
     val limiterEnabled: Boolean = true,
+    // ── Stem Isolation & Vocal/Music/Bass Separation ──
+    val stemIsolationEnabled: Boolean = false,
+    val stemMode: StemIsolationMode = StemIsolationMode.OFF,
+    val stemVocalVolume: Float = 1.0f,    // 0.0 (Mute) .. 1.0 (Normal) .. 2.0 (Boost)
+    val stemMelodyVolume: Float = 1.0f,   // 0.0 (Mute) .. 1.0 (Normal) .. 2.0 (Boost)
+    val stemBassVolume: Float = 1.0f,     // 0.0 (Mute) .. 1.0 (Normal) .. 2.0 (Boost)
 ) {
     val effectivePitchFactor: Float
         get() = when (mode) {
@@ -38,6 +53,47 @@ data class AudioConfig(
         get() = PitchMath.factorToSemitones(effectivePitchFactor)
 
     fun pure(): AudioConfig = AudioConfig(dspEnabled = false)
+
+    /** Apply a stem preset cleanly. */
+    fun withStemMode(mode: StemIsolationMode): AudioConfig = when (mode) {
+        StemIsolationMode.OFF -> copy(
+            stemIsolationEnabled = false,
+            stemMode = StemIsolationMode.OFF,
+            stemVocalVolume = 1.0f,
+            stemMelodyVolume = 1.0f,
+            stemBassVolume = 1.0f,
+            dspEnabled = true,
+        )
+        StemIsolationMode.VOCAL_SOLO -> copy(
+            stemIsolationEnabled = true,
+            stemMode = StemIsolationMode.VOCAL_SOLO,
+            stemVocalVolume = 1.4f,
+            stemMelodyVolume = 0.0f,
+            stemBassVolume = 0.0f,
+            dspEnabled = true,
+        )
+        StemIsolationMode.INSTRUMENTAL -> copy(
+            stemIsolationEnabled = true,
+            stemMode = StemIsolationMode.INSTRUMENTAL,
+            stemVocalVolume = 0.0f,
+            stemMelodyVolume = 1.0f,
+            stemBassVolume = 1.0f,
+            dspEnabled = true,
+        )
+        StemIsolationMode.BASS_SOLO -> copy(
+            stemIsolationEnabled = true,
+            stemMode = StemIsolationMode.BASS_SOLO,
+            stemVocalVolume = 0.0f,
+            stemMelodyVolume = 0.0f,
+            stemBassVolume = 1.5f,
+            dspEnabled = true,
+        )
+        StemIsolationMode.CUSTOM -> copy(
+            stemIsolationEnabled = true,
+            stemMode = StemIsolationMode.CUSTOM,
+            dspEnabled = true,
+        )
+    }
 }
 
 object PitchMath {
@@ -53,12 +109,13 @@ data class AudioPreset(
 object BuiltInPresets {
     val all = listOf(
         AudioPreset("Original", AudioConfig()),
+        AudioPreset("Vocal Only", AudioConfig().withStemMode(StemIsolationMode.VOCAL_SOLO)),
+        AudioPreset("Karaoke / Music", AudioConfig().withStemMode(StemIsolationMode.INSTRUMENTAL)),
+        AudioPreset("Bass Only", AudioConfig().withStemMode(StemIsolationMode.BASS_SOLO)),
         AudioPreset("Slowed", AudioConfig(speed = 0.82f, pitchSemitones = -2f, mode = PitchTempoMode.INDEPENDENT)),
         AudioPreset("Slowed + Reverb", AudioConfig(speed = 0.8f, pitchSemitones = -2f, mode = PitchTempoMode.INDEPENDENT, reverbMix = 0.2f)),
         AudioPreset("Nightcore", AudioConfig(speed = 1.22f, pitchSemitones = 3f, mode = PitchTempoMode.INDEPENDENT)),
         AudioPreset("8D", AudioConfig(eightDEnabled = true)),
-        AudioPreset("Slowed 8D", AudioConfig(speed = 0.82f, pitchSemitones = -2f, mode = PitchTempoMode.INDEPENDENT, eightDEnabled = true, reverbMix = 0.12f)),
         AudioPreset("Deep Bass", AudioConfig(equalizerEnabled = true, bassDb = 6f, preampDb = -4f, eqBandsDb = listOf(5f, 4f, 2f, 0f, -1f, -1f, 0f, 1f, 1f, 0f))),
-        AudioPreset("Dream", AudioConfig(eightDEnabled = true, eightDStrength = 0.35f, eightDRateHz = 0.055f, reverbMix = 0.28f, stereoWidth = 1.25f)),
     )
 }

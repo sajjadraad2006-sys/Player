@@ -1,14 +1,26 @@
 package dev.auralis.studio.ui
 
 import android.app.Application
+import android.app.DownloadManager
+import android.content.Context
+import android.net.Uri
+import android.os.Environment
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.auralis.studio.AuralisApplication
+import dev.auralis.studio.core.database.DownloadEntity
+import dev.auralis.studio.core.database.DownloadStatus
 import dev.auralis.studio.core.database.PlaylistEntity
 import dev.auralis.studio.core.database.PlaylistTrackEntity
 import dev.auralis.studio.core.model.AudioConfig
 import dev.auralis.studio.core.model.ThemeSettings
 import dev.auralis.studio.core.model.Track
+import dev.auralis.studio.online.ArchiveOrgMusicProvider
+import dev.auralis.studio.online.FreeMusicDiscoveryProvider
+import dev.auralis.studio.online.OnlineTrack
+import dev.auralis.studio.online.ProviderResult
+import dev.auralis.studio.online.toStreamableTrack
 import dev.auralis.studio.playback.PlaybackConnection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -18,18 +30,21 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
 
 @OptIn(FlowPreview::class)
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val container = (application as AuralisApplication).container
     private val dao = container.database.dao()
+    private val downloadsDao = container.database.downloadsDao()
     val playback = PlaybackConnection(application, viewModelScope)
     val playbackState = playback.state
     val tracks: StateFlow<List<Track>> = container.library.tracks
@@ -54,6 +69,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var sleepTimerJob: Job? = null
     private var audioSaveJob: Job? = null
     private var themeSaveJob: Job? = null
+
+    // ── Online Search & Downloads ─────────────────────────────────────────────
+    private val prefs = application.getSharedPreferences("aura_studio_prefs", Context.MODE_PRIVATE)
+    val downloadFolderLocation = MutableStateFlow(prefs.getString("download_folder_name", "Music/AuraStudio/") ?: "Music/AuraStudio/")
+    val downloadFolderUri = MutableStateFlow(prefs.getString("download_folder_uri", null))
+
+    fun setDownloadLocation(uri: Uri, folderName: String) {
+        prefs.edit()
+            .putString("download_folder_uri", uri.toString())
+            .putString("download_folder_name", folderName)
+            .apply()
+        downloadFolderUri.value = uri.toString()
+        downloadFolderLocation.value = folderName
+    }
+
+    fun resetDownloadLocation() {
+        prefs.edit()
+            .remove("download_folder_uri")
+            .putString("download_folder_name", "Music/AuraStudio/")
+            .apply()
+        downloadFolderUri.value = null
+        downloadFolderLocation.value = "Music/AuraStudio/"
+    }
+
+    private val onlineProvider = FreeMusicDiscoveryProvider()
+    private val _onlineResults = MutableStateFlow<List<OnlineTrack>>(emptyList())
+    val onlineResults: StateFlow<List<OnlineTrack>> = _onlineResults.asStateFlow()
+    private val _isSearchingOnline = MutableStateFlow(false)
+    val isSearchingOnline: StateFlow<Boolean> = _isSearchingOnline.asStateFlow()
+    val downloads: StateFlow<List<DownloadEntity>> = downloadsDao.observeAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val searchResults: StateFlow<List<Track>> = combine(
         searchQuery.debounce(180),
@@ -92,6 +138,115 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ?: safResult.exceptionOrNull()?.let { libraryError.value = it.localizedMessage }
                 ?: run { libraryError.value = null }
             isScanning.value = false
+        }
+    }
+
+    fun searchOnline(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) {
+            _onlineResults.value = emptyList()
+            return
+        }
+        viewModelScope.launch {
+            _isSearchingOnline.value = true
+            when (val res = onlineProvider.search(trimmed)) {
+                is ProviderResult.Success<*> -> {
+                    _onlineResults.value = (res.data as? List<*>)?.filterIsInstance<OnlineTrack>() ?: emptyList()
+                }
+                else -> _onlineResults.value = emptyList()
+            }
+            _isSearchingOnline.value = false
+        }
+    }
+
+    fun playOnlineTrack(onlineTrack: OnlineTrack) {
+        viewModelScope.launch {
+            // Resolve direct audio stream if needed
+            val trackToPlay = if (onlineTrack.durationMs <= 0) {
+                when (val detailed = onlineProvider.getTrack(onlineTrack.id)) {
+                    is ProviderResult.Success<*> -> (detailed.data as? OnlineTrack)?.toStreamableTrack() ?: onlineTrack.toStreamableTrack()
+                    else -> onlineTrack.toStreamableTrack()
+                }
+            } else {
+                onlineTrack.toStreamableTrack()
+            }
+            trackToPlay?.let { playback.play(it, listOf(it)) }
+        }
+    }
+
+    fun downloadOnlineTrack(onlineTrack: OnlineTrack) {
+        val app = getApplication<Application>()
+        viewModelScope.launch(Dispatchers.IO) {
+            val resolved = if (onlineTrack.streamUrl?.contains(".mp3") == true) onlineTrack else {
+                when (val d = onlineProvider.getTrack(onlineTrack.id)) {
+                    is ProviderResult.Success<*> -> (d.data as? OnlineTrack) ?: onlineTrack
+                    else -> onlineTrack
+                }
+            }
+
+            val downloadUrl = resolved.downloadUrl ?: resolved.streamUrl ?: return@launch
+            val safeTitle = resolved.title.replace(Regex("[^a-zA-Z0-9._ -]"), "_").take(50)
+            val fileName = "$safeTitle.mp3"
+
+            val downloadRecord = DownloadEntity(
+                provider         = resolved.provider,
+                providerTrackId  = resolved.id,
+                remoteUrl        = downloadUrl,
+                fileName         = fileName,
+                title            = resolved.title,
+                artist           = resolved.artist,
+                album            = resolved.album,
+                artworkUrl       = resolved.artworkUrl,
+                durationMs       = resolved.durationMs,
+                status           = DownloadStatus.DOWNLOADING.name,
+            )
+            val rowId = downloadsDao.insert(downloadRecord)
+
+            val customUriStr = downloadFolderUri.value
+            if (customUriStr != null) {
+                try {
+                    val treeUri = Uri.parse(customUriStr)
+                    val docTree = androidx.documentfile.provider.DocumentFile.fromTreeUri(app, treeUri)
+                    val newFile = docTree?.createFile("audio/mpeg", fileName)
+                    if (newFile != null) {
+                        val inputUrl = java.net.URL(downloadUrl)
+                        val conn = inputUrl.openConnection()
+                        conn.connect()
+                        val input = conn.getInputStream()
+                        val output = app.contentResolver.openOutputStream(newFile.uri)
+                        if (output != null) {
+                            input.use { i -> output.use { o -> i.copyTo(o) } }
+                            downloadsDao.updateStatus(rowId, DownloadStatus.COMPLETED.name, "")
+                            launch(Dispatchers.Main) {
+                                Toast.makeText(app, "تم التنزيل بنجاح في: ${downloadFolderLocation.value}", Toast.LENGTH_LONG).show()
+                            }
+                            return@launch
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("MainViewModel", "Custom download failed, falling back to standard DownloadManager", e)
+                }
+            }
+
+            try {
+                val dm = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                val uri = Uri.parse(downloadUrl)
+                val request = DownloadManager.Request(uri).apply {
+                    setTitle(resolved.title)
+                    setDescription("Downloading via Aura Studio")
+                    setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                    setDestinationInExternalPublicDir(Environment.DIRECTORY_MUSIC, "AuraStudio/$fileName")
+                    setAllowedOverMetered(true)
+                    setAllowedOverRoaming(true)
+                }
+                dm.enqueue(request)
+
+                launch(Dispatchers.Main) {
+                    Toast.makeText(app, "جارٍ التنزيل في: ${downloadFolderLocation.value}", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                downloadsDao.updateStatus(rowId, DownloadStatus.FAILED.name, e.localizedMessage ?: "Failed")
+            }
         }
     }
 
@@ -155,6 +310,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun playNext(track: Track) = playback.playNext(track)
     fun addToQueue(track: Track) = playback.addToQueue(track)
+
+    fun shuffleAll(tracksList: List<Track>) {
+        if (tracksList.isEmpty()) return
+        val shuffled = tracksList.shuffled()
+        playback.play(shuffled.first(), shuffled)
+    }
+
+    fun playAll(tracksList: List<Track>) {
+        if (tracksList.isEmpty()) return
+        playback.play(tracksList.first(), tracksList)
+    }
 
     fun setMinimumTrackDuration(durationMs: Long) {
         viewModelScope.launch {

@@ -9,7 +9,7 @@ enum class AnimationStyle { REDUCED, SMOOTH, EXPRESSIVE }
 data class ThemeSettings(
     val style: ThemeStyle = ThemeStyle.GLASS,
     val appearance: AppearanceMode = AppearanceMode.SYSTEM,
-    val accentArgb: Long = 0xFF70E1C1,
+    val accentArgb: Long = 0xFF5EE6B8,
     val glassAlpha: Float = 0.16f,
     val cornerRadius: Float = 24f,
     val animationScale: Float = 1f,

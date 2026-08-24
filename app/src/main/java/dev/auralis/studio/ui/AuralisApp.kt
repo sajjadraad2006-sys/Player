@@ -82,10 +82,13 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     val results by viewModel.searchResults.collectAsStateWithLifecycle()
     val query by viewModel.searchQuery.collectAsStateWithLifecycle()
     val scanning by viewModel.isScanning.collectAsStateWithLifecycle()
+    val onlineResults by viewModel.onlineResults.collectAsStateWithLifecycle()
+    val isSearchingOnline by viewModel.isSearchingOnline.collectAsStateWithLifecycle()
     val folders by viewModel.musicFolders.collectAsStateWithLifecycle()
     val minimumDuration by viewModel.minimumTrackDuration.collectAsStateWithLifecycle()
     val sleepRemaining by viewModel.sleepTimerRemainingMs.collectAsStateWithLifecycle()
     val libraryError by viewModel.libraryError.collectAsStateWithLifecycle()
+    val downloadLocation by viewModel.downloadFolderLocation.collectAsStateWithLifecycle()
 
     var audioPermissionGranted by remember { mutableStateOf(viewModel.hasAudioPermission) }
     var notificationPermissionGranted by remember {
@@ -112,6 +115,18 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                 context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             viewModel.addMusicFolder(it.toString())
+        }
+    }
+    val downloadFolderLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+            val folderName = it.path?.substringAfterLast(':')?.ifBlank { null } ?: it.lastPathSegment ?: it.toString()
+            viewModel.setDownloadLocation(it, folderName)
         }
     }
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -190,6 +205,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                                     onOpen      = { playerVisible = true },
                                     onPlayPause = viewModel.playback::playPause,
                                     onNext      = viewModel.playback::next,
+                                    onPrevious  = viewModel.playback::previous,
                                     modifier    = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                                 )
                             }
@@ -225,19 +241,38 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                             commonModifier,
                         )
                         MainDestination.SEARCH -> SearchScreen(
-                            query, results, favorites, playlists,
-                            { viewModel.searchQuery.value = it },
-                            viewModel.playback::play, viewModel::toggleFavorite,
-                            viewModel::playNext, viewModel::addToQueue, viewModel::addToPlaylist,
-                            commonModifier,
+                            query             = query,
+                            results           = results,
+                            favorites         = favorites,
+                            playlists         = playlists,
+                            onlineResults     = onlineResults,
+                            isSearchingOnline = isSearchingOnline,
+                            onQueryChange     = { viewModel.searchQuery.value = it },
+                            onSearchOnline    = viewModel::searchOnline,
+                            onPlay            = viewModel.playback::play,
+                            onPlayOnline      = viewModel::playOnlineTrack,
+                            onDownloadOnline  = viewModel::downloadOnlineTrack,
+                            onToggleFavorite  = viewModel::toggleFavorite,
+                            onPlayNext        = viewModel::playNext,
+                            onAddToQueue      = viewModel::addToQueue,
+                            onAddToPlaylist   = viewModel::addToPlaylist,
+                            modifier          = commonModifier,
                         )
                         MainDestination.AUDIO_LAB -> AudioLabScreen(config, viewModel::updateAudio, commonModifier)
                         MainDestination.SETTINGS -> SettingsScreen(
-                            theme, folders, minimumDuration, notificationPermissionGranted,
-                            viewModel::updateTheme, viewModel::setMinimumTrackDuration,
-                            chooseFolder, viewModel::removeMusicFolder,
-                            { if (Build.VERSION.SDK_INT >= 33) notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
-                            commonModifier,
+                            theme = theme,
+                            folders = folders,
+                            minimumDurationMs = minimumDuration,
+                            notificationPermissionGranted = notificationPermissionGranted,
+                            downloadLocation = downloadLocation,
+                            onThemeChange = viewModel::updateTheme,
+                            onMinimumDuration = viewModel::setMinimumTrackDuration,
+                            onChooseFolder = chooseFolder,
+                            onRemoveFolder = viewModel::removeMusicFolder,
+                            onRequestNotifications = { if (Build.VERSION.SDK_INT >= 33) notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                            onChooseDownloadFolder = { downloadFolderLauncher.launch(null) },
+                            onResetDownloadFolder = viewModel::resetDownloadLocation,
+                            modifier = commonModifier,
                         )
                     }
                 }

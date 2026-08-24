@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -58,7 +59,7 @@ import dev.auralis.studio.designsystem.LocalAuralisTokens
 import dev.auralis.studio.designsystem.LocalThemeSettings
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GlassCard — primary card surface
+// GlassCard — primary card surface with proper glass/frosted appearance
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
 fun GlassCard(
@@ -69,19 +70,53 @@ fun GlassCard(
     val tokens = LocalAuralisTokens.current
     val colors = MaterialTheme.colorScheme
     val shape  = RoundedCornerShape(tokens.cardCorner.dp)
+    val accent = colors.primary
+
+    // Build gradient overlay for glass depth
+    val containerColor = if (tokens.gradientOverlay) {
+        colors.surface.copy(alpha = tokens.surfaceAlpha)
+    } else {
+        colors.surface.copy(alpha = tokens.surfaceAlpha)
+    }
+
+    // Border color — use accent tint for glass/neon, neutral for others
+    val borderColor = if (tokens.accentGlowAlpha > 0f) {
+        accent.copy(alpha = tokens.cardBorderAlpha)
+    } else {
+        colors.outline.copy(alpha = tokens.cardBorderAlpha)
+    }
+
     val cardModifier = if (onClick != null) modifier.clip(shape).clickable(onClick = onClick) else modifier
+
     Card(
         modifier  = cardModifier,
         shape     = shape,
         colors    = CardDefaults.cardColors(
-            containerColor = colors.surface.copy(alpha = tokens.surfaceAlpha),
-            contentColor   = colors.onSurface,   // ← semantic — never hard-coded
+            containerColor = containerColor,
+            contentColor   = colors.onSurface,
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardElevation),
         border    = if (tokens.cardBorderWidth > 0.dp) {
-            BorderStroke(tokens.cardBorderWidth, colors.outline.copy(alpha = tokens.cardBorderAlpha))
+            BorderStroke(tokens.cardBorderWidth, borderColor)
         } else null,
-    ) { content() }
+    ) {
+        if (tokens.gradientOverlay) {
+            // Subtle gradient overlay inside the card for glass depth
+            Box(
+                Modifier.background(
+                    Brush.verticalGradient(
+                        listOf(
+                            accent.copy(alpha = 0.03f),
+                            Color.Transparent,
+                            colors.secondary.copy(alpha = 0.02f),
+                        ),
+                    ),
+                ),
+            ) { content() }
+        } else {
+            content()
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -139,21 +174,28 @@ fun TrackArtwork(track: Track?, modifier: Modifier = Modifier) {
         Box(
             modifier         = modifier
                 .clip(shape)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primaryContainer,
+                            MaterialTheme.colorScheme.surfaceVariant,
+                        ),
+                    ),
+                ),
             contentAlignment = Alignment.Center,
         ) {
-            // ♫ uses onSurfaceVariant for proper contrast in both light & dark
-            Text(
-                "♫",
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Icon(
+                imageVector = Icons.Default.MusicNote,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                modifier = Modifier.size(28.dp),
             )
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TrackRow — compact list item
+// TrackRow — compact list item with improved visuals
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
 fun TrackRow(

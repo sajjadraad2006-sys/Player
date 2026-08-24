@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Auralis Studio</string>
+    <string name="app_name">Aura Studio</string>
     <string name="songs">Songs</string>
     <string name="favorites">Favorites</string>
     <string name="recently_played">Recently played</string>
