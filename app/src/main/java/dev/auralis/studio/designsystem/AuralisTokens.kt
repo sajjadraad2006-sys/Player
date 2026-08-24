@@ -102,6 +102,8 @@ object AuralisMotion {
 
 /** Accent palette — premium curated colours. */
 object AccentPalette {
+    const val DEFAULT_ARGB: Long = 0xFFA78BFAL
+
     val MINT    = Color(0xFF5EE6B8)    // Vibrant mint
     val PURPLE  = Color(0xFFA78BFA)    // Rich violet
     val PINK    = Color(0xFFFF6FAE)    // Vivid pink
@@ -111,4 +113,7 @@ object AccentPalette {
     val GOLD    = Color(0xFFF59E0B)    // Rich gold
     val CORAL   = Color(0xFFFB7185)    // Soft coral
     val LIME    = Color(0xFF84CC16)    // Fresh lime
+
+    val PRESETS = listOf(MINT, PURPLE, PINK, BLUE, ORANGE, TEAL, GOLD, CORAL, LIME)
 }
+

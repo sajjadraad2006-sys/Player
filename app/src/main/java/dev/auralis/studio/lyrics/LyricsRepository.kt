@@ -40,6 +40,28 @@ class LyricsRepository(
     private val offsetStore = context.getSharedPreferences("lyrics_timing_offsets", Context.MODE_PRIVATE)
 
     /**
+     * Matching-algorithm version. Bump when candidate scoring materially changes so
+     * stale low-confidence auto-matched cache entries are re-evaluated instead of
+     * being served forever. Manual selections and imports are never invalidated.
+     *
+     * v1 (pre-fix): matched against preview-duration metadata (29 s bug) which
+     * poisoned LRCLIB exact lookups. Current version requires full-track metadata.
+     */
+    private companion object {
+        const val NEGATIVE_CACHE_MS = 6L * 60L * 60L * 1_000L
+        const val MATCHER_VERSION = 2
+        /** Local durations below this are previews/incomplete — never used for lyric matching. */
+        const val MIN_FULL_TRACK_MS_FOR_MATCHING = 45_000L
+        /**
+         * Deploy-time epoch of matching algorithm v2. Set to 0 so ALL pre-existing
+         * auto-matched cache rows are re-validated exactly once after this update
+         * (they were matched against poisoned preview-duration metadata). Rows
+         * fetched afterwards carry a fresh lastValidatedAt and are trusted.
+         */
+        const val MATCHER_EPOCH_MS = 0L
+    }
+
+    /**
      * Resolves lyrics for [track], following the offline-first pipeline.
      * Returns [SyncedLyrics.EMPTY] if nothing is available.
      */
@@ -65,10 +87,19 @@ class LyricsRepository(
         }
 
         // ── Step 4: Valid online cache ─────────────────────────────────────
+        // Cache entries fetched under an older matching algorithm (or against
+        // preview-duration metadata) are treated as stale and re-evaluated.
+        // Manual selections and imports never reach this branch (returned above).
         val cached = dao.getLyrics(track.uri)
         if (cached != null && isCacheValid(cached)) {
-            Log.d(TAG, "Using cached LRCLIB lyrics for ${track.title}")
-            return@withContext applyStoredOffset(track, parseCachedEntity(cached))
+            val staleFromOldMatcher = cached.lastValidatedAt < MATCHER_EPOCH_MS ||
+                (cached.trackDurationMs > 0 && cached.trackDurationMs < MIN_FULL_TRACK_MS_FOR_MATCHING)
+            if (!staleFromOldMatcher) {
+                Log.d(TAG, "Using cached LRCLIB lyrics for ${track.title}")
+                return@withContext applyStoredOffset(track, parseCachedEntity(cached))
+            }
+            Log.d(TAG, "Discarding stale low-confidence lyrics cache for ${track.title}")
+            dao.clearAutoCache(track.uri)
         }
 
         val missKey = track.uri.ifBlank { "${track.title}|${track.artist}|${track.durationMs}" }
@@ -81,12 +112,19 @@ class LyricsRepository(
         if (!isNetworkAvailable()) return@withContext SyncedLyrics.EMPTY
 
         // ── Step 5: Network lookup via LRCLIB ─────────────────────────────
+        // Metadata confidence hierarchy: a preview-length duration (<45 s) or
+        // placeholder artist ("Music", "Lyrune", "Unknown") must never reach
+        // LRCLIB as high-confidence metadata — it poisons exact lookups.
+        val lookupDurationMs = if (track.durationMs in 1 until MIN_FULL_TRACK_MS_FOR_MATCHING) 0L else track.durationMs
+        val lookupArtist = LyricsMetadataNormalizer.artist(track.artist)
+            .takeUnless { it.isBlank() || it.equals("Music", true) || it.equals("Lyrune", true) }
+            .orEmpty()
         try {
             val result = lrclib.resolve(
                 title     = track.title,
-                artist    = track.artist,
+                artist    = lookupArtist,
                 album     = track.album,
-                durationMs = track.durationMs,
+                durationMs = lookupDurationMs,
             )
             if (result != null) {
                 val entity = LyricsCacheEntity(
@@ -95,6 +133,7 @@ class LyricsRepository(
                     providerItemId = result.id.toString(),
                     plainLyrics    = result.plainLyrics.orEmpty(),
                     syncedLyrics   = result.syncedLyrics.orEmpty(),
+                    lyricsfile     = result.lyricsfile.orEmpty(),
                     trackDurationMs = track.durationMs,
                     fetchedAt      = System.currentTimeMillis(),
                     lastValidatedAt = System.currentTimeMillis(),
@@ -116,14 +155,30 @@ class LyricsRepository(
         SyncedLyrics.EMPTY
     }
 
-    /** Parses a [LyricsCacheEntity] into [SyncedLyrics]. */
+    /**
+     * Parses a [LyricsCacheEntity] into [SyncedLyrics].
+     *
+     * Source priority for one record:
+     *   1. Lyricsfile with genuine WORD timing
+     *   2. Lyricsfile with LINE timing
+     *   3. Legacy synced LRC (`syncedLyrics`, incl. Enhanced LRC word tags)
+     *   4. Plain lyrics
+     *
+     * A Lyricsfile whose word timing is absent/invalid falls back to its line
+     * timing inside the parser — never to fabricated word timestamps.
+     */
     private fun parseCachedEntity(entity: LyricsCacheEntity): SyncedLyrics {
         val source = runCatching { LyricsSource.valueOf(entity.source) }.getOrDefault(LyricsSource.CACHE)
+        val offset = entity.offsetMs
+
+        if (entity.lyricsfile.isNotBlank()) {
+            val fromLyricsfile = LyricsfileParser.parse(entity.lyricsfile, source)
+            if (fromLyricsfile != null) return fromLyricsfile.copy(offsetMs = offset)
+            // Malformed document → fall through to legacy representations.
+        }
         return when {
-            entity.syncedLyrics.isNotBlank() ->
-                LrcParser.parse(entity.syncedLyrics, source).copy(offsetMs = entity.offsetMs)
-            entity.plainLyrics.isNotBlank()  ->
-                LrcParser.parse(entity.plainLyrics, source).copy(offsetMs = entity.offsetMs)
+            entity.syncedLyrics.isNotBlank() -> LrcParser.parse(entity.syncedLyrics, source).copy(offsetMs = offset)
+            entity.plainLyrics.isNotBlank()  -> LrcParser.parse(entity.plainLyrics, source).copy(offsetMs = offset)
             else -> SyncedLyrics.EMPTY
         }
     }
@@ -225,6 +280,35 @@ class LyricsRepository(
         dao.upsertLyrics(entity)
     }
 
+    /** Searches for candidate lyrics from online provider for manual selection. */
+    suspend fun searchCandidates(track: Track): List<LrclibTrack> = withContext(Dispatchers.IO) {
+        if (!isNetworkAvailable()) return@withContext emptyList()
+        val cleanTitle = LyricsMetadataNormalizer.title(track.title)
+        val cleanArtist = LyricsMetadataNormalizer.artist(track.artist)
+        lrclib.searchCandidates(cleanTitle, cleanArtist, track.album, track.durationMs)
+    }
+
+    /** User-initiated: manually select a candidate version from the candidates list. */
+    suspend fun selectCandidate(track: Track, candidate: LrclibTrack): SyncedLyrics = withContext(Dispatchers.IO) {
+        val entity = LyricsCacheEntity(
+            trackUri        = track.uri,
+            source          = LyricsSource.LRCLIB.name,
+            providerItemId  = candidate.id.toString(),
+            plainLyrics     = candidate.plainLyrics.orEmpty(),
+            syncedLyrics    = candidate.syncedLyrics.orEmpty(),
+            lyricsfile      = candidate.lyricsfile.orEmpty(),
+            trackDurationMs = track.durationMs,
+            manualSelection = true, // never overwritten automatically
+            fetchedAt       = System.currentTimeMillis(),
+            lastValidatedAt = System.currentTimeMillis(),
+        )
+        dao.clearAutoCache(track.uri)
+        dao.upsertLyrics(entity)
+        val missKey = track.uri.ifBlank { "${track.title}|${track.artist}|${track.durationMs}" }
+        negativeCache.edit().remove(missKey).apply()
+        applyStoredOffset(track, parseCachedEntity(entity))
+    }
+
     /** Persists playback correction separately from downloaded/embedded source text. */
     suspend fun updateOffset(track: Track, offsetMs: Long) {
         val safeOffset = offsetMs.coerceIn(-5_000L, 5_000L)
@@ -255,7 +339,4 @@ class LyricsRepository(
     val lastLookupWasRateLimited: Boolean get() = lrclib.lastLookupWasRateLimited
     val lastLookupError: String? get() = lrclib.lastLookupError
 
-    private companion object {
-        const val NEGATIVE_CACHE_MS = 6L * 60L * 60L * 1_000L
-    }
 }

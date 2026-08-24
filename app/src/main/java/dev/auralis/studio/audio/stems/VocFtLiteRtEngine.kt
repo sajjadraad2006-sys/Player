@@ -208,11 +208,14 @@ class VocFtLiteRtEngine(
         if (readableEnd <= readableStart) return
         val destinationOffset = (readableStart - sourceStart).toInt()
         val count = (readableEnd - readableStart).toInt()
-        val readLeft = FloatArray(count)
-        val readRight = FloatArray(count)
-        source.readFrames(readableStart, readLeft, readRight)
-        readLeft.copyInto(left, destinationOffset)
-        readRight.copyInto(right, destinationOffset)
+        source.readFramesInto(
+            startFrame = readableStart,
+            count = count,
+            destLeft = left,
+            leftOffset = destinationOffset,
+            destRight = right,
+            rightOffset = destinationOffset,
+        )
     }
 
     private suspend fun writeStemFiles(
@@ -279,24 +282,25 @@ class VocFtLiteRtEngine(
     }
 }
 
-/** Disk-backed weighted overlap-add: keeps long tracks out of the Java heap. */
+/** Disk-backed weighted overlap-add: keeps long tracks out of the Java heap with preallocated reusable buffer. */
 private class PredictionAccumulator(private val file: File, frames: Long) : AutoCloseable {
     private val access = RandomAccessFile(file, "rw").apply { setLength(frames * 12L) }
+    private val chunkBytes = ByteArray(VocFtContract.GENERATED_SIZE * 12)
+    private val chunkBuffer = ByteBuffer.wrap(chunkBytes).order(ByteOrder.LITTLE_ENDIAN)
 
     fun add(startFrame: Long, left: FloatArray, right: FloatArray, sourceOffset: Int, window: FloatArray) {
-        val bytes = ByteArray(window.size * 12)
+        val byteCount = window.size * 12
         access.seek(startFrame * 12L)
-        access.readFully(bytes)
-        val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        access.readFully(chunkBytes, 0, byteCount)
         for (index in window.indices) {
             val byteOffset = index * 12
             val weight = window[index]
-            buffer.putFloat(byteOffset, buffer.getFloat(byteOffset) + left[sourceOffset + index] * weight)
-            buffer.putFloat(byteOffset + 4, buffer.getFloat(byteOffset + 4) + right[sourceOffset + index] * weight)
-            buffer.putFloat(byteOffset + 8, buffer.getFloat(byteOffset + 8) + weight)
+            chunkBuffer.putFloat(byteOffset, chunkBuffer.getFloat(byteOffset) + left[sourceOffset + index] * weight)
+            chunkBuffer.putFloat(byteOffset + 4, chunkBuffer.getFloat(byteOffset + 4) + right[sourceOffset + index] * weight)
+            chunkBuffer.putFloat(byteOffset + 8, chunkBuffer.getFloat(byteOffset + 8) + weight)
         }
         access.seek(startFrame * 12L)
-        access.write(bytes)
+        access.write(chunkBytes, 0, byteCount)
     }
 
     fun reader(): PredictionReader {
@@ -306,6 +310,7 @@ private class PredictionAccumulator(private val file: File, frames: Long) : Auto
 
     override fun close() = access.close()
 }
+
 
 private class PredictionReader(file: File) : AutoCloseable {
     private val input = BufferedInputStream(file.inputStream(), 256 * 1024)

@@ -122,6 +122,7 @@ class ArchiveOrgMusicProvider : OnlineMusicProvider {
                     album           = album,
                     durationMs      = 0L, // Will resolve on playback
                     artworkUrl      = artwork,
+                    previewUrl      = null,
                     streamUrl       = streamUrl,
                     downloadUrl     = streamUrl,
                     downloadAllowed = true,
@@ -169,6 +170,7 @@ class ArchiveOrgMusicProvider : OnlineMusicProvider {
                     album           = audioFile?.album?.ifBlank { null } ?: "Internet Archive",
                     durationMs      = (durSec * 1000).toLong(),
                     artworkUrl      = "https://archive.org/services/img/$id",
+                    previewUrl      = null,
                     streamUrl       = directUrl,
                     downloadUrl     = directUrl,
                     downloadAllowed = true,

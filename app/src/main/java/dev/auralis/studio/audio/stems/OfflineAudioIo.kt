@@ -231,21 +231,47 @@ class FloatStereoReader(file: File) : AutoCloseable {
 
 class StereoFloatRandomAccess(file: File, mode: String) : AutoCloseable {
     private val access = RandomAccessFile(file, mode)
-    private val bytes = ByteArray(8)
+    private val blockBuffer = ByteArray(64 * 1024)
+    private val byteBuffer = ByteBuffer.wrap(blockBuffer).order(ByteOrder.LITTLE_ENDIAN)
 
     fun readFrame(frame: Long): Pair<Float, Float> {
         access.seek(frame * 8L)
-        access.readFully(bytes)
-        return Float.fromBits(littleEndianInt(bytes, 0)) to Float.fromBits(littleEndianInt(bytes, 4))
+        val l = access.readInt()
+        val r = access.readInt()
+        // Convert little-endian ints to floats
+        val lLe = Integer.reverseBytes(l)
+        val rLe = Integer.reverseBytes(r)
+        return Float.fromBits(lLe) to Float.fromBits(rLe)
     }
 
     fun readFrames(startFrame: Long, left: FloatArray, right: FloatArray) {
-        require(left.size == right.size)
+        readFramesInto(startFrame, left.size, left, 0, right, 0)
+    }
+
+    fun readFramesInto(
+        startFrame: Long,
+        count: Int,
+        destLeft: FloatArray,
+        leftOffset: Int,
+        destRight: FloatArray,
+        rightOffset: Int,
+    ) {
         access.seek(startFrame * 8L)
-        for (index in left.indices) {
-            access.readFully(bytes)
-            left[index] = Float.fromBits(littleEndianInt(bytes, 0))
-            right[index] = Float.fromBits(littleEndianInt(bytes, 4))
+        var remainingFrames = count
+        var currentLeft = leftOffset
+        var currentRight = rightOffset
+
+        val framesPerBlock = blockBuffer.size / 8
+        while (remainingFrames > 0) {
+            val framesToRead = minOf(remainingFrames, framesPerBlock)
+            val bytesToRead = framesToRead * 8
+            access.readFully(blockBuffer, 0, bytesToRead)
+            byteBuffer.position(0)
+            for (i in 0 until framesToRead) {
+                destLeft[currentLeft++] = byteBuffer.float
+                destRight[currentRight++] = byteBuffer.float
+            }
+            remainingFrames -= framesToRead
         }
     }
 
@@ -255,7 +281,8 @@ class StereoFloatRandomAccess(file: File, mode: String) : AutoCloseable {
 class Pcm16WavWriter(file: File, private val sampleRate: Int = VocFtContract.SAMPLE_RATE_HZ) : AutoCloseable {
     private val access = RandomAccessFile(file, "rw")
     private var frames = 0L
-    private val bytes = ByteArray(4)
+    private val blockBuffer = ByteArray(64 * 1024)
+    private val byteBuffer = ByteBuffer.wrap(blockBuffer).order(ByteOrder.LITTLE_ENDIAN)
 
     init {
         access.setLength(0)
@@ -263,15 +290,26 @@ class Pcm16WavWriter(file: File, private val sampleRate: Int = VocFtContract.SAM
     }
 
     fun write(left: Float, right: Float) {
-        val l = (left.coerceIn(-1f, 1f) * 32_767f).toInt().toShort().toInt()
-        val r = (right.coerceIn(-1f, 1f) * 32_767f).toInt().toShort().toInt()
-        bytes[0] = l.toByte(); bytes[1] = (l ushr 8).toByte()
-        bytes[2] = r.toByte(); bytes[3] = (r ushr 8).toByte()
-        access.write(bytes)
+        if (byteBuffer.remaining() < 4) {
+            flushBuffer()
+        }
+        val l = (left.coerceIn(-1f, 1f) * 32_767f).toInt().toShort()
+        val r = (right.coerceIn(-1f, 1f) * 32_767f).toInt().toShort()
+        byteBuffer.putShort(l)
+        byteBuffer.putShort(r)
         frames++
     }
 
+    private fun flushBuffer() {
+        val count = byteBuffer.position()
+        if (count > 0) {
+            access.write(blockBuffer, 0, count)
+            byteBuffer.clear()
+        }
+    }
+
     override fun close() {
+        flushBuffer()
         val dataBytes = frames * 4L
         access.seek(0)
         access.writeBytes("RIFF")
@@ -298,6 +336,7 @@ class Pcm16WavWriter(file: File, private val sampleRate: Int = VocFtContract.SAM
         access.write(value and 0xff); access.write((value ushr 8) and 0xff)
     }
 }
+
 
 private fun MediaFormat.getIntegerOrDefault(key: String, default: Int): Int =
     if (containsKey(key)) getInteger(key) else default

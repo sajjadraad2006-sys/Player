@@ -28,12 +28,14 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -58,16 +60,19 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -154,6 +159,10 @@ fun PlayerScreen(
     onImportLyrics: () -> Unit,
     onManualLyricsSearch: (String) -> Unit,
     onLyricsOffsetChange: (Long) -> Unit,
+    lyricsClock: dev.auralis.studio.lyrics.LyricsClock? = null,
+    lyricsCandidates: List<dev.auralis.studio.lyrics.LrclibTrack> = emptyList(),
+    onLoadLyricsCandidates: () -> Unit = {},
+    onSelectLyricsCandidate: (dev.auralis.studio.lyrics.LrclibTrack) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     BackHandler(onBack = onBack)
@@ -258,13 +267,17 @@ fun PlayerScreen(
                 val page = if (isLtr) rawPage else PAGE_COUNT - 1 - rawPage
                 when (page) {
                     PAGE_LYRICS     -> LyricsPage(
-                        state     = lyricsState,
-                        positionMs = state.positionMs,
-                        onSeek    = onSeek,
-                        onRetry   = onRetryLyrics,
-                        onImport  = onImportLyrics,
-                        onManualSearch = onManualLyricsSearch,
-                        onOffsetChange = onLyricsOffsetChange,
+                        state                  = lyricsState,
+                        positionMs             = state.positionMs,
+                        lyricsClock            = lyricsClock,
+                        lyricsCandidates       = lyricsCandidates,
+                        onSeek                 = onSeek,
+                        onRetry                = onRetryLyrics,
+                        onImport               = onImportLyrics,
+                        onManualSearch         = onManualLyricsSearch,
+                        onOffsetChange         = onLyricsOffsetChange,
+                        onLoadCandidates       = onLoadLyricsCandidates,
+                        onSelectCandidate      = onSelectLyricsCandidate,
                     )
                     PAGE_PLAYER     -> PlayerPage(
                         state               = state,
@@ -521,23 +534,7 @@ private fun PlayerPage(
             }
         }
 
-        // Repeat mode label — small text below controls showing current state
-        item {
-            val repeatLabel = when (state.repeatMode) {
-                Player.REPEAT_MODE_ALL -> "🔁 Repeat All"
-                Player.REPEAT_MODE_ONE -> "🔂 Repeat One"
-                else -> null
-            }
-            if (repeatLabel != null) {
-                Text(
-                    repeatLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.primary.copy(alpha = 0.85f),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
+
 
         // Secondary action row: Quick Audio | Queue | Audio Lab
         item {
@@ -710,21 +707,38 @@ private fun PlayerPage(
 // ─────────────────────────────────────────────────────────────────────────────
 // Lyrics Page (left)
 // ─────────────────────────────────────────────────────────────────────────────
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LyricsPage(
     state: LyricsUiState,
     positionMs: Long,
+    lyricsClock: dev.auralis.studio.lyrics.LyricsClock?,
+    lyricsCandidates: List<dev.auralis.studio.lyrics.LrclibTrack>,
     onSeek: (Long) -> Unit,
     onRetry: () -> Unit,
     onImport: () -> Unit,
     onManualSearch: (String) -> Unit,
     onOffsetChange: (Long) -> Unit,
+    onLoadCandidates: () -> Unit,
+    onSelectCandidate: (dev.auralis.studio.lyrics.LrclibTrack) -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
     val listState = rememberLazyListState()
     val lyrics = (state as? LyricsUiState.Found)?.lyrics ?: SyncedLyrics.EMPTY
     var manualQuery by remember { mutableStateOf("") }
-    val activeIndex = lyrics.activeIndex(positionMs)
+    var showCandidatesSheet by remember { mutableStateOf(false) }
+
+    var smoothPositionMs by remember(positionMs) { mutableLongStateOf(positionMs) }
+    LaunchedEffect(state, lyricsClock) {
+        if (state is LyricsUiState.Found) {
+            while (isActive) {
+                smoothPositionMs = lyricsClock?.tick() ?: positionMs
+                delay(35)
+            }
+        }
+    }
+
+    val activeIndex = lyrics.activeIndex(smoothPositionMs)
     var autoFollow by remember(lyrics.lines) { mutableStateOf(true) }
     var programmaticScroll by remember { mutableStateOf(false) }
 
@@ -741,6 +755,104 @@ private fun LyricsPage(
                 listState.animateScrollToItem(index = activeIndex, scrollOffset = -120)
             } finally {
                 programmaticScroll = false
+            }
+        }
+    }
+
+    if (showCandidatesSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showCandidatesSheet = false },
+            containerColor = colors.surface,
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 16.dp)
+            ) {
+                Text(
+                    stringResource(R.string.choose_lyrics_version),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = colors.onSurface,
+                )
+                Spacer(Modifier.height(12.dp))
+
+                if (lyricsCandidates.isEmpty()) {
+                    Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(modifier = Modifier.size(28.dp), color = colors.primary)
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(lyricsCandidates) { candidate ->
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(colors.surfaceVariant.copy(alpha = 0.5f))
+                                    .clickable {
+                                        onSelectCandidate(candidate)
+                                        showCandidatesSheet = false
+                                    }
+                                    .padding(12.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            candidate.trackName,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = colors.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            "${candidate.artistName} • ${candidate.albumName.ifBlank { "Single" }}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = colors.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    Spacer(Modifier.width(8.dp))
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        val durSec = candidate.duration.toInt()
+                                        val durMin = durSec / 60
+                                        val durRem = durSec % 60
+                                        Text(
+                                            "%02d:%02d".format(durMin, durRem),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = colors.onSurfaceVariant,
+                                        )
+                                        Spacer(Modifier.height(4.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(
+                                                    if (!candidate.syncedLyrics.isNullOrBlank()) colors.primary.copy(alpha = 0.2f)
+                                                    else colors.surfaceVariant
+                                                )
+                                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                                        ) {
+                                            Text(
+                                                if (!candidate.syncedLyrics.isNullOrBlank()) stringResource(R.string.synced_badge)
+                                                else stringResource(R.string.plain_badge),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = if (!candidate.syncedLyrics.isNullOrBlank()) colors.primary else colors.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
             }
         }
     }
@@ -779,6 +891,10 @@ private fun LyricsPage(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TextButton(onClick = onRetry) { Text(stringResource(R.string.retry_search)) }
                         TextButton(onClick = onImport) { Text(stringResource(R.string.import_lrc)) }
+                        TextButton(onClick = {
+                            onLoadCandidates()
+                            showCandidatesSheet = true
+                        }) { Text(stringResource(R.string.choose_lyrics_version)) }
                     }
                     if (state == LyricsUiState.NotFound || state is LyricsUiState.Error) {
                         Spacer(Modifier.height(8.dp))
@@ -812,10 +928,22 @@ private fun LyricsPage(
                                 style = MaterialTheme.typography.labelMedium,
                                 color = colors.onSurfaceVariant,
                             )
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs - 250L) }) { Text(stringResource(R.string.offset_negative_step)) }
+                            Spacer(Modifier.height(4.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs - 250L) }) { Text("-250ms") }
+                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs - 50L) }) { Text("-50ms") }
                                 TextButton(onClick = { onOffsetChange(0L) }) { Text(stringResource(R.string.reset)) }
-                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs + 250L) }) { Text(stringResource(R.string.offset_positive_step)) }
+                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs + 50L) }) { Text("+50ms") }
+                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs + 250L) }) { Text("+250ms") }
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            TextButton(
+                                onClick = {
+                                    onLoadCandidates()
+                                    showCandidatesSheet = true
+                                },
+                            ) {
+                                Text(stringResource(R.string.choose_lyrics_version), style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }
@@ -832,28 +960,75 @@ private fun LyricsPage(
                         tween(220),
                         label = "lyric_color",
                     )
-                    Text(
-                        text = line.text,
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            fontSize = if (isActive) 20.sp else 17.sp,
-                            fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
-                            lineHeight = if (isActive) 29.sp else 25.sp,
-                            textDirection = TextDirection.Content,
-                        ),
-                        color = lineColor,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .scale(scale)
-                            .then(
-                                if (lyrics.synced && line.timeMs >= 0) {
-                                    Modifier.pointerInput(line.timeMs, lyrics.offsetMs) {
-                                        detectTapGestures { onSeek(lyrics.seekPositionFor(line)) }
-                                    }
-                                } else Modifier,
-                            )
-                            .padding(vertical = 6.dp),
-                    )
+
+                    val adjustedPos = smoothPositionMs - lyrics.offsetMs
+                    val annotatedText = if (isActive && line.hasWordTiming) {
+                        androidx.compose.ui.text.buildAnnotatedString {
+                            val words = line.words!!
+                            for (wIdx in words.indices) {
+                                val word = words[wIdx]
+                                val nextWordStart = words.getOrNull(wIdx + 1)?.startTimeMs
+                                    ?: if (word.endTimeMs > 0) word.endTimeMs else (word.startTimeMs + 2000L)
+                                val isWordCurrent = adjustedPos >= word.startTimeMs && adjustedPos < nextWordStart
+                                val isWordPassed = adjustedPos >= nextWordStart
+                                val wordColor = when {
+                                    isWordCurrent -> colors.primary
+                                    isWordPassed -> colors.primary.copy(alpha = 0.85f)
+                                    else -> colors.onSurface.copy(alpha = 0.40f)
+                                }
+                                val wordWeight = if (isWordCurrent) FontWeight.Bold else FontWeight.SemiBold
+                                pushStyle(androidx.compose.ui.text.SpanStyle(color = wordColor, fontWeight = wordWeight))
+                                append(word.text)
+                                pop()
+                            }
+                        }
+                    } else null
+
+                    if (annotatedText != null) {
+                        Text(
+                            text = annotatedText,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = 20.sp,
+                                lineHeight = 29.sp,
+                                textDirection = TextDirection.Content,
+                            ),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .scale(scale)
+                                .then(
+                                    if (lyrics.synced && line.timeMs >= 0) {
+                                        Modifier.pointerInput(line.timeMs, lyrics.offsetMs) {
+                                             detectTapGestures { onSeek(lyrics.seekPositionFor(line)) }
+                                        }
+                                    } else Modifier,
+                                )
+                                .padding(vertical = 6.dp),
+                        )
+                    } else {
+                        Text(
+                            text = line.text,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = if (isActive) 20.sp else 17.sp,
+                                fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                                lineHeight = if (isActive) 29.sp else 25.sp,
+                                textDirection = TextDirection.Content,
+                            ),
+                            color = lineColor,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .scale(scale)
+                                .then(
+                                    if (lyrics.synced && line.timeMs >= 0) {
+                                        Modifier.pointerInput(line.timeMs, lyrics.offsetMs) {
+                                            detectTapGestures { onSeek(lyrics.seekPositionFor(line)) }
+                                        }
+                                    } else Modifier,
+                                )
+                                .padding(vertical = 6.dp),
+                        )
+                    }
                 }
             }
             AnimatedVisibility(

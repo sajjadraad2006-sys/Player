@@ -126,7 +126,52 @@ class FreeMusicDiscoveryProvider : OnlineMusicProvider {
                 "${it.title.lowercase().trim()}_${it.artist.lowercase().trim()}" 
             }
 
-            ProviderResult.Success(distinct)
+            // Sort by version-aware ranking (Original Studio first unless requested)
+            val queryLower = trimmed.lowercase()
+            val hasRemixInQuery = "remix" in queryLower || "mix" in queryLower
+            val hasLiveInQuery = "live" in queryLower || "concert" in queryLower
+            val hasAcousticInQuery = "acoustic" in queryLower || "unplugged" in queryLower
+            val hasSpedInQuery = "sped" in queryLower || "nightcore" in queryLower
+            val hasSlowedInQuery = "slowed" in queryLower
+            val hasInstrumentalInQuery = "instrumental" in queryLower || "karaoke" in queryLower
+            val hasCoverInQuery = "cover" in queryLower
+
+            val ranked = distinct.sortedWith(
+                compareByDescending<OnlineTrack> { track ->
+                    var score = 100
+                    val titleLower = track.title.lowercase()
+
+                    if (titleLower == queryLower) score += 200
+                    else if (titleLower.startsWith(queryLower)) score += 100
+                    else if (titleLower.contains(queryLower)) score += 50
+
+                    val isRemix = "remix" in titleLower || " mix" in titleLower
+                    val isLive = "live" in titleLower || "concert" in titleLower
+                    val isAcoustic = "acoustic" in titleLower || "unplugged" in titleLower
+                    val isSped = "sped up" in titleLower || "nightcore" in titleLower
+                    val isSlowed = "slowed" in titleLower
+                    val isInstrumental = "instrumental" in titleLower || "karaoke" in titleLower
+                    val isCover = "cover" in titleLower
+
+                    if (isRemix && !hasRemixInQuery) score -= 40
+                    if (isLive && !hasLiveInQuery) score -= 35
+                    if (isAcoustic && !hasAcousticInQuery) score -= 30
+                    if (isSped && !hasSpedInQuery) score -= 45
+                    if (isSlowed && !hasSlowedInQuery) score -= 45
+                    if (isInstrumental && !hasInstrumentalInQuery) score -= 40
+                    if (isCover && !hasCoverInQuery) score -= 35
+
+                    if (isRemix && hasRemixInQuery) score += 60
+                    if (isLive && hasLiveInQuery) score += 60
+                    if (isAcoustic && hasAcousticInQuery) score += 60
+                    if (isSped && hasSpedInQuery) score += 60
+                    if (isSlowed && hasSlowedInQuery) score += 60
+
+                    score
+                }
+            )
+
+            ProviderResult.Success(ranked)
         } catch (e: Exception) {
             Log.e(TAG, "Search failed", e)
             ProviderResult.Error(e.localizedMessage ?: "Search failed")
@@ -144,7 +189,9 @@ class FreeMusicDiscoveryProvider : OnlineMusicProvider {
             if (resp.status == HttpStatusCode.OK) {
                 val body = resp.body<ITunesSearchResponse>()
                 body.results.mapNotNull { item ->
-                    val stream = item.previewUrl ?: return@mapNotNull null
+                    // iTunes previewUrl is a ~30-second promotional clip.
+                    // It is a PREVIEW only — never a download or full stream.
+                    val preview = item.previewUrl ?: return@mapNotNull null
                     val highResArt = item.artworkUrl100?.replace("100x100bb.jpg", "600x600bb.jpg") ?: ""
                     val genre = item.primaryGenreName ?: "Audio"
                     OnlineTrack(
@@ -153,14 +200,13 @@ class FreeMusicDiscoveryProvider : OnlineMusicProvider {
                         title           = item.trackName,
                         artist          = item.artistName,
                         album           = item.collectionName ?: genre,
-                        durationMs      = item.trackTimeMillis.coerceAtLeast(30_000L),
+                        durationMs      = item.trackTimeMillis,
                         artworkUrl      = highResArt,
-                        streamUrl       = stream,
-                        downloadUrl     = stream,
-                        downloadAllowed = true,
-                        license         = "Direct Audio / Free Stream",
-                        licenseUrl      = "",
-                        sourceUrl       = stream,
+                        previewUrl      = preview,
+                        streamUrl       = null,
+                        downloadUrl     = null,
+                        downloadAllowed = false,
+                        license         = "Catalog search / 30s preview only",
                     )
                 }
             } else emptyList()
@@ -179,7 +225,8 @@ class FreeMusicDiscoveryProvider : OnlineMusicProvider {
             if (resp.status == HttpStatusCode.OK) {
                 val body = resp.body<DeezerSearchResponse>()
                 body.data.mapNotNull { item ->
-                    val stream = item.preview ?: return@mapNotNull null
+                    // Deezer preview is a ~30-second promotional clip — PREVIEW only.
+                    val preview = item.preview ?: return@mapNotNull null
                     val art = item.album?.coverBig ?: item.album?.coverMedium ?: ""
                     OnlineTrack(
                         provider        = "deezer",
@@ -189,12 +236,11 @@ class FreeMusicDiscoveryProvider : OnlineMusicProvider {
                         album           = item.album?.title ?: "Single",
                         durationMs      = item.duration * 1000L,
                         artworkUrl      = art,
-                        streamUrl       = stream,
-                        downloadUrl     = stream,
-                        downloadAllowed = true,
-                        license         = "Direct Stream / Download",
-                        licenseUrl      = "",
-                        sourceUrl       = stream,
+                        previewUrl      = preview,
+                        streamUrl       = null,
+                        downloadUrl     = null,
+                        downloadAllowed = false,
+                        license         = "Catalog search / 30s preview only",
                     )
                 }
             } else emptyList()

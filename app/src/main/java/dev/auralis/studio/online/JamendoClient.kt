@@ -139,7 +139,8 @@ class JamendoClient(private val clientId: String) : OnlineMusicProvider {
         album           = albumName,
         durationMs      = duration * 1000L,
         artworkUrl      = image,
-        // audio = streaming preview; audioDownload = download (only if permitted)
+        // audio = full-length stream; audioDownload = authorized download (only if permitted)
+        previewUrl      = null,
         streamUrl       = audio.ifBlank { null },
         downloadUrl     = if (audioDownloadAllowed) audioDownload.ifBlank { null } else null,
         downloadAllowed = audioDownloadAllowed,

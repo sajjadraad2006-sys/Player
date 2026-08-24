@@ -87,6 +87,11 @@ data class LyricsCacheEntity(
     val plainLyrics: String = "",
     /** LRC-formatted synced lyrics string. Empty if none. */
     val syncedLyrics: String = "",
+    /**
+     * Raw Lyricsfile YAML (LRCLIB `lyricsfile`). Kept verbatim so the parser
+     * can be re-run when its logic improves. Empty if unavailable.
+     */
+    val lyricsfile: String = "",
     /** Track duration at time of fetch, used for match validation (ms). */
     val trackDurationMs: Long = 0,
     /** Epoch ms when this was fetched from the provider. */
@@ -103,7 +108,15 @@ data class LyricsCacheEntity(
 )
 
 /** Download record — one row per queued/active/completed download. */
-@Entity(tableName = "downloads", indices = [Index("status"), Index("trackUri")])
+@Entity(
+    tableName = "downloads",
+    indices = [
+        Index("status"),
+        Index("trackUri"),
+        // Stable DownloadKey — DB-level guarantee of one row per remote track.
+        Index(value = ["provider", "providerTrackId"], unique = true),
+    ],
+)
 data class DownloadEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     /** Local track URI after download, or empty while pending. */

@@ -41,9 +41,30 @@ class LrclibMatchingTest {
                 original,
                 client.pickBestCandidate(listOf(remix, original), "Song", "Artist", "Album", 180_000),
             )
-            assertEquals(0.24, client.versionMismatchPenalty("Song", "Song (Acoustic)"), 0.0)
+            assertEquals(0.40, client.versionMismatchPenalty("Song", "Song (Acoustic)"), 0.01)
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test fun studioTrackNeverBeatenByLiveOrAcousticDueToDurationProximity() {
+        val client = LrclibClient()
+        try {
+            val studio = LrclibTrack(1, "Closer", "Artist", "Album", 200.0, syncedLyrics = "[00:01.00]lyrics")
+            val acoustic = LrclibTrack(2, "Closer (Acoustic)", "Artist", "Album", 199.5, syncedLyrics = "[00:01.00]acoustic")
+            val live = LrclibTrack(3, "Closer (Live)", "Artist", "Album", 199.8, syncedLyrics = "[00:01.00]live")
+            val cover = LrclibTrack(4, "Closer (Cover)", "Artist", "Album", 200.0, syncedLyrics = "[00:01.00]cover")
+            val karaoke = LrclibTrack(5, "Closer (Karaoke)", "Artist", "Album", 200.0, syncedLyrics = "[00:01.00]karaoke")
+            val slowed = LrclibTrack(6, "Closer (Slowed)", "Artist", "Album", 200.0, syncedLyrics = "[00:01.00]slowed")
+            val spedUp = LrclibTrack(7, "Closer (Sped Up)", "Artist", "Album", 200.0, syncedLyrics = "[00:01.00]sped")
+
+            assertEquals(
+                studio,
+                client.pickBestCandidate(listOf(acoustic, live, cover, karaoke, slowed, spedUp, studio), "Closer", "Artist", "Album", 200_000),
+            )
         } finally {
             client.close()
         }
     }
 }
+

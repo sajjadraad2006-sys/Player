@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,10 +21,14 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
@@ -34,7 +40,10 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -46,10 +55,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import dev.auralis.studio.R
+import dev.auralis.studio.core.database.DownloadEntity
+import dev.auralis.studio.core.database.DownloadStatus
 import dev.auralis.studio.core.database.PlaylistEntity
 import dev.auralis.studio.core.model.Track
 import dev.auralis.studio.online.OnlineTrack
@@ -67,6 +79,7 @@ private val GENERAL_MUSIC_CATEGORIES = listOf(
     "Electronic" to R.string.genre_edm,
 )
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SearchScreen(
     query: String,
@@ -75,8 +88,12 @@ fun SearchScreen(
     playlists: List<PlaylistEntity>,
     onlineResults: List<OnlineTrack>,
     isSearchingOnline: Boolean,
+    recentSearches: List<String> = emptyList(),
+    downloads: List<DownloadEntity> = emptyList(),
     onQueryChange: (String) -> Unit,
     onSearchOnline: (String) -> Unit,
+    onClearRecentSearches: () -> Unit = {},
+    onRemoveRecentSearch: (String) -> Unit = {},
     onPlay: (Track, List<Track>) -> Unit,
     onPlayOnline: (OnlineTrack) -> Unit,
     onDownloadOnline: (OnlineTrack) -> Unit,
@@ -231,10 +248,170 @@ fun SearchScreen(
         // Tab Content
         if (selectedTab == 0) {
             // Local Library Search
-            if (query.isBlank() || results.isEmpty()) {
+            if (query.isBlank()) {
+                // Empty state: Show Recent Searches if available
+                if (recentSearches.isNotEmpty()) {
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.History,
+                                    contentDescription = null,
+                                    tint = colors.primary,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    stringResource(R.string.recent_searches),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.onSurface,
+                                )
+                            }
+                            TextButton(onClick = onClearRecentSearches) {
+                                Text(
+                                    stringResource(R.string.clear_all),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.primary,
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            recentSearches.forEach { searchItem ->
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(colors.surfaceVariant.copy(alpha = 0.65f))
+                                        .clickable { onQueryChange(searchItem) }
+                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(searchItem, style = MaterialTheme.typography.bodySmall, color = colors.onSurface)
+                                        Spacer(Modifier.width(6.dp))
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = stringResource(R.string.delete),
+                                            modifier = Modifier
+                                                .size(14.dp)
+                                                .clickable { onRemoveRecentSearch(searchItem) },
+                                            tint = colors.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                val completedDownloads = downloads.filter { it.status == dev.auralis.studio.core.database.DownloadStatus.COMPLETED.name }
+                if (completedDownloads.isNotEmpty()) {
+                    Spacer(Modifier.height(16.dp))
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.CloudDownload,
+                                contentDescription = null,
+                                tint = colors.primary,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                stringResource(R.string.recent_downloads),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.onSurface,
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        completedDownloads.take(5).forEach { dl ->
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(colors.surfaceVariant.copy(alpha = 0.4f))
+                                    .clickable {
+                                        if (dl.trackUri.isNotBlank()) {
+                                            val dummyTrack = Track(
+                                                id = dl.id,
+                                                uri = dl.trackUri,
+                                                title = dl.title,
+                                                artist = dl.artist,
+                                                album = dl.album,
+                                                durationMs = dl.durationMs,
+                                                displayName = dl.fileName,
+                                                sizeBytes = dl.bytesDownloaded,
+                                                dateAddedSeconds = dl.completedAt,
+                                            )
+                                            onPlay(dummyTrack, listOf(dummyTrack))
+                                        }
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            dl.title,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = colors.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            dl.artist,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = colors.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    Icon(
+                                        Icons.Default.PlayArrow,
+                                        contentDescription = stringResource(R.string.play),
+                                        tint = colors.primary,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(6.dp))
+                        }
+                    }
+                }
+
+                if (recentSearches.isEmpty() && completedDownloads.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            stringResource(R.string.search_empty),
+                            color = colors.onBackground.copy(alpha = 0.65f),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                }
+            } else if (results.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        stringResource(if (query.isBlank()) R.string.search_empty else R.string.no_results),
+                        stringResource(R.string.no_results),
                         color = colors.onBackground.copy(alpha = 0.65f),
                         style = MaterialTheme.typography.bodyLarge,
                     )
@@ -287,7 +464,7 @@ fun SearchScreen(
                             else stringResource(R.string.online_no_results, query),
                             style = MaterialTheme.typography.bodyMedium,
                             color = colors.onBackground.copy(alpha = 0.75f),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            textAlign = TextAlign.Center,
                         )
                     }
                 }
@@ -297,8 +474,15 @@ fun SearchScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     items(onlineResults, key = { "online:${it.provider}:${it.id}" }) { onlineTrack ->
+                        // Stable DownloadKey match only (provider + providerTrackId) —
+                        // title-based matching caused wrong duplicate state display.
+                        val downloadStatus = downloads.firstOrNull {
+                            it.provider == onlineTrack.provider && it.providerTrackId == onlineTrack.id
+                        }?.status
+
                         OnlineTrackCard(
                             track = onlineTrack,
+                            downloadStatus = downloadStatus,
                             onPlay = { onPlayOnline(onlineTrack) },
                             onDownload = { onDownloadOnline(onlineTrack) },
                         )
@@ -312,6 +496,7 @@ fun SearchScreen(
 @Composable
 private fun OnlineTrackCard(
     track: OnlineTrack,
+    downloadStatus: String? = null,
     onPlay: () -> Unit,
     onDownload: () -> Unit,
 ) {
@@ -368,9 +553,15 @@ private fun OnlineTrackCard(
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    stringResource(R.string.free_stream_download),
+                    when {
+                        downloadStatus == DownloadStatus.COMPLETED.name -> stringResource(R.string.downloaded)
+                        downloadStatus == DownloadStatus.DOWNLOADING.name -> stringResource(R.string.downloading)
+                        // Honest capability: previews are labelled Preview, never Download.
+                        !track.isDownloadableFullTrack -> stringResource(R.string.preview_available)
+                        else -> stringResource(R.string.free_stream_download)
+                    },
                     style = MaterialTheme.typography.labelSmall,
-                    color = colors.primary,
+                    color = if (downloadStatus == DownloadStatus.COMPLETED.name) colors.primary else colors.primary.copy(alpha = 0.85f),
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                 )
@@ -392,16 +583,80 @@ private fun OnlineTrackCard(
 
             Spacer(Modifier.width(6.dp))
 
-            // Quick Download Button
-            FilledIconButton(
-                onClick = onDownload,
-                modifier = Modifier.size(40.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = colors.surfaceVariant,
-                    contentColor = colors.onSurface,
-                ),
-            ) {
-                Icon(Icons.Default.Download, contentDescription = stringResource(R.string.download), tint = colors.primary, modifier = Modifier.size(20.dp))
+            // Download Status / Action Button
+            when (downloadStatus) {
+                DownloadStatus.COMPLETED.name -> {
+                    FilledIconButton(
+                        onClick = onPlay,
+                        modifier = Modifier.size(40.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = colors.primary.copy(alpha = 0.15f),
+                            contentColor = colors.primary,
+                        ),
+                    ) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = stringResource(R.string.downloaded),
+                            tint = colors.primary,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
+                DownloadStatus.DOWNLOADING.name -> {
+                    Box(
+                        modifier = Modifier.size(40.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            color = colors.primary,
+                            strokeWidth = 2.dp,
+                        )
+                    }
+                }
+                DownloadStatus.FAILED.name -> {
+                    FilledIconButton(
+                        onClick = onDownload,
+                        modifier = Modifier.size(40.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = colors.errorContainer,
+                            contentColor = colors.onErrorContainer,
+                        ),
+                    ) {
+                        Icon(
+                            Icons.Default.ErrorOutline,
+                            contentDescription = stringResource(R.string.download_failed),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+                else -> {
+                    if (track.isDownloadableFullTrack) {
+                        FilledIconButton(
+                            onClick = onDownload,
+                            modifier = Modifier.size(40.dp),
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = colors.surfaceVariant,
+                                contentColor = colors.onSurface,
+                            ),
+                        ) {
+                            Icon(
+                                Icons.Default.Download,
+                                contentDescription = stringResource(R.string.download),
+                                tint = colors.primary,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    } else {
+                        // Preview-only: no Download action is offered.
+                        Icon(
+                            Icons.Default.MusicNote,
+                            contentDescription = stringResource(R.string.preview_available),
+                            tint = colors.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
             }
         }
     }

@@ -55,10 +55,15 @@ class PlaybackService : MediaLibraryService() {
         super.onCreate()
         processor = StudioAudioProcessor(container.pcmAudioTap)
         val renderersFactory = StudioRenderersFactory(this, processor)
+        val dataSourceFactory = LyruneDataSourceFactory(this)
+        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(this)
+            .setDataSourceFactory(dataSourceFactory)
         player = ExoPlayer.Builder(this, renderersFactory)
+            .setMediaSourceFactory(mediaSourceFactory)
             .setSeekBackIncrementMs(10_000)
             .setSeekForwardIncrementMs(10_000)
             .build()
+
             .apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()

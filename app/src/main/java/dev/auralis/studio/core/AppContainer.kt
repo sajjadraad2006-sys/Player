@@ -16,7 +16,7 @@ class AppContainer(context: Context) {
         AppDatabase::class.java,
         "auralis.db",
     )
-        .addMigrations(AppDatabase.MIGRATION_1_2)
+        .addMigrations(*AppDatabase.ALL_MIGRATIONS)
         .build()
 
     val settings    = SettingsRepository(context)
@@ -24,4 +24,8 @@ class AppContainer(context: Context) {
     val safLibrary  = SafMusicRepository(context)
     val pcmAudioTap = PcmAudioTap()
     val lyrics = LyricsRepository(context, database.lyricsDao(), LrclibClient())
+    val downloadManager = dev.auralis.studio.library.DownloadIngestionManager(context, database.downloadsDao(), library).also {
+        dev.auralis.studio.library.DownloadWorkerBridge.attach(it)
+    }
+    val downloadRepair = dev.auralis.studio.library.DownloadRepairManager(context, database.downloadsDao(), library)
 }

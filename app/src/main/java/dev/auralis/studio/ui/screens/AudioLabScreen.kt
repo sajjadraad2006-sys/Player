@@ -66,15 +66,21 @@ import kotlin.math.roundToInt
 
 @Composable
 fun AudioLabScreen(
+
     config: AudioConfig,
     onChange: (AudioConfig) -> Unit,
     stemState: StemUiState,
+    stemGains: dev.auralis.studio.audio.stems.StemMixGains,
     currentTrack: Track?,
     onDownloadStemModel: () -> Unit,
     onDeleteStemModel: () -> Unit,
     onPrepareStems: (Track) -> Unit,
     onCancelStemWork: () -> Unit,
     onPlayStem: (StemKind) -> Unit,
+    onVocalsGainChange: (Float) -> Unit,
+    onInstrumentalGainChange: (Float) -> Unit,
+    onBassGainChange: (Float) -> Unit,
+    onPlayStemMix: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var eqExpanded by remember { mutableStateOf(false) }
@@ -111,12 +117,17 @@ fun AudioLabScreen(
         item {
             StemIsolationPanel(
                 state = stemState,
+                stemGains = stemGains,
                 currentTrack = currentTrack,
                 onDownloadModel = onDownloadStemModel,
                 onDeleteModel = onDeleteStemModel,
                 onPrepare = onPrepareStems,
                 onCancel = onCancelStemWork,
                 onPlayStem = onPlayStem,
+                onVocalsGainChange = onVocalsGainChange,
+                onInstrumentalGainChange = onInstrumentalGainChange,
+                onBassGainChange = onBassGainChange,
+                onPlayStemMix = onPlayStemMix,
             )
         }
         item { PitchTempoPanel(config, onChange) }
@@ -147,12 +158,17 @@ fun AudioLabScreen(
 @Composable
 private fun StemIsolationPanel(
     state: StemUiState,
+    stemGains: dev.auralis.studio.audio.stems.StemMixGains,
     currentTrack: Track?,
     onDownloadModel: () -> Unit,
     onDeleteModel: () -> Unit,
     onPrepare: (Track) -> Unit,
     onCancel: () -> Unit,
     onPlayStem: (StemKind) -> Unit,
+    onVocalsGainChange: (Float) -> Unit,
+    onInstrumentalGainChange: (Float) -> Unit,
+    onBassGainChange: (Float) -> Unit,
+    onPlayStemMix: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
     GlassCard(Modifier.fillMaxWidth()) {
@@ -213,8 +229,40 @@ private fun StemIsolationPanel(
                 }
                 is StemUiState.Complete -> {
                     Text(stringResource(R.string.stem_ready_to_listen), color = colors.onSurfaceVariant)
+
+                    Button(
+                        onClick = onPlayStemMix,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.play_stem_mix))
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(stringResource(R.string.vocals_gain), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+                            Text("${(stemGains.vocals * 100).roundToInt()}%", style = MaterialTheme.typography.bodyMedium, color = colors.primary)
+                        }
+                        AuralisSlider(
+                            value = stemGains.vocals,
+                            onValueChange = onVocalsGainChange,
+                            valueRange = 0f..1f,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(stringResource(R.string.instrumental_gain), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+                            Text("${(stemGains.instrumental * 100).roundToInt()}%", style = MaterialTheme.typography.bodyMedium, color = colors.primary)
+                        }
+                        AuralisSlider(
+                            value = stemGains.instrumental,
+                            onValueChange = onInstrumentalGainChange,
+                            valueRange = 0f..1f,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { onPlayStem(StemKind.VOCALS) }, modifier = Modifier.weight(1f)) {
+                        FilledTonalButton(onClick = { onPlayStem(StemKind.VOCALS) }, modifier = Modifier.weight(1f)) {
                             Text(stringResource(R.string.stem_play_vocals))
                         }
                         FilledTonalButton(onClick = { onPlayStem(StemKind.INSTRUMENTAL) }, modifier = Modifier.weight(1f)) {
@@ -257,6 +305,7 @@ private fun StemIsolationPanel(
 
 @Composable
 private fun DspPanel(config: AudioConfig, onChange: (AudioConfig) -> Unit) {
+
     val colors = MaterialTheme.colorScheme
     GlassCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {

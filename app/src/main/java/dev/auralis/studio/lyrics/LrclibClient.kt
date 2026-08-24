@@ -31,7 +31,14 @@ data class LrclibTrack(
     val duration: Double = 0.0,
     val plainLyrics: String? = null,
     val syncedLyrics: String? = null,
+    /**
+     * Raw Lyricsfile YAML document (https://lrclib.net/lyricsfile).
+     * LRCLIB docs state every lyrics record contains one. May carry genuine
+     * word-level timing that legacy syncedLyrics cannot express.
+     */
+    val lyricsfile: String? = null,
 )
+
 
 /**
  * Client for the LRCLIB open lyrics API.
@@ -92,7 +99,7 @@ class LrclibClient {
             when (resp.status) {
                 HttpStatusCode.OK -> {
                     val track = resp.body<LrclibTrack>()
-                    if (!track.syncedLyrics.isNullOrBlank() || !track.plainLyrics.isNullOrBlank()) {
+                    if (!track.syncedLyrics.isNullOrBlank() || !track.plainLyrics.isNullOrBlank() || !track.lyricsfile.isNullOrBlank()) {
                         return track
                     }
                 }
@@ -157,24 +164,57 @@ class LrclibClient {
     }
 
     /**
-     * Scoring: picks the candidate that best matches title, artist, and duration.
-     * Rejects candidates whose synced and plain lyrics are both absent.
-     * Threshold: minimum score of 0.40 required to accept a match.
+     * Searches for candidates and returns them sorted by match confidence.
      */
-    internal fun pickBestCandidate(
+    suspend fun searchCandidates(
+        title: String,
+        artist: String,
+        album: String = "",
+        durationMs: Long,
+    ): List<LrclibTrack> {
+        return try {
+            if (System.currentTimeMillis() < rateLimitedUntilMs) return emptyList()
+            lastLookupError = null
+            throttle()
+            val resp = client.get("$BASE/search") {
+                parameter("track_name", title)
+                if (artist.isNotBlank()) parameter("artist_name", artist)
+            }
+            if (resp.status == HttpStatusCode.TooManyRequests) {
+                val retryAfter = resp.headers["Retry-After"]?.toLongOrNull() ?: 5L
+                rateLimitedUntilMs = System.currentTimeMillis() + retryAfter.coerceIn(1L, 300L) * 1_000L
+                lastLookupWasRateLimited = true
+                return emptyList()
+            }
+            if (!resp.status.isSuccess()) return emptyList()
+
+            val candidates = resp.body<List<LrclibTrack>>()
+            scoreCandidates(candidates, title, artist, album, durationMs)
+                .filter { it.score >= 0.30 }
+                .map { it.track }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            lastLookupError = e.localizedMessage ?: "Network request failed"
+            Log.e(TAG, "LRCLIB /searchCandidates error: ${e.message}")
+            emptyList()
+        }
+    }
+
+    internal data class ScoredTrack(val track: LrclibTrack, val score: Double)
+
+    internal fun scoreCandidates(
         candidates: List<LrclibTrack>,
         title: String,
         artist: String,
         album: String = "",
         durationMs: Long,
-    ): LrclibTrack? {
-        if (candidates.isEmpty()) return null
+    ): List<ScoredTrack> {
+        if (candidates.isEmpty()) return emptyList()
         val durationSec = durationMs / 1000.0
 
-        data class Scored(val track: LrclibTrack, val score: Double)
-
-        val scored = candidates.mapNotNull { track ->
-            if (track.syncedLyrics.isNullOrBlank() && track.plainLyrics.isNullOrBlank()) return@mapNotNull null
+        return candidates.mapNotNull { track ->
+            if (track.syncedLyrics.isNullOrBlank() && track.plainLyrics.isNullOrBlank() && track.lyricsfile.isNullOrBlank()) return@mapNotNull null
             val titleWeight = when {
                 artist.isBlank() && durationMs <= 0 -> 0.95
                 artist.isBlank() -> 0.75
@@ -194,22 +234,34 @@ class LrclibClient {
             val durDiff   = abs(durationSec - track.duration)
             val durScore  = when {
                 durationMs <= 0 -> 0.0
-                durDiff < 1  -> 0.20
-                durDiff < 3  -> 0.15
-                durDiff < 8  -> 0.08
-                durDiff < 20 -> 0.03
-                else         -> 0.0
+                durDiff < 1.0   -> 0.25 // Excellent match
+                durDiff < 2.0   -> 0.18 // Strong match
+                durDiff < 4.0   -> 0.10
+                durDiff < 8.0   -> 0.04
+                durDiff < 20.0  -> 0.01
+                else            -> -0.15 // Duration mismatch penalty
             }
-            val syncBonus = if (!track.syncedLyrics.isNullOrBlank()) 0.05 else 0.0
-            // A close duration must not make a studio recording beat an explicitly requested
-            // live/acoustic/remix version (or vice versa). These qualifiers are musically
-            // meaningful metadata, so unlike promotional suffixes the normalizer preserves them.
+            val syncBonus = if (!track.syncedLyrics.isNullOrBlank()) 0.06 else 0.0
             val versionPenalty = versionMismatchPenalty(queryTitle, candidateTitle)
             val total = titleSim + artistSim + albumBonus + durScore + syncBonus - versionPenalty
-            Scored(track, total)
-        }
+            ScoredTrack(track, total)
+        }.sortedByDescending { it.score }
+    }
 
-        val best = scored.maxByOrNull { it.score } ?: return null
+    /**
+     * Scoring: picks the candidate that best matches title, artist, and duration.
+     * Rejects candidates whose synced and plain lyrics are both absent.
+     * Threshold: minimum score of 0.58 required to accept an automatic match.
+     */
+    internal fun pickBestCandidate(
+        candidates: List<LrclibTrack>,
+        title: String,
+        artist: String,
+        album: String = "",
+        durationMs: Long,
+    ): LrclibTrack? {
+        val scored = scoreCandidates(candidates, title, artist, album, durationMs)
+        val best = scored.firstOrNull() ?: return null
         val threshold = if (artist.isBlank() || durationMs <= 0) 0.78 else 0.58
         if (best.score < threshold) {
             return null
@@ -231,10 +283,12 @@ class LrclibClient {
         val query = versionTags(queryTitle)
         val candidate = versionTags(candidateTitle)
         if (query == candidate) return 0.0
-        // An explicit but different version is riskier than an unqualified candidate.
+        // Version identity is stronger than duration.
+        // A live or remix version must never beat a studio query simply because of duration.
         return when {
-            query.isNotEmpty() && candidate.isNotEmpty() -> 0.34
-            query.isNotEmpty() || candidate.isNotEmpty() -> 0.24
+            query.isNotEmpty() && candidate.isNotEmpty() -> 0.45
+            query.isEmpty() && candidate.isNotEmpty() -> 0.40
+            query.isNotEmpty() && candidate.isEmpty() -> 0.35
             else -> 0.0
         }
     }
@@ -247,12 +301,18 @@ class LrclibClient {
         val tags = linkedSetOf<String>()
         if ("live" in words || "concert" in words) tags += "live"
         if ("acoustic" in words || "unplugged" in words) tags += "acoustic"
-        if ("remix" in words || "mix" in words || "edit" in words) tags += "remix"
-        if ("instrumental" in words || "karaoke" in words) tags += "instrumental"
+        if ("remix" in words || "mix" in words) tags += "remix"
+        if ("instrumental" in words) tags += "instrumental"
+        if ("karaoke" in words) tags += "karaoke"
+        if ("cover" in words) tags += "cover"
         if ("demo" in words) tags += "demo"
+        if ("remaster" in words || "remastered" in words) tags += "remaster"
+        if ("slowed" in words) tags += "slowed"
+        if ("sped" in words || "nightcore" in words || ("speed" in words && "up" in words)) tags += "sped_up"
         if ("radio" in words && "edit" in words) tags += "radio_edit"
         return tags
     }
+
 
     private fun trigrams(s: String): Set<String> =
         (0..s.length - 3).map { s.substring(it, it + 3) }.toSet()

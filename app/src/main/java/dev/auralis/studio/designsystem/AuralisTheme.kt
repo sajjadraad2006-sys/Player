@@ -103,143 +103,74 @@ private object AuralisPalette {
 
 /**
  * Derives a complete M3 color scheme ensuring all text, sliders,
- * chips, and buttons are always clearly visible with high contrast.
+ * chips, and buttons are always clearly visible with high contrast via HCT.
  */
-private fun buildColorScheme(settings: ThemeSettings, dark: Boolean, artwork: ArtworkPalette?) = if (dark) {
-    val isDynamic = settings.style == ThemeStyle.DYNAMIC_ART
-    val accent = accessibleAccent(if (isDynamic) artwork?.vibrant ?: Color(settings.accentArgb) else Color(settings.accentArgb), dark = true)
-    val amoled = ThemeModeResolver.isAmoled(settings.appearance)
-    val isNeon = settings.style == ThemeStyle.NEON
-    val isGlass = settings.style == ThemeStyle.GLASS || settings.style == ThemeStyle.DYNAMIC_ART
-
-    val bg = when {
-        amoled -> AuralisPalette.BgAmoled
-        isDynamic && artwork != null -> lerp(AuralisPalette.BgDeepDark, artwork.dark, 0.42f)
-        isNeon -> Color(0xFF0C0C20)
-        isGlass -> Color(0xFF101124)
-        else -> AuralisPalette.BgDeepDark
+private fun buildColorScheme(
+    settings: ThemeSettings,
+    dark: Boolean,
+    artwork: ArtworkPalette?,
+): androidx.compose.material3.ColorScheme {
+    val derived = ColorTonalPalette.buildPalette(settings, dark, artwork)
+    return if (dark) {
+        darkColorScheme(
+            primary            = derived.primary,
+            onPrimary          = derived.onPrimary,
+            primaryContainer   = derived.primaryContainer,
+            onPrimaryContainer = derived.onPrimaryContainer,
+            secondary          = derived.secondary,
+            onSecondary        = derived.onSecondary,
+            secondaryContainer = derived.secondaryContainer,
+            onSecondaryContainer = derived.onSecondaryContainer,
+            tertiary           = ColorTonalPalette.Success,
+            onTertiary         = ColorTonalPalette.OnLight,
+            background         = derived.background,
+            onBackground       = derived.onBackground,
+            surface            = derived.surface,
+            onSurface          = derived.onSurface,
+            surfaceVariant     = derived.surfaceVariant,
+            onSurfaceVariant   = derived.onSurfaceVariant,
+            outline            = derived.outline,
+            outlineVariant     = derived.outlineVariant,
+            error              = ColorTonalPalette.Error,
+            onError            = ColorTonalPalette.OnError,
+            scrim              = Color.Black,
+            inverseSurface     = ColorTonalPalette.BgLight,
+            inverseOnSurface   = ColorTonalPalette.OnLight,
+            inversePrimary     = lerp(ColorTonalPalette.BgLight, derived.primary, 0.35f),
+        )
+    } else {
+        lightColorScheme(
+            primary            = derived.primary,
+            onPrimary          = derived.onPrimary,
+            primaryContainer   = derived.primaryContainer,
+            onPrimaryContainer = derived.onPrimaryContainer,
+            secondary          = derived.secondary,
+            onSecondary        = derived.onSecondary,
+            secondaryContainer = derived.secondaryContainer,
+            onSecondaryContainer = derived.onSecondaryContainer,
+            tertiary           = Color(0xFF00897B),
+            onTertiary         = ColorTonalPalette.OnDark,
+            background         = derived.background,
+            onBackground       = derived.onBackground,
+            surface            = derived.surface,
+            onSurface          = derived.onSurface,
+            surfaceVariant     = derived.surfaceVariant,
+            onSurfaceVariant   = derived.onSurfaceVariant,
+            outline            = derived.outline,
+            outlineVariant     = derived.outlineVariant,
+            error              = Color(0xFFD32F2F),
+            onError            = ColorTonalPalette.OnDark,
+            scrim              = Color.Black,
+            inverseSurface     = ColorTonalPalette.SurfDark,
+            inverseOnSurface   = ColorTonalPalette.OnDark,
+            inversePrimary     = lerp(ColorTonalPalette.SurfDark, derived.primary, 0.4f),
+        )
     }
-    val surf = when {
-        amoled -> AuralisPalette.SurfAmoled
-        isDynamic && artwork != null -> lerp(AuralisPalette.SurfDark, artwork.muted, 0.24f)
-        isNeon -> Color(0xFF161633)
-        isGlass -> AuralisPalette.GlassSurfDark
-        else -> AuralisPalette.SurfDark
-    }
-    val surfVar = when {
-        amoled -> Color(0xFF1A1A24)
-        isDynamic && artwork != null -> lerp(AuralisPalette.SurfVarDark, artwork.dominant, 0.30f)
-        isNeon -> Color(0xFF22224A)
-        isGlass -> Color(0xFF2A2E52)
-        else -> AuralisPalette.SurfVarDark
-    }
-
-    val secondary = when (settings.style) {
-        ThemeStyle.NEON    -> Color(0xFFFF52BF)
-        ThemeStyle.DYNAMIC_ART -> artwork?.light ?: Color(0xFFB39DDB)
-        ThemeStyle.GLASS -> artwork?.muted ?: Color(0xFFB39DDB)
-        ThemeStyle.CLASSIC -> Color(0xFFB5B0D8)
-        else               -> Color(0xFFB39DDB)
-    }
-
-    darkColorScheme(
-        primary            = accent,
-        onPrimary          = if (isColorDark(accent)) AuralisPalette.OnDark else AuralisPalette.OnLight,
-        primaryContainer   = lerp(surfVar, accent, 0.28f),
-        onPrimaryContainer = AuralisPalette.OnDark,
-        secondary          = secondary,
-        onSecondary        = AuralisPalette.OnDark,
-        secondaryContainer = lerp(surfVar, secondary, 0.24f),
-        onSecondaryContainer = AuralisPalette.OnDark,
-        tertiary           = AuralisPalette.Success,
-        onTertiary         = AuralisPalette.OnLight,
-        background         = bg,
-        onBackground       = AuralisPalette.OnDark,
-        surface            = surf,
-        onSurface          = AuralisPalette.OnDark,
-        surfaceVariant     = surfVar,
-        onSurfaceVariant   = AuralisPalette.OnDarkSub,
-        outline            = if (isGlass) AuralisPalette.GlassBorder else AuralisPalette.OutlineDark,
-        outlineVariant     = AuralisPalette.OutlineDark.copy(alpha = 0.6f),
-        error              = AuralisPalette.Error,
-        onError            = AuralisPalette.OnError,
-        scrim              = Color.Black,
-        inverseSurface     = AuralisPalette.BgLight,
-        inverseOnSurface   = AuralisPalette.OnLight,
-        inversePrimary     = lerp(AuralisPalette.BgLight, accent, 0.35f),
-    )
-} else {
-    val isDynamic = settings.style == ThemeStyle.DYNAMIC_ART
-    val accent = accessibleAccent(if (isDynamic) artwork?.vibrant ?: Color(settings.accentArgb) else Color(settings.accentArgb), dark = false)
-    val isMinimal = settings.style == ThemeStyle.MINIMAL
-    val isMaterial = settings.style == ThemeStyle.MATERIAL
-
-    val bg = when {
-        isDynamic && artwork != null -> lerp(AuralisPalette.BgLight, artwork.light, 0.22f)
-        isMinimal -> Color(0xFFFAFAFC)
-        isMaterial -> Color(0xFFF7F5FE)
-        else -> AuralisPalette.BgLight
-    }
-
-    lightColorScheme(
-        primary            = accent,
-        onPrimary          = if (isColorDark(accent)) AuralisPalette.OnDark else AuralisPalette.OnLight,
-        primaryContainer   = lerp(Color.White, accent, 0.18f),
-        onPrimaryContainer = AuralisPalette.OnLight,
-        secondary          = if (isDynamic && artwork != null) accessibleAccent(artwork.muted, false) else Color(0xFF674FD8),
-        onSecondary        = AuralisPalette.OnDark,
-        secondaryContainer = Color(0xFFE8E4FA),
-        onSecondaryContainer = AuralisPalette.OnLight,
-        tertiary           = Color(0xFF00897B),
-        onTertiary         = AuralisPalette.OnDark,
-        background         = bg,
-        onBackground       = AuralisPalette.OnLight,
-        surface            = AuralisPalette.SurfLight,
-        onSurface          = AuralisPalette.OnLight,
-        surfaceVariant     = AuralisPalette.SurfVarLight,
-        onSurfaceVariant   = AuralisPalette.OnLightSub,
-        outline            = AuralisPalette.OutlineLight,
-        outlineVariant     = AuralisPalette.OutlineLight.copy(alpha = 0.65f),
-        error              = Color(0xFFD32F2F),
-        onError            = AuralisPalette.OnDark,
-        scrim              = Color.Black,
-        inverseSurface     = AuralisPalette.SurfDark,
-        inverseOnSurface   = AuralisPalette.OnDark,
-        inversePrimary     = lerp(AuralisPalette.SurfDark, accent, 0.4f),
-    )
 }
 
 /** Returns true if a colour should use white/light foreground text on top of it. */
-fun isColorDark(color: Color): Boolean {
-    val lum = 0.2126f * linearize(color.red) +
-              0.7152f * linearize(color.green) +
-              0.0722f * linearize(color.blue)
-    return lum < 0.38f
-}
+fun isColorDark(color: Color): Boolean = ColorTonalPalette.relativeLuminance(color) < 0.38f
 
-private fun linearize(v: Float): Float =
-    if (v <= 0.04045f) v / 12.92f else ((v + 0.055f) / 1.055f).let { it * it * it }
-
-private fun relativeLuminance(color: Color): Float =
-    0.2126f * linearize(color.red) + 0.7152f * linearize(color.green) + 0.0722f * linearize(color.blue)
-
-private fun contrastRatio(a: Color, b: Color): Float {
-    val lighter = maxOf(relativeLuminance(a), relativeLuminance(b))
-    val darker = minOf(relativeLuminance(a), relativeLuminance(b))
-    return (lighter + 0.05f) / (darker + 0.05f)
-}
-
-/** Keeps user accents identifiable while meeting non-text control contrast. */
-private fun accessibleAccent(raw: Color, dark: Boolean): Color {
-    val background = if (dark) AuralisPalette.BgDeepDark else AuralisPalette.BgLight
-    val target = if (dark) Color.White else Color.Black
-    var result = raw.copy(alpha = 1f)
-    repeat(12) {
-        if (contrastRatio(result, background) >= 3.1f) return result
-        result = lerp(result, target, 0.10f)
-    }
-    return result
-}
 
 /** Maps ThemeStyle → structural AuralisTokens for a given dark state. */
 internal fun buildTokens(settings: ThemeSettings, dark: Boolean): AuralisTokens {

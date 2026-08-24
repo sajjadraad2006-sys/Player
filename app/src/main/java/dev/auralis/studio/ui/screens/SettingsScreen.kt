@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Info
@@ -29,9 +30,13 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PrivacyTip
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +48,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -62,6 +68,7 @@ import dev.auralis.studio.core.model.ThemeSettings
 import dev.auralis.studio.core.model.ThemeStyle
 import dev.auralis.studio.core.model.VisualQuality
 import dev.auralis.studio.designsystem.AccentPalette
+import dev.auralis.studio.designsystem.HexColorParser
 import dev.auralis.studio.designsystem.AuralisFilterChip as FilterChip
 import dev.auralis.studio.designsystem.AuralisSlider as Slider
 import dev.auralis.studio.designsystem.AuralisSwitch as Switch
@@ -87,6 +94,13 @@ fun SettingsScreen(
     onRequestNotifications: () -> Unit,
     onChooseDownloadFolder: () -> Unit,
     onResetDownloadFolder: () -> Unit,
+    brokenDownloads: List<dev.auralis.studio.library.DownloadRepairManager.BrokenDownload> = emptyList(),
+    isScanningBrokenDownloads: Boolean = false,
+    onScanBrokenDownloads: () -> Unit = {},
+    onRemoveBrokenDownload: (dev.auralis.studio.library.DownloadRepairManager.BrokenDownload) -> Unit = {},
+    onKeepSuspiciousFile: (Long) -> Unit = {},
+    onRepairDownloadMetadata: () -> Unit = {},
+    metadataRepairMessage: String? = null,
     modifier: Modifier = Modifier,
 ) {
     var section by remember { mutableStateOf(SettingsSection.ROOT) }
@@ -118,6 +132,13 @@ fun SettingsScreen(
             onRequestNotifications = onRequestNotifications,
             onChooseDownloadFolder = onChooseDownloadFolder,
             onResetDownloadFolder = onResetDownloadFolder,
+            brokenDownloads = brokenDownloads,
+            isScanningBroken = isScanningBrokenDownloads,
+            onScanBrokenDownloads = onScanBrokenDownloads,
+            onRemoveBrokenDownload = onRemoveBrokenDownload,
+            onKeepSuspiciousFile = onKeepSuspiciousFile,
+            onRepairMetadata = onRepairDownloadMetadata,
+            metadataRepairMessage = metadataRepairMessage,
             onBack = { section = SettingsSection.ROOT },
             modifier = modifier,
         )
@@ -288,40 +309,10 @@ private fun AppearanceSection(
 
         // Accent colours
         item {
-            SettingsCard(stringResource(R.string.accent_color)) {
-                val accents = listOf(
-                    AccentPalette.MINT, AccentPalette.PURPLE, AccentPalette.PINK,
-                    AccentPalette.BLUE, AccentPalette.ORANGE, AccentPalette.TEAL,
-                    AccentPalette.GOLD, AccentPalette.CORAL, AccentPalette.LIME,
-                )
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(accents) { color ->
-                        val isSelected = theme.accentArgb == color.value.toLong()
-                        Box(
-                            Modifier
-                                .size(42.dp)
-                                .clip(CircleShape)
-                                .background(color)
-                                .then(
-                                    if (isSelected) Modifier.border(2.5.dp, colors.onSurface, CircleShape)
-                                    else Modifier,
-                                )
-                                .clickable { onThemeChange(theme.copy(accentArgb = color.value.toLong())) },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (isSelected) {
-                                Icon(
-                                    Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint     = if (isColorDark(color)) Color.White else Color(0xFF111111),
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            AccentColorSettingCard(theme = theme, onThemeChange = onThemeChange)
         }
+
+
 
         // Corner style
         item {
@@ -404,6 +395,13 @@ private fun LibrarySection(
     onRequestNotifications: () -> Unit,
     onChooseDownloadFolder: () -> Unit,
     onResetDownloadFolder: () -> Unit,
+    brokenDownloads: List<dev.auralis.studio.library.DownloadRepairManager.BrokenDownload>,
+    isScanningBroken: Boolean,
+    onScanBrokenDownloads: () -> Unit,
+    onRemoveBrokenDownload: (dev.auralis.studio.library.DownloadRepairManager.BrokenDownload) -> Unit,
+    onKeepSuspiciousFile: (Long) -> Unit,
+    onRepairMetadata: () -> Unit,
+    metadataRepairMessage: String?,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -485,7 +483,110 @@ private fun LibrarySection(
                 }
             }
         }
+
+        // ── Review broken downloads (Lyrune-owned preview pollution cleanup) ──
+        item {
+            SettingsCard(stringResource(R.string.review_broken_downloads)) {
+                Text(stringResource(R.string.review_broken_downloads_summary), style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.65f))
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = onScanBrokenDownloads,
+                    enabled = !isScanningBroken,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (isScanningBroken) stringResource(R.string.scanning) else stringResource(R.string.scan_for_broken_downloads))
+                }
+                if (!isScanningBroken && brokenDownloads.isEmpty()) {
+                    Text(stringResource(R.string.no_broken_downloads), style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.55f))
+                }
+            }
+        }
+        items(brokenDownloads, key = { it.entity.id }) { broken ->
+            BrokenDownloadCard(
+                item = broken,
+                onRemove = onRemoveBrokenDownload,
+                onKeep = onKeepSuspiciousFile,
+            )
+        }
+
+        // ── Repair download metadata ──
+        item {
+            SettingsCard(stringResource(R.string.repair_download_metadata)) {
+                Text(stringResource(R.string.repair_download_metadata_summary), style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.65f))
+                Spacer(Modifier.height(8.dp))
+                FilledTonalButton(onClick = onRepairMetadata, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.repair_download_metadata))
+                }
+                metadataRepairMessage?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = colors.primary)
+                }
+            }
+        }
     }
+}
+
+@Composable
+private fun BrokenDownloadCard(
+    item: dev.auralis.studio.library.DownloadRepairManager.BrokenDownload,
+    onRemove: (dev.auralis.studio.library.DownloadRepairManager.BrokenDownload) -> Unit,
+    onKeep: (Long) -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    var confirmRemove by remember { mutableStateOf(false) }
+
+    GlassCard(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Warning, contentDescription = null, tint = colors.error, modifier = Modifier.size(24.dp))
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(item.entity.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(
+                    stringResource(R.string.expected_duration_label, formatDuration(item.expectedDurationMs)),
+                    style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant,
+                )
+                Text(
+                    stringResource(R.string.local_duration_label, formatDuration(item.actualDurationMs)),
+                    style = MaterialTheme.typography.bodySmall, color = colors.error,
+                )
+                Text(item.reason, style = MaterialTheme.typography.labelSmall, color = colors.onSurface.copy(0.55f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { confirmRemove = true }, shape = RoundedCornerShape(12.dp)) {
+                Text(stringResource(R.string.remove_broken_download))
+            }
+            androidx.compose.material3.FilledTonalButton(onClick = { onKeep(item.entity.id) }, shape = RoundedCornerShape(12.dp)) {
+                Text(stringResource(R.string.keep_file))
+            }
+        }
+    }
+
+    if (confirmRemove) {
+        AlertDialog(
+            onDismissRequest = { confirmRemove = false },
+            title = { Text(stringResource(R.string.remove_broken_download)) },
+            text = { Text(stringResource(R.string.remove_download_confirm)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmRemove = false
+                    onRemove(item)
+                }) { Text(stringResource(R.string.remove_broken_download), color = colors.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRemove = false }) { Text(stringResource(R.string.keep_file)) }
+            },
+        )
+    }
+}
+
+private fun formatDuration(ms: Long): String {
+    val totalSeconds = ms / 1000
+    return "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
 }
 
 // ─── Providers section ────────────────────────────────────────────────────────
@@ -669,3 +770,143 @@ private fun cornerLabel(style: CornerStyle): String = stringResource(
         CornerStyle.ROUND -> R.string.round
     },
 )
+
+@Composable
+private fun AccentColorSettingCard(
+    theme: ThemeSettings,
+    onThemeChange: (ThemeSettings) -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    val accents = AccentPalette.PRESETS
+    val currentHex = remember(theme.accentArgb) {
+        HexColorParser.formatToHex(theme.accentArgb)
+    }
+    var customHexInput by remember(theme.accentArgb) {
+        mutableStateOf(currentHex)
+    }
+    val parsedCustomColor = remember(customHexInput) {
+        HexColorParser.parse(customHexInput)
+    }
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+
+    SettingsCard(stringResource(R.string.accent_color)) {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(accents) { color ->
+                val colorArgb = HexColorParser.fromComposeColor(color)
+                val isSelected = (theme.accentArgb and 0xFFFFFFFFL) == colorArgb
+                Box(
+                    Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(color)
+                        .then(
+                            if (isSelected) Modifier.border(2.5.dp, colors.onSurface, CircleShape)
+                            else Modifier,
+                        )
+                        .clickable {
+                            onThemeChange(theme.copy(accentArgb = colorArgb))
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (isSelected) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = null,
+                            tint = if (isColorDark(color)) Color.White else Color(0xFF111111),
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        HorizontalDivider(color = colors.outline.copy(alpha = 0.25f))
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            stringResource(R.string.custom_hex_color),
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(6.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            // Color swatch preview
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        parsedCustomColor?.let { Color(it.toInt()) } ?: colors.surfaceVariant
+                    )
+                    .border(1.dp, colors.outline.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (parsedCustomColor == null) {
+                    Text("?", color = colors.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            androidx.compose.material3.OutlinedTextField(
+                value = customHexInput,
+                onValueChange = { customHexInput = it },
+                placeholder = { Text(stringResource(R.string.hex_color_hint)) },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+                isError = parsedCustomColor == null && customHexInput.isNotBlank(),
+            )
+
+            TextButton(
+                onClick = {
+                    val clipText = clipboardManager.getText()?.text
+                    if (!clipText.isNullOrBlank()) {
+                        customHexInput = clipText
+                    }
+                }
+            ) {
+                Text(stringResource(R.string.paste))
+            }
+        }
+
+        if (parsedCustomColor == null && customHexInput.isNotBlank()) {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                stringResource(R.string.invalid_hex),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.error,
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(
+                onClick = {
+                    onThemeChange(theme.copy(accentArgb = AccentPalette.DEFAULT_ARGB))
+                }
+            ) {
+                Text(stringResource(R.string.reset_default))
+            }
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = {
+                    parsedCustomColor?.let { validArgb ->
+                        onThemeChange(theme.copy(accentArgb = validArgb))
+                    }
+                },
+                enabled = parsedCustomColor != null && (theme.accentArgb and 0xFFFFFFFFL) != parsedCustomColor,
+            ) {
+                Text(stringResource(R.string.apply))
+            }
+        }
+    }
+}
+

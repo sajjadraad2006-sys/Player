@@ -1,15 +1,34 @@
 package dev.auralis.studio.core.model
 
 /**
+ * Represents a single word inside a timed lyric line.
+
+ *
+ * @param startTimeMs  Word start timestamp in milliseconds.
+ * @param endTimeMs    Word end timestamp if explicitly provided, or -1L if unknown (UI will transition at next word's start).
+ * @param text         The word text string.
+ */
+data class LyricsWord(
+    val startTimeMs: Long,
+    val endTimeMs: Long = -1L,
+    val text: String,
+)
+
+/**
  * Represents a single line in a lyrics display (synced or plain).
  *
  * @param timeMs  Start timestamp in milliseconds. -1 for plain/unsynced lyrics.
  * @param text    The lyric line content.
+ * @param words   Optional list of word timestamps for genuine word-by-word synchronization.
  */
 data class LyricsLine(
     val timeMs: Long,
     val text: String,
-)
+    val words: List<LyricsWord>? = null,
+) {
+    val hasWordTiming: Boolean get() = !words.isNullOrEmpty()
+}
+
 
 /** Where a lyrics result came from — used for cache provenance and priority. */
 enum class LyricsSource {

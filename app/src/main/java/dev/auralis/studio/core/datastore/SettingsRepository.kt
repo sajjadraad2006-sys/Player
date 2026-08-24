@@ -63,6 +63,37 @@ class SettingsRepository(private val context: Context) {
         val queueUris = stringPreferencesKey("queue_uris")
         val queueIndex = longPreferencesKey("queue_index")
         val queuePosition = longPreferencesKey("queue_position")
+        val recentSearches = stringPreferencesKey("recent_searches")
+    }
+
+    val recentSearches: Flow<List<String>> = context.settingsDataStore.data.map { preferences ->
+        preferences[Keys.recentSearches]?.split('\n')?.filter(String::isNotBlank).orEmpty()
+    }
+
+    suspend fun addRecentSearch(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) return
+        context.settingsDataStore.edit { preferences ->
+            val current = preferences[Keys.recentSearches]?.split('\n')?.filter(String::isNotBlank).orEmpty().toMutableList()
+            current.remove(trimmed)
+            current.add(0, trimmed)
+            val trimmedList = current.take(20)
+            preferences[Keys.recentSearches] = trimmedList.joinToString("\n")
+        }
+    }
+
+    suspend fun removeRecentSearch(query: String) {
+        context.settingsDataStore.edit { preferences ->
+            val current = preferences[Keys.recentSearches]?.split('\n')?.filter(String::isNotBlank).orEmpty().toMutableList()
+            current.remove(query.trim())
+            preferences[Keys.recentSearches] = current.joinToString("\n")
+        }
+    }
+
+    suspend fun clearRecentSearches() {
+        context.settingsDataStore.edit { preferences ->
+            preferences.remove(Keys.recentSearches)
+        }
     }
 
     val audioConfig: Flow<AudioConfig> = context.settingsDataStore.data.map { it.toAudioConfig() }

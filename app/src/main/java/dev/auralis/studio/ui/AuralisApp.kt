@@ -98,6 +98,11 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     val visualizerWaveform by viewModel.visualizerWaveform.collectAsStateWithLifecycle()
     val lyricsState by viewModel.lyricsState.collectAsStateWithLifecycle()
     val stemState by viewModel.stemState.collectAsStateWithLifecycle()
+    val stemGains by viewModel.stemGains.collectAsStateWithLifecycle()
+    val recentSearches by viewModel.recentSearches.collectAsStateWithLifecycle()
+    val downloads by viewModel.downloads.collectAsStateWithLifecycle()
+    val lyricsCandidates by viewModel.lyricsCandidates.collectAsStateWithLifecycle()
+
 
     var audioPermissionGranted by remember { mutableStateOf(viewModel.hasAudioPermission) }
     var notificationPermissionGranted by remember {
@@ -187,7 +192,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                     onPlayPause         = viewModel.playback::playPause,
                     onNext              = viewModel.playback::next,
                     onPrevious          = viewModel.playback::previous,
-                    onSeek              = viewModel.playback::seekTo,
+                    onSeek              = viewModel::seekTo,
                     onToggleFavorite    = { currentTrack?.let { viewModel.toggleFavorite(it.uri) } },
                     onShuffle           = viewModel.playback::toggleShuffle,
                     onRepeat            = viewModel.playback::cycleRepeat,
@@ -202,6 +207,10 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                     onImportLyrics      = { lyricsImportLauncher.launch("*/*") },
                     onManualLyricsSearch = viewModel::searchLyricsManually,
                     onLyricsOffsetChange = viewModel::updateLyricsOffset,
+                    lyricsClock         = viewModel.lyricsClock,
+                    lyricsCandidates    = lyricsCandidates,
+                    onLoadLyricsCandidates = viewModel::loadLyricsCandidates,
+                    onSelectLyricsCandidate = viewModel::selectLyricsCandidate,
                 )
                 // Audio quick sheet shown over the player
                 if (quickAudioVisible) {
@@ -284,35 +293,45 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                             commonModifier,
                         )
                         MainDestination.SEARCH -> SearchScreen(
-                            query             = query,
-                            results           = results,
-                            favorites         = favorites,
-                            playlists         = playlists,
-                            onlineResults     = onlineResults,
-                            isSearchingOnline = isSearchingOnline,
-                            onQueryChange     = { viewModel.searchQuery.value = it },
-                            onSearchOnline    = viewModel::searchOnline,
-                            onPlay            = viewModel.playback::play,
-                            onPlayOnline      = viewModel::playOnlineTrack,
-                            onDownloadOnline  = viewModel::downloadOnlineTrack,
-                            onToggleFavorite  = viewModel::toggleFavorite,
-                            onPlayNext        = viewModel::playNext,
-                            onAddToQueue      = viewModel::addToQueue,
-                            onAddToPlaylist   = viewModel::addToPlaylist,
-                            modifier          = commonModifier,
+                            query                 = query,
+                            results               = results,
+                            favorites             = favorites,
+                            playlists             = playlists,
+                            onlineResults         = onlineResults,
+                            isSearchingOnline     = isSearchingOnline,
+                            recentSearches        = recentSearches,
+                            downloads             = downloads,
+                            onQueryChange         = { viewModel.searchQuery.value = it },
+                            onSearchOnline        = viewModel::searchOnline,
+                            onClearRecentSearches = viewModel::clearRecentSearches,
+                            onRemoveRecentSearch  = viewModel::removeRecentSearch,
+                            onPlay                = viewModel.playback::play,
+                            onPlayOnline          = viewModel::playOnlineTrack,
+                            onDownloadOnline      = viewModel::downloadOnlineTrack,
+                            onToggleFavorite      = viewModel::toggleFavorite,
+                            onPlayNext            = viewModel::playNext,
+                            onAddToQueue          = viewModel::addToQueue,
+                            onAddToPlaylist       = viewModel::addToPlaylist,
+                            modifier              = commonModifier,
                         )
                         MainDestination.AUDIO_LAB -> AudioLabScreen(
                             config = config,
                             onChange = viewModel::updateAudio,
                             stemState = stemState,
+                            stemGains = stemGains,
                             currentTrack = currentTrack,
                             onDownloadStemModel = viewModel::downloadStemModel,
                             onDeleteStemModel = viewModel::deleteStemModel,
                             onPrepareStems = viewModel::prepareStems,
                             onCancelStemWork = viewModel::cancelStemWork,
                             onPlayStem = viewModel::playStem,
+                            onVocalsGainChange = viewModel::setVocalsGain,
+                            onInstrumentalGainChange = viewModel::setInstrumentalGain,
+                            onBassGainChange = viewModel::setBassGain,
+                            onPlayStemMix = viewModel::playStemMix,
                             modifier = commonModifier,
                         )
+
                         MainDestination.SETTINGS -> SettingsScreen(
                             theme = theme,
                             folders = folders,
@@ -326,6 +345,13 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                             onRequestNotifications = { if (Build.VERSION.SDK_INT >= 33) notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
                             onChooseDownloadFolder = { downloadFolderLauncher.launch(null) },
                             onResetDownloadFolder = viewModel::resetDownloadLocation,
+                            brokenDownloads = viewModel.brokenDownloads.collectAsStateWithLifecycle().value,
+                            isScanningBrokenDownloads = viewModel.isScanningBrokenDownloads.collectAsStateWithLifecycle().value,
+                            onScanBrokenDownloads = viewModel::scanForBrokenDownloads,
+                            onRemoveBrokenDownload = viewModel::removeBrokenDownload,
+                            onKeepSuspiciousFile = viewModel::keepSuspiciousFile,
+                            onRepairDownloadMetadata = viewModel::repairPlaceholderMetadata,
+                            metadataRepairMessage = viewModel.metadataRepairMessage.collectAsStateWithLifecycle().value,
                             modifier = commonModifier,
                         )
                     }

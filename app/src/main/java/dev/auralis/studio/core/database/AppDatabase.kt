@@ -13,11 +13,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         PlaylistTrackEntity::class,
         AudioPresetEntity::class,
         BookmarkEntity::class,
-        // v2 additions
         LyricsCacheEntity::class,
         DownloadEntity::class,
     ],
-    version = 2,
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -28,8 +27,7 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         /**
          * Migration 1 → 2: adds lyrics_cache and downloads tables.
-         * Existing user data (favorites, history, playlists, queue, presets, bookmarks)
-         * is completely preserved — no destructive migration.
+         * Existing user data is completely preserved — no destructive migration.
          */
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -84,5 +82,39 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_downloads_trackUri` ON `downloads` (`trackUri`)")
             }
         }
+
+        /**
+         * Migration 2 → 3:
+         * - Deduplicates historical download rows sharing the same (provider, providerTrackId),
+         *   keeping the oldest row (first record wins; later duplicates are removed).
+         * - Adds the unique DownloadKey index so the DB itself blocks future duplicates.
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    DELETE FROM downloads WHERE id NOT IN (
+                        SELECT MIN(id) FROM downloads GROUP BY provider, providerTrackId
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_downloads_provider_providerTrackId` " +
+                        "ON `downloads` (`provider`, `providerTrackId`)",
+                )
+            }
+        }
+
+        /**
+         * Migration 3 → 4: adds `lyricsfile` column to lyrics_cache for LRCLIB
+         * Lyricsfile (YAML) storage. Existing rows get an empty document.
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `lyrics_cache` ADD COLUMN `lyricsfile` TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        val ALL_MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
     }
 }

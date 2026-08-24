@@ -81,16 +81,28 @@ class VocFtIstft {
     private val overlapLength = (VocFtContract.DIM_T - 1) * VocFtContract.HOP + VocFtContract.N_FFT
     private val inverseEnvelope = buildInverseEnvelope()
 
+    // Preallocated reusable buffers to avoid ~4.2 MB heap allocation per chunk
+    private val overlapAddLeft = FloatArray(overlapLength)
+    private val overlapAddRight = FloatArray(overlapLength)
+    private val outputLeft = FloatArray(VocFtContract.CHUNK_SIZE)
+    private val outputRight = FloatArray(VocFtContract.CHUNK_SIZE)
+    private val pcmResult = StereoPcm(outputLeft, outputRight)
+
     fun inverse(spectrum: FloatArray): StereoPcm {
         require(spectrum.size == VocFtContract.TENSOR_FLOATS)
-        return StereoPcm(
-            inverseChannel(spectrum, 0, 1),
-            inverseChannel(spectrum, 2, 3),
-        )
+        inverseChannel(spectrum, 0, 1, overlapAddLeft, outputLeft)
+        inverseChannel(spectrum, 2, 3, overlapAddRight, outputRight)
+        return pcmResult
     }
 
-    private fun inverseChannel(spectrum: FloatArray, realPlane: Int, imaginaryPlane: Int): FloatArray {
-        val overlapAdd = FloatArray(overlapLength)
+    private fun inverseChannel(
+        spectrum: FloatArray,
+        realPlane: Int,
+        imaginaryPlane: Int,
+        overlapAdd: FloatArray,
+        output: FloatArray,
+    ) {
+        overlapAdd.fill(0f)
         repeat(VocFtContract.DIM_T) { frame ->
             complex.fill(0f)
             repeat(VocFtContract.DIM_F) { bin ->
@@ -111,8 +123,8 @@ class VocFtIstft {
                 overlapAdd[start + offset] += complex[offset * 2] * hann[offset]
             }
         }
-        return FloatArray(VocFtContract.CHUNK_SIZE) { index ->
-            overlapAdd[VocFtContract.CENTER_PAD + index] * inverseEnvelope[index]
+        for (index in 0 until VocFtContract.CHUNK_SIZE) {
+            output[index] = overlapAdd[VocFtContract.CENTER_PAD + index] * inverseEnvelope[index]
         }
     }
 
@@ -139,3 +151,4 @@ internal fun buildMdxCrossfadeWindow(): FloatArray {
         minOf(1f, (index + 1f) / denominator, (VocFtContract.GENERATED_SIZE - index) / denominator)
     }
 }
+

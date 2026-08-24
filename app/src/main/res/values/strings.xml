@@ -218,6 +218,20 @@
     <string name="online_search_empty">Search for a song, artist or genre to stream or download.</string>
     <string name="online_no_results">No results for “%1$s”. Try another search.</string>
     <string name="free_stream_download">Free direct stream and download</string>
+    <string name="preview_only_no_download">Only a 30-second preview is available for this track — full download not offered</string>
+    <string name="preview_available">Preview available</string>
+    <string name="review_broken_downloads">Review broken downloads</string>
+    <string name="review_broken_downloads_summary">Find and clean old Lyrune preview downloads stored as full songs</string>
+    <string name="scan_for_broken_downloads">Scan now</string>
+    <string name="no_broken_downloads">No suspicious downloads found</string>
+    <string name="remove_broken_download">Remove broken download</string>
+    <string name="keep_file">Keep file</string>
+    <string name="expected_duration_label">Expected: %1$s</string>
+    <string name="local_duration_label">Local file: %1$s</string>
+    <string name="repair_download_metadata">Repair download metadata</string>
+    <string name="repair_download_metadata_summary">Fix artist or title shown as Music, Lyrune, or Unknown on Lyrune downloads</string>
+    <string name="metadata_repaired_count">%1$d records repaired</string>
+    <string name="remove_download_confirm">Delete the downloaded file and its library entry? This only affects files saved by Lyrune.</string>
     <string name="download">Download</string>
     <string name="genre_top_hits">Top Hits</string>
     <string name="genre_pop">Pop</string>
@@ -317,4 +331,30 @@
     <string name="lyrics_import_failed">Could not import lyrics</string>
     <string name="lyrics_rate_limited">LRCLIB rate limit reached. Please retry later.</string>
     <string name="lyrics_search_failed">Lyrics search failed</string>
+    <string name="custom_hex_color">Custom HEX color</string>
+    <string name="hex_color_hint">e.g. #00C2A8 or 9C7CFF</string>
+    <string name="paste">Paste</string>
+    <string name="apply">Apply</string>
+    <string name="reset_default">Reset to default</string>
+    <string name="invalid_hex">Invalid HEX color</string>
+    <string name="preview">Preview</string>
+    <string name="stem_mixer">Stem Mixer</string>
+    <string name="vocals_gain">Vocals</string>
+    <string name="instrumental_gain">Instrumental</string>
+    <string name="bass_gain">Bass</string>
+    <string name="play_stem_mix">Play Synchronized Mix</string>
+    <string name="stem_mix_active">Synchronized multi-stem playback active</string>
+    <string name="recent_searches">Recent searches</string>
+    <string name="clear_all">Clear all</string>
+    <string name="downloaded">Downloaded</string>
+    <string name="downloading">Downloading…</string>
+    <string name="recent_downloads">Recent downloads</string>
+    <string name="choose_lyrics_version">Choose lyrics version</string>
+    <string name="adjust_synchronization">Adjust synchronization</string>
+    <string name="lyrics_earlier">Earlier</string>
+    <string name="lyrics_later">Later</string>
+    <string name="synced_badge">Synced</string>
+    <string name="plain_badge">Plain</string>
 </resources>
+
+
