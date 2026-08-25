@@ -10,7 +10,6 @@ import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.auralis.studio.AuralisApplication
-import dev.auralis.studio.BuildConfig
 import dev.auralis.studio.R
 import dev.auralis.studio.core.database.DownloadEntity
 import dev.auralis.studio.core.database.DownloadStatus
@@ -22,12 +21,10 @@ import dev.auralis.studio.core.model.Track
 import dev.auralis.studio.core.model.LyricsUiState
 import dev.auralis.studio.lyrics.LrclibTrack
 import dev.auralis.studio.lyrics.LyricsClock
-import dev.auralis.studio.online.ArchiveOrgMusicProvider
-import dev.auralis.studio.online.FreeMusicDiscoveryProvider
-import dev.auralis.studio.online.JamendoClient
-import dev.auralis.studio.online.OnlineMusicProvider
+import dev.auralis.studio.online.DownloadQuality
 import dev.auralis.studio.online.OnlineTrack
 import dev.auralis.studio.online.ProviderResult
+import dev.auralis.studio.online.UnifiedTrack
 import dev.auralis.studio.online.toStreamableTrack
 import dev.auralis.studio.playback.PlaybackConnection
 import dev.auralis.studio.audio.visualizer.VisualizerAnalyzer
@@ -117,11 +114,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val downloadFolderLocation = MutableStateFlow(prefs.getString("download_folder_name", "Music/Lyrune/") ?: "Music/Lyrune/")
     val downloadFolderUri = MutableStateFlow(prefs.getString("download_folder_uri", null))
 
-    // Catalog/preview providers (mainstream search) — never treated as download sources.
-    private val catalogProviders: List<OnlineMusicProvider> = listOf(FreeMusicDiscoveryProvider())
-    // Genuine full-download provider (Jamendo, when a client_id is configured).
-    private val jamendo = JamendoClient(BuildConfig.JAMENDO_CLIENT_ID)
-    private val onlineProvider: OnlineMusicProvider = if (jamendo.isConfigured) jamendo else FreeMusicDiscoveryProvider()
+    private val providerRegistry = container.musicProviders
 
     fun setDownloadLocation(uri: Uri, folderName: String) {
         prefs.edit()
@@ -141,10 +134,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         downloadFolderLocation.value = "Music/Lyrune/"
     }
 
-    private val _onlineResults = MutableStateFlow<List<OnlineTrack>>(emptyList())
-    val onlineResults: StateFlow<List<OnlineTrack>> = _onlineResults.asStateFlow()
+    private val _onlineResults = MutableStateFlow<List<UnifiedTrack>>(emptyList())
+    val onlineResults: StateFlow<List<UnifiedTrack>> = _onlineResults.asStateFlow()
     private val _isSearchingOnline = MutableStateFlow(false)
     val isSearchingOnline: StateFlow<Boolean> = _isSearchingOnline.asStateFlow()
+    private val _onlineProviderFailures = MutableStateFlow(0)
+    val onlineProviderFailures: StateFlow<Int> = _onlineProviderFailures.asStateFlow()
+    val downloadQuality: StateFlow<DownloadQuality> = container.settings.downloadQuality
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DownloadQuality.BEST_AVAILABLE)
+    private var onlineSearchJob: Job? = null
+    private var onlineSearchGeneration: Long = 0
     val downloads: StateFlow<List<DownloadEntity>> = downloadsDao.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val recentDownloads: StateFlow<List<DownloadEntity>> = downloadsDao.observeByStatus(DownloadStatus.COMPLETED.name)
@@ -217,26 +216,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun searchOnline(query: String) {
         val trimmed = query.trim()
+        val generation = ++onlineSearchGeneration
+        onlineSearchJob?.cancel()
         if (trimmed.isBlank()) {
             _onlineResults.value = emptyList()
+            _isSearchingOnline.value = false
             return
         }
-        viewModelScope.launch {
+        onlineSearchJob = viewModelScope.launch {
             addRecentSearch(trimmed)
             _isSearchingOnline.value = true
-            // Aggregate: configured full-download provider first (Jamendo), then catalog providers.
-            val aggregated = mutableListOf<OnlineTrack>()
-            for (provider in (listOf(onlineProvider) + catalogProviders).distinctBy { it.name }) {
-                if (!provider.isConfigured) continue
-                when (val res = provider.search(trimmed)) {
-                    is ProviderResult.Success<*> ->
-                        aggregated += (res.data as? List<*>)?.filterIsInstance<OnlineTrack>().orEmpty()
-                    else -> Unit
-                }
+            try {
+                val aggregated = container.unifiedSearch.search(trimmed)
+                _onlineResults.value = aggregated.tracks
+                _onlineProviderFailures.value = aggregated.failures.size
+            } finally {
+                if (generation == onlineSearchGeneration) _isSearchingOnline.value = false
             }
-            _onlineResults.value = aggregated
-                .distinctBy { "${it.provider}:${it.id}" }
-            _isSearchingOnline.value = false
         }
     }
 
@@ -258,29 +254,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun playOnlineTrack(onlineTrack: OnlineTrack) {
+    fun playOnlineTrack(unifiedTrack: UnifiedTrack) {
         viewModelScope.launch {
-            // First check if already downloaded locally (stable DownloadKey lookup)
+            val onlineTrack = unifiedTrack.playableSource ?: return@launch
+            // Recording identity wins across providers; DownloadKey remains provider-specific.
             val downloadedUri: String? = withContext(Dispatchers.IO) {
-                downloadsDao.findByKey(onlineTrack.provider, onlineTrack.id)
+                (downloadsDao.findCompletedByRecordingIdentity(unifiedTrack.recordingIdentity)
+                    ?: downloadsDao.findByKey(onlineTrack.provider, onlineTrack.id))
                     ?.takeIf { it.status == DownloadStatus.COMPLETED.name && it.trackUri.isNotBlank() }
                     ?.trackUri
             }
 
             if (downloadedUri != null) {
-                val localTrack = container.library.track(downloadedUri) ?: onlineTrack.toStreamableTrack()?.copy(uri = downloadedUri)
+                val localTrack = container.library.track(downloadedUri) ?: onlineTrack.toStreamableTrack()?.copy(
+                    uri = downloadedUri,
+                    title = unifiedTrack.title,
+                    artist = unifiedTrack.artist,
+                    album = unifiedTrack.album,
+                    durationMs = unifiedTrack.durationMs,
+                )
                 localTrack?.let { playback.play(it, listOf(it)) }
                 return@launch
             }
 
-            // Resolve direct audio stream if needed
-            val trackToPlay = if (onlineTrack.durationMs <= 0) {
-                when (val detailed = onlineProvider.getTrack(onlineTrack.id)) {
-                    is ProviderResult.Success<*> -> (detailed.data as? OnlineTrack)?.toStreamableTrack() ?: onlineTrack.toStreamableTrack()
-                    else -> onlineTrack.toStreamableTrack()
-                }
-            } else {
-                onlineTrack.toStreamableTrack()
+            val trackToPlay = when (val resolved = providerRegistry.resolveStream(onlineTrack)) {
+                is ProviderResult.Success -> onlineTrack.copy(
+                    streamUrl = resolved.data.url.takeIf { resolved.data.kind == dev.auralis.studio.online.MediaUrlKind.STREAM },
+                    previewUrl = resolved.data.url.takeIf { resolved.data.kind == dev.auralis.studio.online.MediaUrlKind.PREVIEW },
+                    streamAllowed = resolved.data.kind == dev.auralis.studio.online.MediaUrlKind.STREAM,
+                ).toStreamableTrack()
+                else -> onlineTrack.toStreamableTrack()
             }
             trackToPlay?.let { playback.play(it, listOf(it)) }
         }
@@ -289,22 +292,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** One tap → at most one download. Re-entry for an active DownloadKey is ignored. */
     private val inFlightDownloads = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    fun downloadOnlineTrack(onlineTrack: OnlineTrack) {
+    fun downloadOnlineTrack(unifiedTrack: UnifiedTrack) {
         val app = getApplication<Application>()
-        // Preview-only results must never enter the download pipeline.
-        if (!onlineTrack.isDownloadableFullTrack) {
+        val source = unifiedTrack.preferredDownloadSource(downloadQuality.value)
+        if (source == null) {
             Toast.makeText(app, app.getString(R.string.preview_only_no_download), Toast.LENGTH_SHORT).show()
             return
         }
         // Process-safe unique work: repeated taps reuse/ignore existing work (KEEP).
         // The inFlightDownloads guard only suppresses duplicate toasts.
-        if (!inFlightDownloads.add(onlineTrack.downloadKey)) return
+        if (!inFlightDownloads.add(unifiedTrack.recordingIdentity)) return
         viewModelScope.launch {
             try {
-                dev.auralis.studio.library.enqueueDownload(app, onlineTrack)
+                val existing = withContext(Dispatchers.IO) {
+                    downloadsDao.findOwnedByRecordingIdentity(unifiedTrack.recordingIdentity)
+                }
+                if (existing != null) {
+                    val message = if (existing.status == DownloadStatus.COMPLETED.name) R.string.downloaded else R.string.downloading
+                    Toast.makeText(app, app.getString(message), Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                val resolved = providerRegistry.resolveDownload(source, downloadQuality.value)
+                if (resolved !is ProviderResult.Success) {
+                    Toast.makeText(app, app.getString(R.string.preview_only_no_download), Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                val verified = source.copy(
+                    title = unifiedTrack.title,
+                    artist = unifiedTrack.artist,
+                    album = unifiedTrack.album,
+                    albumArtist = unifiedTrack.albumArtist,
+                    durationMs = unifiedTrack.durationMs,
+                    artworkUrl = unifiedTrack.artworkUrl,
+                    isrc = unifiedTrack.isrc,
+                    downloadUrl = resolved.data.url,
+                    downloadAllowed = true,
+                    audioFormat = resolved.data.format,
+                    qualityLabel = resolved.data.qualityLabel,
+                )
+                dev.auralis.studio.library.enqueueDownload(app, verified)
                 Toast.makeText(app, app.getString(R.string.downloading_location, downloadFolderLocation.value), Toast.LENGTH_SHORT).show()
             } finally {
-                inFlightDownloads.remove(onlineTrack.downloadKey)
+                inFlightDownloads.remove(unifiedTrack.recordingIdentity)
             }
         }
     }
@@ -319,7 +348,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun retryDownload(onlineTrack: OnlineTrack) = downloadOnlineTrack(onlineTrack)
+    fun setDownloadQuality(quality: DownloadQuality) {
+        viewModelScope.launch {
+            container.settings.setDownloadQuality(quality)
+            container.unifiedSearch.invalidate()
+        }
+    }
 
     // ── Review broken downloads ─────────────────────────────────────────────
 
@@ -704,16 +738,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun trackForLyrics(mediaId: String): Track? {
-        tracks.value.firstOrNull { it.uri == mediaId }?.let { return it }
+        val downloadedMetadata = downloads.value.firstOrNull {
+            it.trackUri == mediaId && it.status == DownloadStatus.COMPLETED.name
+        }
+        tracks.value.firstOrNull { it.uri == mediaId }?.let { local ->
+            return if (downloadedMetadata == null) local else local.copy(
+                title = downloadedMetadata.title.takeIf(String::isNotBlank) ?: local.title,
+                artist = downloadedMetadata.artist.takeIf { it.isNotBlank() && !it.equals("Music", true) && !it.equals("Lyrune", true) }
+                    ?: local.artist,
+                album = downloadedMetadata.album.takeIf(String::isNotBlank) ?: local.album,
+                durationMs = downloadedMetadata.durationMs.takeIf { it > 0 } ?: local.durationMs,
+            )
+        }
         val item = playbackState.value.currentMediaItem ?: return null
         return Track(
             id = mediaId.hashCode().toLong(),
             uri = mediaId,
-            title = item.mediaMetadata.title?.toString().orEmpty(),
-            artist = item.mediaMetadata.artist?.toString().orEmpty(),
-            album = item.mediaMetadata.albumTitle?.toString().orEmpty(),
+            title = downloadedMetadata?.title?.takeIf(String::isNotBlank) ?: item.mediaMetadata.title?.toString().orEmpty(),
+            artist = downloadedMetadata?.artist?.takeIf(String::isNotBlank) ?: item.mediaMetadata.artist?.toString().orEmpty(),
+            album = downloadedMetadata?.album?.takeIf(String::isNotBlank) ?: item.mediaMetadata.albumTitle?.toString().orEmpty(),
             albumId = null,
-            durationMs = playbackState.value.durationMs,
+            durationMs = downloadedMetadata?.durationMs?.takeIf { it > 0 } ?: playbackState.value.durationMs,
             dateAddedSeconds = 0,
             displayName = item.mediaMetadata.title?.toString().orEmpty(),
             mimeType = null,

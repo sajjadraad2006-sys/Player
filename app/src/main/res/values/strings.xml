@@ -355,6 +355,17 @@
     <string name="lyrics_later">Later</string>
     <string name="synced_badge">Synced</string>
     <string name="plain_badge">Plain</string>
+    <string name="available_sources">Available sources</string>
+    <string name="full_download">Full download</string>
+    <string name="full_stream">Full stream</string>
+    <string name="not_available">Not available</string>
+    <string name="download_quality">Download quality</string>
+    <string name="quality_best">Best available</string>
+    <string name="quality_high">High</string>
+    <string name="quality_data_saver">Data saver</string>
+    <string name="audius_public_access">Public catalog; optional API key improves rate limits</string>
+    <string name="api_key_configured">API key configured</string>
+    <string name="catalog_preview_only">Catalog and preview only</string>
+    <string name="youtube_not_configured">Discovery not configured</string>
+    <string name="youtube_discovery_not_enabled">Key configured; discovery is not enabled</string>
 </resources>
-
-

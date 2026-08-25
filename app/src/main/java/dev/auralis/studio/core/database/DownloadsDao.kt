@@ -23,6 +23,12 @@ interface DownloadsDao {
     @Query("SELECT * FROM downloads WHERE provider = :provider AND providerTrackId = :providerTrackId LIMIT 1")
     suspend fun findByKey(provider: String, providerTrackId: String): DownloadEntity?
 
+    @Query("SELECT * FROM downloads WHERE recordingIdentity = :identity AND status = 'COMPLETED' LIMIT 1")
+    suspend fun findCompletedByRecordingIdentity(identity: String): DownloadEntity?
+
+    @Query("SELECT * FROM downloads WHERE recordingIdentity = :identity AND status IN ('COMPLETED', 'DOWNLOADING', 'QUEUED') LIMIT 1")
+    suspend fun findOwnedByRecordingIdentity(identity: String): DownloadEntity?
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(download: DownloadEntity): Long
 

@@ -113,6 +113,7 @@ data class LyricsCacheEntity(
     indices = [
         Index("status"),
         Index("trackUri"),
+        Index("recordingIdentity"),
         // Stable DownloadKey — DB-level guarantee of one row per remote track.
         Index(value = ["provider", "providerTrackId"], unique = true),
     ],
@@ -137,6 +138,9 @@ data class DownloadEntity(
     val album: String,
     val artworkUrl: String = "",
     val durationMs: Long = 0,
+    /** Cross-provider recording identity; distinct from provider-scoped download job identity. */
+    val recordingIdentity: String = "",
+    val isrc: String = "",
     /** DownloadStatus enum name. */
     val status: String = DownloadStatus.QUEUED.name,
     /** Bytes downloaded so far. */

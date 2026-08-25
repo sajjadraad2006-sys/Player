@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
@@ -38,6 +39,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SuggestionChip
@@ -47,6 +50,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -64,7 +68,9 @@ import dev.auralis.studio.core.database.DownloadEntity
 import dev.auralis.studio.core.database.DownloadStatus
 import dev.auralis.studio.core.database.PlaylistEntity
 import dev.auralis.studio.core.model.Track
-import dev.auralis.studio.online.OnlineTrack
+import dev.auralis.studio.online.DownloadQuality
+import dev.auralis.studio.online.UnifiedTrack
+import dev.auralis.studio.library.RecordingDownloadMatcher
 import dev.auralis.studio.ui.components.GlassCard
 import dev.auralis.studio.ui.components.TrackRow
 
@@ -79,14 +85,14 @@ private val GENERAL_MUSIC_CATEGORIES = listOf(
     "Electronic" to R.string.genre_edm,
 )
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
     query: String,
     results: List<Track>,
     favorites: Set<String>,
     playlists: List<PlaylistEntity>,
-    onlineResults: List<OnlineTrack>,
+    onlineResults: List<UnifiedTrack>,
     isSearchingOnline: Boolean,
     recentSearches: List<String> = emptyList(),
     downloads: List<DownloadEntity> = emptyList(),
@@ -95,8 +101,8 @@ fun SearchScreen(
     onClearRecentSearches: () -> Unit = {},
     onRemoveRecentSearch: (String) -> Unit = {},
     onPlay: (Track, List<Track>) -> Unit,
-    onPlayOnline: (OnlineTrack) -> Unit,
-    onDownloadOnline: (OnlineTrack) -> Unit,
+    onPlayOnline: (UnifiedTrack) -> Unit,
+    onDownloadOnline: (UnifiedTrack) -> Unit,
     onToggleFavorite: (String) -> Unit,
     onPlayNext: (Track) -> Unit,
     onAddToQueue: (Track) -> Unit,
@@ -104,6 +110,7 @@ fun SearchScreen(
     modifier: Modifier = Modifier,
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
+    var sourceSheetTrack by remember { mutableStateOf<UnifiedTrack?>(null) }
     val colors = MaterialTheme.colorScheme
 
     Column(modifier.fillMaxSize()) {
@@ -473,21 +480,49 @@ fun SearchScreen(
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 28.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(onlineResults, key = { "online:${it.provider}:${it.id}" }) { onlineTrack ->
-                        // Stable DownloadKey match only (provider + providerTrackId) —
-                        // title-based matching caused wrong duplicate state display.
-                        val downloadStatus = downloads.firstOrNull {
-                            it.provider == onlineTrack.provider && it.providerTrackId == onlineTrack.id
-                        }?.status
+                    items(onlineResults, key = { "online:${it.recordingIdentity}" }) { onlineTrack ->
+                        val downloadStatus = RecordingDownloadMatcher.status(onlineTrack, downloads)
 
                         OnlineTrackCard(
                             track = onlineTrack,
                             downloadStatus = downloadStatus,
                             onPlay = { onPlayOnline(onlineTrack) },
                             onDownload = { onDownloadOnline(onlineTrack) },
+                            onSources = { sourceSheetTrack = onlineTrack },
                         )
                     }
                 }
+            }
+        }
+    }
+
+    sourceSheetTrack?.let { unified ->
+        ModalBottomSheet(onDismissRequest = { sourceSheetTrack = null }) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+                Text(stringResource(R.string.available_sources), style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.height(12.dp))
+                unified.sources.forEach { source ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(source.provider.replaceFirstChar(Char::uppercase), fontWeight = FontWeight.SemiBold)
+                            Text(
+                                when {
+                                    source.isDownloadableFullTrack -> stringResource(R.string.full_download)
+                                    source.streamAllowed && !source.streamUrl.isNullOrBlank() -> stringResource(R.string.full_stream)
+                                    !source.previewUrl.isNullOrBlank() -> stringResource(R.string.preview_available)
+                                    else -> stringResource(R.string.not_available)
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        source.qualityLabel?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
+                    }
+                }
+                Spacer(Modifier.height(20.dp))
             }
         }
     }
@@ -495,10 +530,11 @@ fun SearchScreen(
 
 @Composable
 private fun OnlineTrackCard(
-    track: OnlineTrack,
+    track: UnifiedTrack,
     downloadStatus: String? = null,
     onPlay: () -> Unit,
     onDownload: () -> Unit,
+    onSources: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
 
@@ -545,7 +581,7 @@ private fun OnlineTrackCard(
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    "${track.artist} · ${track.album}",
+                    listOf(track.artist, track.album, formatDuration(track.durationMs)).filter(String::isNotBlank).joinToString(" · "),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodySmall,
@@ -557,7 +593,8 @@ private fun OnlineTrackCard(
                         downloadStatus == DownloadStatus.COMPLETED.name -> stringResource(R.string.downloaded)
                         downloadStatus == DownloadStatus.DOWNLOADING.name -> stringResource(R.string.downloading)
                         // Honest capability: previews are labelled Preview, never Download.
-                        !track.isDownloadableFullTrack -> stringResource(R.string.preview_available)
+                        track.sources.none { it.isDownloadableFullTrack } && track.streamSource == null -> stringResource(R.string.preview_available)
+                        track.sources.none { it.isDownloadableFullTrack } -> stringResource(R.string.full_stream)
                         else -> stringResource(R.string.free_stream_download)
                     },
                     style = MaterialTheme.typography.labelSmall,
@@ -631,7 +668,7 @@ private fun OnlineTrackCard(
                     }
                 }
                 else -> {
-                    if (track.isDownloadableFullTrack) {
+                    if (track.preferredDownloadSource(DownloadQuality.BEST_AVAILABLE) != null) {
                         FilledIconButton(
                             onClick = onDownload,
                             modifier = Modifier.size(40.dp),
@@ -649,15 +686,18 @@ private fun OnlineTrackCard(
                         }
                     } else {
                         // Preview-only: no Download action is offered.
-                        Icon(
-                            Icons.Default.MusicNote,
-                            contentDescription = stringResource(R.string.preview_available),
-                            tint = colors.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp),
-                        )
+                        IconButton(onClick = onSources) {
+                            Icon(Icons.Default.Info, contentDescription = stringResource(R.string.available_sources), tint = colors.onSurfaceVariant)
+                        }
                     }
                 }
             }
         }
     }
+}
+
+private fun formatDuration(durationMs: Long): String {
+    if (durationMs <= 0L) return ""
+    val seconds = durationMs / 1_000L
+    return "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
 }

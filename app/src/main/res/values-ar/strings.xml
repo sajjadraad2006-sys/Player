@@ -363,4 +363,17 @@
     <string name="lyrics_later">أبطأ</string>
     <string name="synced_badge">متزامنة</string>
     <string name="plain_badge">نصية</string>
+    <string name="available_sources">المصادر المتاحة</string>
+    <string name="full_download">تنزيل كامل</string>
+    <string name="full_stream">بث كامل</string>
+    <string name="not_available">غير متاح</string>
+    <string name="download_quality">جودة التنزيل</string>
+    <string name="quality_best">أفضل جودة متاحة</string>
+    <string name="quality_high">عالية</string>
+    <string name="quality_data_saver">توفير البيانات</string>
+    <string name="audius_public_access">فهرس عام؛ مفتاح API اختياري يحسن حدود الطلبات</string>
+    <string name="api_key_configured">مفتاح API مضبوط</string>
+    <string name="catalog_preview_only">فهرس ومعاينة فقط</string>
+    <string name="youtube_not_configured">الاكتشاف غير مضبوط</string>
+    <string name="youtube_discovery_not_enabled">المفتاح مضبوط؛ الاكتشاف غير مفعّل</string>
 </resources>

@@ -5,6 +5,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
@@ -36,7 +37,7 @@ private data class JamendoHeaders(
 )
 
 @Serializable
-private data class JamendoTrackDto(
+internal data class JamendoTrackDto(
     val id: String = "",
     val name: String = "",
     @SerialName("artist_name") val artistName: String = "",
@@ -60,7 +61,12 @@ private data class JamendoTrackDto(
  *
  * Download is only offered when [JamendoTrackDto.audioDownloadAllowed] == true.
  */
-class JamendoClient(private val clientId: String) : OnlineMusicProvider {
+class JamendoClient(
+    private val clientId: String,
+    private val defaultQuality: () -> DownloadQuality = { DownloadQuality.BEST_AVAILABLE },
+) : OnlineMusicProvider, MusicStreamProvider, MusicDownloadProvider {
+
+    override val id: String = "jamendo"
 
     override val name: String = "Jamendo"
 
@@ -69,8 +75,14 @@ class JamendoClient(private val clientId: String) : OnlineMusicProvider {
 
     private val client by lazy {
         HttpClient(OkHttp) {
+            expectSuccess = true
             install(ContentNegotiation) {
                 json(Json { ignoreUnknownKeys = true; isLenient = true })
+            }
+            install(HttpTimeout) {
+                connectTimeoutMillis = 10_000
+                requestTimeoutMillis = 15_000
+                socketTimeoutMillis = 20_000
             }
             defaultRequest {
                 headers.append("User-Agent", USER_AGENT)
@@ -87,7 +99,9 @@ class JamendoClient(private val clientId: String) : OnlineMusicProvider {
                 parameter("format", "json")
                 parameter("namesearch", query)
                 parameter("include", "musicinfo licenses")
-                parameter("audioformat", "mp31")
+                parameter("audioformat", "mp32")
+                parameter("audiodlformat", requestedFormat(defaultQuality()))
+                parameter("imagesize", 600)
                 parameter("limit", 20)
                 parameter("offset", offset)
                 parameter("order", "popularity_total")
@@ -99,13 +113,22 @@ class JamendoClient(private val clientId: String) : OnlineMusicProvider {
                     if (body.headers.status == "error") {
                         return ProviderResult.Error(body.headers.errorMessage, body.headers.code)
                     }
-                    ProviderResult.Success(body.results.map { it.toOnlineTrack() })
+                    ProviderResult.Success(body.results.map { it.toOnlineTrack(requestedFormat(defaultQuality())) })
                 }
                 else -> ProviderResult.Error("HTTP ${resp.status.value}", resp.status.value)
             }
+        } catch (e: io.ktor.client.plugins.ClientRequestException) {
+            when (e.response.status) {
+                HttpStatusCode.TooManyRequests -> ProviderResult.RateLimited
+                HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden -> ProviderResult.Unauthorized
+                HttpStatusCode.NotFound -> ProviderResult.Unavailable
+                else -> ProviderResult.Error("Jamendo request failed", e.response.status.value)
+            }
+        } catch (e: java.io.IOException) {
+            ProviderResult.NetworkUnavailable
         } catch (e: Exception) {
             Log.e(TAG, "Search failed: ${e.message}")
-            ProviderResult.Error(e.message ?: "Unknown error")
+            ProviderResult.Error("Jamendo search failed")
         }
     }
 
@@ -117,7 +140,9 @@ class JamendoClient(private val clientId: String) : OnlineMusicProvider {
                 parameter("format", "json")
                 parameter("id", id)
                 parameter("include", "musicinfo licenses")
-                parameter("audioformat", "mp31")
+                parameter("audioformat", "mp32")
+                parameter("audiodlformat", requestedFormat(defaultQuality()))
+                parameter("imagesize", 600)
             }
             if (resp.status != HttpStatusCode.OK) {
                 return ProviderResult.Error("HTTP ${resp.status.value}")
@@ -125,13 +150,95 @@ class JamendoClient(private val clientId: String) : OnlineMusicProvider {
             val body = resp.body<JamendoResponse>()
             val track = body.results.firstOrNull()
                 ?: return ProviderResult.Error("Track not found")
-            ProviderResult.Success(track.toOnlineTrack())
+            ProviderResult.Success(track.toOnlineTrack(requestedFormat(defaultQuality())))
+        } catch (e: io.ktor.client.plugins.ClientRequestException) {
+            when (e.response.status) {
+                HttpStatusCode.TooManyRequests -> ProviderResult.RateLimited
+                HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden -> ProviderResult.Unauthorized
+                HttpStatusCode.NotFound -> ProviderResult.Unavailable
+                else -> ProviderResult.Error("Jamendo request failed", e.response.status.value)
+            }
+        } catch (e: java.io.IOException) {
+            ProviderResult.NetworkUnavailable
         } catch (e: Exception) {
-            ProviderResult.Error(e.message ?: "Unknown error")
+            ProviderResult.Error("Jamendo request failed")
         }
     }
 
-    private fun JamendoTrackDto.toOnlineTrack() = OnlineTrack(
+    override suspend fun resolveStream(track: OnlineTrack): ProviderResult<StreamResource> {
+        if (track.provider != id || !track.streamAllowed || track.streamUrl.isNullOrBlank()) {
+            return ProviderResult.Unavailable
+        }
+        return ProviderResult.Success(StreamResource(track.streamUrl, MediaUrlKind.STREAM, "mp3", "VBR stream"))
+    }
+
+    override suspend fun resolveDownload(
+        track: OnlineTrack,
+        quality: DownloadQuality,
+    ): ProviderResult<DownloadResource> {
+        if (!isConfigured) return ProviderResult.NotConfigured
+        if (track.provider != id) return ProviderResult.Unavailable
+        val format = requestedFormat(quality)
+        val resolved = when (val fresh = fetchTrack(track.id, format)) {
+            is ProviderResult.Success -> fresh.data
+            ProviderResult.RateLimited -> return ProviderResult.RateLimited
+            ProviderResult.NotConfigured -> return ProviderResult.NotConfigured
+            ProviderResult.NetworkUnavailable -> return ProviderResult.NetworkUnavailable
+            ProviderResult.Unauthorized -> return ProviderResult.Unauthorized
+            ProviderResult.Unavailable -> return ProviderResult.Unavailable
+            is ProviderResult.Error -> return ProviderResult.Error(fresh.message, fresh.code)
+        }
+        if (!resolved.downloadAllowed || resolved.downloadUrl.isNullOrBlank()) return ProviderResult.Unauthorized
+        return ProviderResult.Success(
+            DownloadResource(
+                url = resolved.downloadUrl,
+                format = resolved.audioFormat,
+                qualityLabel = resolved.qualityLabel,
+                isOriginal = format == "flac",
+            ),
+        )
+    }
+
+    private suspend fun fetchTrack(trackId: String, downloadFormat: String): ProviderResult<OnlineTrack> = try {
+        val resp = client.get("$BASE/tracks/") {
+            parameter("client_id", clientId)
+            parameter("format", "json")
+            parameter("id", trackId)
+            parameter("include", "musicinfo licenses")
+            parameter("audioformat", "mp32")
+            parameter("audiodlformat", downloadFormat)
+            parameter("imagesize", 600)
+        }
+        val body = resp.body<JamendoResponse>()
+        if (body.headers.status == "error") ProviderResult.Error(body.headers.errorMessage, body.headers.code)
+        else body.results.firstOrNull()?.let { ProviderResult.Success(it.toOnlineTrack(downloadFormat)) }
+            ?: ProviderResult.Unavailable
+    } catch (e: io.ktor.client.plugins.ClientRequestException) {
+        when (e.response.status) {
+            HttpStatusCode.TooManyRequests -> ProviderResult.RateLimited
+            HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden -> ProviderResult.Unauthorized
+            HttpStatusCode.NotFound -> ProviderResult.Unavailable
+            else -> ProviderResult.Error("Jamendo request failed", e.response.status.value)
+        }
+    } catch (e: java.io.IOException) {
+        ProviderResult.NetworkUnavailable
+    } catch (e: Exception) {
+        ProviderResult.Error("Jamendo request failed")
+    }
+
+    internal fun mapFixture(dto: JamendoTrackDto, downloadFormat: String = "flac") = dto.toOnlineTrack(downloadFormat)
+
+    /**
+     * Parse a raw Jamendo /tracks/ JSON payload for testing without network access.
+     * Uses the same JSON decoder and mapping path as the real search() call.
+     */
+    internal fun parseSearchFixture(payload: String): List<OnlineTrack> {
+        val json = Json { ignoreUnknownKeys = true; isLenient = true }
+        val response = json.decodeFromString<JamendoResponse>(payload)
+        return response.results.map { it.toOnlineTrack(requestedFormat(DownloadQuality.BEST_AVAILABLE)) }
+    }
+
+    private fun JamendoTrackDto.toOnlineTrack(downloadFormat: String) = OnlineTrack(
         provider        = "jamendo",
         id              = id,
         title           = name,
@@ -143,11 +250,28 @@ class JamendoClient(private val clientId: String) : OnlineMusicProvider {
         previewUrl      = null,
         streamUrl       = audio.ifBlank { null },
         downloadUrl     = if (audioDownloadAllowed) audioDownload.ifBlank { null } else null,
+        streamAllowed   = audio.isNotBlank(),
         downloadAllowed = audioDownloadAllowed,
+        audioFormat     = if (audioDownloadAllowed) downloadFormat.removeSuffix("1").removeSuffix("2") else "mp3",
+        availableDownloadFormats = if (audioDownloadAllowed) listOf("flac", "mp32", "ogg", "mp31") else emptyList(),
+        qualityLabel    = qualityLabel(downloadFormat),
         license         = license_ccurl,
         licenseUrl      = license_ccurl,
         sourceUrl       = shareurl,
     )
+
+    internal fun requestedFormat(quality: DownloadQuality): String = when (quality) {
+        DownloadQuality.BEST_AVAILABLE -> "flac"
+        DownloadQuality.HIGH -> "mp32"
+        DownloadQuality.DATA_SAVER -> "mp31"
+    }
+
+    private fun qualityLabel(format: String): String = when (format) {
+        "flac" -> "FLAC"
+        "mp32" -> "MP3 VBR high"
+        "ogg" -> "Ogg Vorbis"
+        else -> "MP3 96 kbps"
+    }
 
     fun close() {
         runCatching { client.close() }

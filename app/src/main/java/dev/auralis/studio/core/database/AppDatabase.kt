@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         LyricsCacheEntity::class,
         DownloadEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -115,6 +115,15 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val ALL_MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+        /** Adds recording-level identity without changing provider-specific DownloadKey uniqueness. */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `downloads` ADD COLUMN `recordingIdentity` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `downloads` ADD COLUMN `isrc` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_downloads_recordingIdentity` ON `downloads` (`recordingIdentity`)")
+            }
+        }
+
+        val ALL_MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
     }
 }

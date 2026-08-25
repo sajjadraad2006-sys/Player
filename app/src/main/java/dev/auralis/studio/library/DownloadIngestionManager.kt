@@ -53,10 +53,12 @@ class DownloadIngestionManager(
     private val downloadsDao: DownloadsDao,
     private val mediaStoreRepository: MediaStoreMusicRepository,
     private val okHttpClient: OkHttpClient = OkHttpClient.Builder().build(),
+    private val requestHeadersFor: (OnlineTrack) -> Map<String, String> = { emptyMap() },
 ) {
 
     /** In-process ownership of DownloadKeys so only one job runs per key. */
     private val activeKeys = MutableSet<String>()
+    private val activeRecordings = MutableSet<String>()
     private val startMutex = Mutex()
 
     /** Tolerance when comparing local duration to the catalog's expected full duration. */
@@ -80,8 +82,9 @@ class DownloadIngestionManager(
 
         // ── Gate 2: one active job per DownloadKey (in-process). ────────────
         val acquired = startMutex.withLock {
-            if (onlineTrack.downloadKey in activeKeys) false else {
+            if (onlineTrack.downloadKey in activeKeys || onlineTrack.recordingIdentity in activeRecordings) false else {
                 activeKeys += onlineTrack.downloadKey
+                activeRecordings += onlineTrack.recordingIdentity
                 true
             }
         }
@@ -94,7 +97,10 @@ class DownloadIngestionManager(
         try {
             performDownload(onlineTrack, customFolderUri, onProgress)
         } finally {
-            synchronized(activeKeys) { activeKeys -= onlineTrack.downloadKey }
+            synchronized(activeKeys) {
+                activeKeys -= onlineTrack.downloadKey
+                activeRecordings -= onlineTrack.recordingIdentity
+            }
         }
     }
 
@@ -104,6 +110,18 @@ class DownloadIngestionManager(
         onProgress: (bytesDownloaded: Long, bytesTotal: Long) -> Unit,
     ): Result<Track> {
         val downloadUrl = onlineTrack.downloadUrl ?: error("guarded by isDownloadableFullTrack")
+
+        // A recording already owned through another provider is not downloaded again by default.
+        val recordingOwner = downloadsDao.findOwnedByRecordingIdentity(onlineTrack.recordingIdentity)
+        if (recordingOwner != null &&
+            (recordingOwner.provider != onlineTrack.provider || recordingOwner.providerTrackId != onlineTrack.id)
+        ) {
+            return if (recordingOwner.status == DownloadStatus.COMPLETED.name) {
+                resolveExistingCompleted(recordingOwner)
+            } else {
+                Result.failure(IllegalStateException("This recording already has an active download"))
+            }
+        }
 
         // ── Gate 3: DB-level uniqueness on the stable DownloadKey row. ──────
         val existing = downloadsDao.findByKey(onlineTrack.provider, onlineTrack.id)
@@ -125,16 +143,19 @@ class DownloadIngestionManager(
                     album = onlineTrack.album,
                     artworkUrl = onlineTrack.artworkUrl.orEmpty(),
                     durationMs = onlineTrack.durationMs,
+                    recordingIdentity = onlineTrack.recordingIdentity,
+                    isrc = onlineTrack.isrc.orEmpty(),
                     status = DownloadStatus.DOWNLOADING.name,
                 ),
             )
         }
 
         try {
-            val request = Request.Builder()
+            val requestBuilder = Request.Builder()
                 .url(downloadUrl)
                 .header("User-Agent", "Lyrune-Studio/2.0")
-                .build()
+            requestHeadersFor(onlineTrack).forEach { (name, value) -> requestBuilder.header(name, value) }
+            val request = requestBuilder.build()
 
             val response = okHttpClient.newCall(request).execute()
             if (!response.isSuccessful) {

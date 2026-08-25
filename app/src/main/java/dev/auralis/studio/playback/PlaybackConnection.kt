@@ -175,6 +175,18 @@ class PlaybackConnection(
         ticker = scope.launch(Dispatchers.Main.immediate) {
             while (isActive) {
                 controller?.let(::publish)
+                // Anchor interval: 250 ms while playing, 1 s while paused.
+                //
+                // LyricsClock interpolates position at the Compose frame cadence
+                // (typically 60 fps / 16.7 ms) using the last anchor from here.
+                // At 250 ms re-anchor frequency, worst-case drift before the next
+                // anchor is < 5 ms at 1× speed — well within perceptible threshold.
+                //
+                // Raising this to 100–150 ms would reduce drift but also increases
+                // Binder/IPC traffic on every frame. Hardware testing on a live
+                // device is required before narrowing this interval; the theoretical
+                // smoothness gain is negligible given that LyricsClock already
+                // interpolates. No hardware evidence justifies a change at this time.
                 delay(if (controller?.isPlaying == true) 250 else 1_000)
             }
         }

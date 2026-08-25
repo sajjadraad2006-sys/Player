@@ -22,13 +22,15 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
 
-        // Jamendo client ID — set JAMENDO_CLIENT_ID in local.properties (never commit the key)
+        // Optional provider credentials from local.properties. Never commit local.properties.
         val properties = Properties()
         val localPropertiesFile = rootProject.file("local.properties")
         if (localPropertiesFile.exists()) {
             properties.load(localPropertiesFile.inputStream())
         }
         buildConfigField("String", "JAMENDO_CLIENT_ID", "\"${properties.getProperty("JAMENDO_CLIENT_ID") ?: ""}\"")
+        buildConfigField("String", "AUDIUS_API_KEY", "\"${properties.getProperty("AUDIUS_API_KEY") ?: ""}\"")
+        buildConfigField("String", "YOUTUBE_API_KEY", "\"${properties.getProperty("YOUTUBE_API_KEY") ?: ""}\"")
     }
 
     buildTypes {
@@ -121,6 +123,7 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    testImplementation("io.ktor:ktor-client-mock:3.0.3")
     testImplementation("androidx.room:room-testing:2.6.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")

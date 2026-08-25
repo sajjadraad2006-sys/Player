@@ -101,6 +101,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     val stemGains by viewModel.stemGains.collectAsStateWithLifecycle()
     val recentSearches by viewModel.recentSearches.collectAsStateWithLifecycle()
     val downloads by viewModel.downloads.collectAsStateWithLifecycle()
+    val downloadQuality by viewModel.downloadQuality.collectAsStateWithLifecycle()
     val lyricsCandidates by viewModel.lyricsCandidates.collectAsStateWithLifecycle()
 
 
@@ -338,6 +339,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                             minimumDurationMs = minimumDuration,
                             notificationPermissionGranted = notificationPermissionGranted,
                             downloadLocation = downloadLocation,
+                            downloadQuality = downloadQuality,
                             onThemeChange = viewModel::updateTheme,
                             onMinimumDuration = viewModel::setMinimumTrackDuration,
                             onChooseFolder = chooseFolder,
@@ -345,6 +347,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                             onRequestNotifications = { if (Build.VERSION.SDK_INT >= 33) notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
                             onChooseDownloadFolder = { downloadFolderLauncher.launch(null) },
                             onResetDownloadFolder = viewModel::resetDownloadLocation,
+                            onDownloadQualityChange = viewModel::setDownloadQuality,
                             brokenDownloads = viewModel.brokenDownloads.collectAsStateWithLifecycle().value,
                             isScanningBrokenDownloads = viewModel.isScanningBrokenDownloads.collectAsStateWithLifecycle().value,
                             onScanBrokenDownloads = viewModel::scanForBrokenDownloads,

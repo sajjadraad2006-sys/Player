@@ -24,6 +24,27 @@
 - Supports in-app System Default, English, and Arabic locale selection with RTL resources.
 - Searches and downloads optional online music sources without making network access a playback requirement.
 
+## Online music sources
+
+Online search combines Audius, Jamendo, iTunes, and Deezer results, then merges matching recordings while keeping provider capabilities separate. Audius and Jamendo expose Download only after their current metadata explicitly permits a full-file download. iTunes and Deezer remain catalog/preview-only sources; their short preview URLs never enter the download pipeline.
+
+Provider credentials are optional and belong in the untracked root `local.properties` file:
+
+```properties
+# Optional: public/client-side key for higher Audius catalog read rate limits.
+AUDIUS_API_KEY=your_api_key
+
+# Optional: enables Jamendo catalog, streaming, and permitted downloads.
+JAMENDO_CLIENT_ID=your_client_id
+
+# Optional and currently reserved for future Watch/discovery support only.
+YOUTUBE_API_KEY=your_api_key
+```
+
+Never add bearer tokens, API secrets, or user OAuth tokens to an Android build. Audius public read access continues without a key, Jamendo is simply omitted when its client ID is absent, and all local/offline features remain available.
+
+The optional link-import boundary is documented in [External media resolver decision](docs/EXTERNAL_MEDIA_RESOLVER_DECISION.md). No yt-dlp dependency or YouTube download action is included.
+
 ## Audio Lab
 
 The processing chain is:
@@ -70,6 +91,7 @@ app/src/main/java/dev/auralis/studio/
 ├── core/               # models, Room, DataStore, repositories
 ├── lyrics/             # embedded/sidecar/cache/LRCLIB resolution
 ├── playback/           # Media3 connection, service and session
+├── online/             # capability-separated catalogs, streams, downloads, merging
 ├── designsystem/       # luminance, semantic colors and style tokens
 └── ui/                 # Compose screens, player, lyrics and visualizer
 ```

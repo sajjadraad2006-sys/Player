@@ -1,0 +1,30 @@
+{
+  "data": [
+    {
+      "id": "D7KyD",
+      "title": "Fixture Song",
+      "duration": 188,
+      "downloadable": true,
+      "is_streamable": true,
+      "isrc": "US-A1B-26-00001",
+      "permalink": "/fixture/fixture-song",
+      "album_name": "Fixture Album",
+      "orig_filename": "fixture-master.flac",
+      "license": "CC-BY",
+      "artwork": {
+        "1000x1000": "https://images.example/1000.jpg",
+        "480x480": "https://images.example/480.jpg"
+      },
+      "user": { "name": "Fixture Artist", "handle": "fixture" }
+    },
+    {
+      "id": "NoDownload1",
+      "title": "Stream Only",
+      "duration": 205,
+      "downloadable": false,
+      "is_streamable": true,
+      "permalink": "/fixture/stream-only",
+      "user": { "name": "Fixture Artist", "handle": "fixture" }
+    }
+  ]
+}

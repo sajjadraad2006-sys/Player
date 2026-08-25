@@ -20,6 +20,7 @@ import dev.auralis.studio.core.model.ThemeModeResolver
 import dev.auralis.studio.core.model.CornerStyle
 import dev.auralis.studio.core.model.AnimationStyle
 import dev.auralis.studio.core.model.VisualQuality
+import dev.auralis.studio.online.DownloadQuality
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -64,10 +65,19 @@ class SettingsRepository(private val context: Context) {
         val queueIndex = longPreferencesKey("queue_index")
         val queuePosition = longPreferencesKey("queue_position")
         val recentSearches = stringPreferencesKey("recent_searches")
+        val downloadQuality = stringPreferencesKey("download_quality")
     }
 
     val recentSearches: Flow<List<String>> = context.settingsDataStore.data.map { preferences ->
         preferences[Keys.recentSearches]?.split('\n')?.filter(String::isNotBlank).orEmpty()
+    }
+
+    val downloadQuality: Flow<DownloadQuality> = context.settingsDataStore.data.map { preferences ->
+        enumValue(preferences[Keys.downloadQuality], DownloadQuality.BEST_AVAILABLE)
+    }
+
+    suspend fun setDownloadQuality(quality: DownloadQuality) {
+        context.settingsDataStore.edit { it[Keys.downloadQuality] = quality.name }
     }
 
     suspend fun addRecentSearch(query: String) {

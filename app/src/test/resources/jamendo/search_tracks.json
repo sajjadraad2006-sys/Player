@@ -1,0 +1,33 @@
+{
+  "headers": {
+    "results_count": 2
+  },
+  "results": [
+    {
+      "id": "1234567",
+      "name": "Fixture Song CC",
+      "duration": 214,
+      "artist_name": "Fixture Artist",
+      "album_name": "Fixture Album",
+      "image": "https://imgjam.com/albums/s0/1234/covers/1.600.jpg",
+      "audio": "https://prod-1.storage.jamendo.com/stream/1234567/mp31/",
+      "audiodownload": "https://prod-1.storage.jamendo.com/download/track/1234567/flac/",
+      "audiodownload_allowed": true,
+      "license_ccurl": "https://creativecommons.org/licenses/by/4.0/",
+      "shareurl": "https://www.jamendo.com/track/1234567"
+    },
+    {
+      "id": "7654321",
+      "name": "No Download Song",
+      "duration": 180,
+      "artist_name": "Other Artist",
+      "album_name": "Other Album",
+      "image": "https://imgjam.com/albums/s0/7654/covers/1.600.jpg",
+      "audio": "https://prod-1.storage.jamendo.com/stream/7654321/mp31/",
+      "audiodownload": "",
+      "audiodownload_allowed": false,
+      "license_ccurl": "https://creativecommons.org/licenses/by-nc/4.0/",
+      "shareurl": "https://www.jamendo.com/track/7654321"
+    }
+  ]
+}

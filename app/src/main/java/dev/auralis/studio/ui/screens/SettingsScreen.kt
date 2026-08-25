@@ -73,6 +73,7 @@ import dev.auralis.studio.designsystem.AuralisFilterChip as FilterChip
 import dev.auralis.studio.designsystem.AuralisSlider as Slider
 import dev.auralis.studio.designsystem.AuralisSwitch as Switch
 import dev.auralis.studio.designsystem.isColorDark
+import dev.auralis.studio.online.DownloadQuality
 import dev.auralis.studio.ui.components.GlassCard
 import dev.auralis.studio.ui.components.SectionHeader
 import kotlin.math.roundToInt
@@ -87,6 +88,7 @@ fun SettingsScreen(
     minimumDurationMs: Long,
     notificationPermissionGranted: Boolean,
     downloadLocation: String,
+    downloadQuality: DownloadQuality,
     onThemeChange: (ThemeSettings) -> Unit,
     onMinimumDuration: (Long) -> Unit,
     onChooseFolder: () -> Unit,
@@ -94,6 +96,7 @@ fun SettingsScreen(
     onRequestNotifications: () -> Unit,
     onChooseDownloadFolder: () -> Unit,
     onResetDownloadFolder: () -> Unit,
+    onDownloadQualityChange: (DownloadQuality) -> Unit,
     brokenDownloads: List<dev.auralis.studio.library.DownloadRepairManager.BrokenDownload> = emptyList(),
     isScanningBrokenDownloads: Boolean = false,
     onScanBrokenDownloads: () -> Unit = {},
@@ -143,6 +146,8 @@ fun SettingsScreen(
             modifier = modifier,
         )
         SettingsSection.PROVIDERS -> ProvidersSection(
+            downloadQuality = downloadQuality,
+            onDownloadQualityChange = onDownloadQualityChange,
             onBack = { section = SettingsSection.ROOT },
             modifier = modifier,
         )
@@ -591,9 +596,16 @@ private fun formatDuration(ms: Long): String {
 
 // ─── Providers section ────────────────────────────────────────────────────────
 @Composable
-private fun ProvidersSection(onBack: () -> Unit, modifier: Modifier = Modifier) {
+private fun ProvidersSection(
+    downloadQuality: DownloadQuality,
+    onDownloadQualityChange: (DownloadQuality) -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = MaterialTheme.colorScheme
     val jamendoConfigured = dev.auralis.studio.BuildConfig.JAMENDO_CLIENT_ID.isNotBlank()
+    val audiusKeyConfigured = dev.auralis.studio.BuildConfig.AUDIUS_API_KEY.isNotBlank()
+    val youtubeKeyConfigured = dev.auralis.studio.BuildConfig.YOUTUBE_API_KEY.isNotBlank()
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 40.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -608,13 +620,46 @@ private fun ProvidersSection(onBack: () -> Unit, modifier: Modifier = Modifier) 
                 ProviderRow("LRCLIB", stringResource(R.string.lyrics_provider), ready = true, note = stringResource(R.string.no_api_key_lrclib))
                 HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
                 ProviderRow(
+                    name = "Audius",
+                    role = stringResource(R.string.online_music_role),
+                    ready = true,
+                    note = stringResource(if (audiusKeyConfigured) R.string.api_key_configured else R.string.audius_public_access),
+                )
+                HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
+                ProviderRow(
                     name  = "Jamendo",
                     role  = stringResource(R.string.online_music_role),
                     ready = jamendoConfigured,
                     note  = stringResource(if (jamendoConfigured) R.string.client_id_configured else R.string.client_id_not_configured),
                 )
                 HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
-                ProviderRow("MusicBrainz", stringResource(R.string.metadata_lookup), ready = true, note = stringResource(R.string.no_api_key_musicbrainz))
+                ProviderRow("iTunes", stringResource(R.string.metadata_lookup), ready = true, note = stringResource(R.string.catalog_preview_only))
+                HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
+                ProviderRow("Deezer", stringResource(R.string.metadata_lookup), ready = true, note = stringResource(R.string.catalog_preview_only))
+                HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
+                ProviderRow(
+                    "YouTube",
+                    stringResource(R.string.metadata_lookup),
+                    ready = false,
+                    note = stringResource(if (youtubeKeyConfigured) R.string.youtube_discovery_not_enabled else R.string.youtube_not_configured),
+                )
+            }
+        }
+        item {
+            SettingsCard(stringResource(R.string.download_quality)) {
+                DownloadQuality.entries.forEach { quality ->
+                    val label = when (quality) {
+                        DownloadQuality.BEST_AVAILABLE -> R.string.quality_best
+                        DownloadQuality.HIGH -> R.string.quality_high
+                        DownloadQuality.DATA_SAVER -> R.string.quality_data_saver
+                    }
+                    FilterChip(
+                        selected = downloadQuality == quality,
+                        onClick = { onDownloadQualityChange(quality) },
+                        label = { Text(stringResource(label)) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
         item {
@@ -909,4 +954,3 @@ private fun AccentColorSettingCard(
         }
     }
 }
-
