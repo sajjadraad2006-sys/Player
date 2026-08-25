@@ -29,7 +29,11 @@ internal data class AudiusTrackDto(
     val id: String = "",
     val title: String = "",
     val duration: Int = 0,
-    val downloadable: Boolean = false,
+    // Live API contract (verified 2026-08): "is_downloadable" / "is_download_gated".
+    // Legacy "downloadable" kept only as a fallback for cached/older payloads.
+    val downloadable: Boolean? = null,
+    @SerialName("is_downloadable") val isDownloadable: Boolean? = null,
+    @SerialName("is_download_gated") val isDownloadGated: Boolean = false,
     @SerialName("is_streamable") val isStreamable: Boolean? = null,
     @SerialName("is_stream_gated") val isStreamGated: Boolean = false,
     @SerialName("download_conditions") val downloadConditions: JsonElement? = null,
@@ -147,7 +151,10 @@ class AudiusClient(
 
     internal fun mapTrack(dto: AudiusTrackDto): OnlineTrack {
         val streamable = dto.isStreamable != false && !dto.isStreamGated
-        val freelyDownloadable = dto.downloadable && (dto.downloadConditions == null || dto.downloadConditions is JsonNull)
+        val declaredDownloadable = dto.downloadable == true || dto.isDownloadable == true
+        val gatedDownload = dto.isDownloadGated ||
+            (dto.downloadConditions != null && dto.downloadConditions !is JsonNull)
+        val freelyDownloadable = declaredDownloadable && !gatedDownload
         val format = dto.originalFileName?.substringAfterLast('.', "")?.lowercase()?.takeIf(String::isNotBlank)
         return OnlineTrack(
             provider = id,

@@ -4,7 +4,8 @@
       "id": "D7KyD",
       "title": "Fixture Song",
       "duration": 188,
-      "downloadable": true,
+      "is_downloadable": true,
+      "is_download_gated": false,
       "is_streamable": true,
       "isrc": "US-A1B-26-00001",
       "permalink": "/fixture/fixture-song",
@@ -21,9 +22,18 @@
       "id": "NoDownload1",
       "title": "Stream Only",
       "duration": 205,
-      "downloadable": false,
+      "is_downloadable": false,
       "is_streamable": true,
       "permalink": "/fixture/stream-only",
+      "user": { "name": "Fixture Artist", "handle": "fixture" }
+    },
+    {
+      "id": "Legacy1",
+      "title": "Legacy Downloadable",
+      "duration": 190,
+      "downloadable": true,
+      "is_streamable": true,
+      "permalink": "/fixture/legacy",
       "user": { "name": "Fixture Artist", "handle": "fixture" }
     }
   ]

@@ -50,6 +50,30 @@ class AudiusClientTest {
     }
 
     @Test
+    fun `current is_downloadable contract enables download`() {
+        val payload = requireNotNull(javaClass.classLoader?.getResource("audius/search_tracks.json")).readText()
+        val current = client.parseSearchFixture(payload)[0]
+        assertTrue(current.downloadAllowed)
+        assertTrue(current.isDownloadableFullTrack)
+        val legacy = client.parseSearchFixture(payload)[2]
+        assertTrue(legacy.downloadAllowed)
+    }
+
+    @Test
+    fun `download gated tracks are not freely downloadable`() {
+        val payload = """
+            {"data":[{"id":"gd","title":"Gated Download",
+            "is_downloadable":true,"is_download_gated":true,
+            "is_streamable":true,
+            "download_conditions":{"usdc_purchase":{"price":"1"}},
+            "user":{"name":"Artist"}}]}
+        """.trimIndent()
+        val track = client.parseSearchFixture(payload).single()
+        assertFalse(track.downloadAllowed)
+        assertNull(track.downloadUrl)
+    }
+
+    @Test
     fun `gated Audius media is not exposed without user authorization`() {
         val payload = """
             {"data":[{"id":"gated","title":"Gated","downloadable":true,
