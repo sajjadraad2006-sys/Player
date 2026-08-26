@@ -78,6 +78,11 @@ class AudiusClient(
     private val client: HttpClient by lazy {
         httpClient ?: HttpClient(OkHttp) {
             expectSuccess = true
+            engine {
+                config {
+                    dns(AudiusDns)
+                }
+            }
             install(ContentNegotiation) { json(json) }
             install(HttpTimeout) {
                 connectTimeoutMillis = 10_000
@@ -207,3 +212,26 @@ class AudiusClient(
         if (httpClient == null) runCatching { client.close() }
     }
 }
+
+/**
+ * Fallback DNS resolver for Audius.
+ * Tries standard system DNS first; if resolution fails due to local/ISP UDP DNS glitches,
+ * falls back to the official Cloudflare Anycast IPs for api.audius.co.
+ */
+internal object AudiusDns : okhttp3.Dns {
+    override fun lookup(hostname: String): List<java.net.InetAddress> = try {
+        okhttp3.Dns.SYSTEM.lookup(hostname)
+    } catch (e: java.net.UnknownHostException) {
+        if (hostname.equals("api.audius.co", ignoreCase = true) ||
+            hostname.equals("discoveryprovider.audius.co", ignoreCase = true)
+        ) {
+            listOf(
+                java.net.InetAddress.getByAddress(hostname, byteArrayOf(104.toByte(), 18.toByte(), 24.toByte(), 162.toByte())),
+                java.net.InetAddress.getByAddress(hostname, byteArrayOf(104.toByte(), 18.toByte(), 25.toByte(), 162.toByte())),
+            )
+        } else {
+            throw e
+        }
+    }
+}
+
