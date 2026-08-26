@@ -118,3 +118,43 @@ Every native `.so` library packaged in the final APK was extracted and audited u
 | `jsRuntimeDetectedByYtDlp` | yt-dlp detects quickjs | `ydl._js_runtimes['quickjs'].info.supported == True` |
 | `jsChallengeSelfTestReady` | EJS solver script executes in QuickJS | `yt_dlp_ejs.yt.solver` executes with `0755` exit 0 |
 | `realExtractionReady` | Real extraction succeeded | Real media metadata resolved in current session |
+
+---
+
+## 7. Direct Resource Ingestion Pipeline (Phase 4)
+
+```
+[ LRR ResolvedMedia ] ──► [ DownloadCapabilityEvaluator ]
+                                  │
+                       (PERMITTED + DIRECT_RESOURCE)
+                                  ▼
+                     [ ResolverDownloadDescriptor ]
+                      • SHA-256 stable key
+                      • No CDN token persistence
+                      • Nullable metadata integrity
+                                  │
+                       (WorkManager KEEP Policy)
+                                  ▼
+                        [ DownloadWorker ]
+                      • Fresh re-resolution
+                      • Safe HTTP headers allowlist
+                      • 1-shot 403 recovery
+                                  │
+                                  ▼
+                   [ DownloadIngestionRequest ]
+                                  │
+                                  ▼
+                   [ DownloadIngestionManager ]
+                      • In-process mutex per key
+                      • Magic byte & format detection
+                      • MediaMetadataRetriever validation
+                      • Room DB state persistence
+                      • MediaStore sync
+```
+
+### Key Architectural Invariants:
+1. **Download Permission Provenance & Basis**: Download permission is never inferred from HTTP 200 / file extensions. Generic URLs default to `UNKNOWN` (`NONE` basis). `PERMITTED` requires `PROVIDER_EXPLICIT`, `LICENSE_METADATA`, or `TEST_FIXTURE`.
+2. **Deterministic Identity**: Identity uses `sourceId` when present, else `SHA-256(canonicalUrl)`. Transient CDN query params and tokens are never included in the key.
+3. **Fresh Resolution at Worker Start**: CDN URLs and signed tokens expire. The worker re-resolves the source URL freshly upon execution.
+4. **One-Shot 403 Recovery**: If a freshly resolved URL returns HTTP 403 upon initial request execution, the worker makes exactly one additional resolution to obtain a refreshed signed URL and retries once before logging a terminal failure.
+5. **No Parallel Download Pipelines**: Both `OnlineTrack` and `ResolverDownloadDescriptor` adapt into the unified `DownloadIngestionRequest` handled by `DownloadIngestionManager`.

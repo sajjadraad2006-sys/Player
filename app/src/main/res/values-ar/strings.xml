@@ -387,4 +387,12 @@
     <string name="not_installed">غير مثبت</string>
     <string name="optional_not_installed">اختياري / غير مثبت</string>
     <string name="ready_isolated_process">جاهز (العملية :resolver)</string>
+    <string name="import_from_link">استيراد من رابط</string>
+    <string name="import_link_hint">أدخل رابط وسائط أو صوت مباشر</string>
+    <string name="import_link_inspect">فحص</string>
+    <string name="import_link_download">تنزيل</string>
+    <string name="import_link_stream_only">هذا المصدر مخصص للبث فقط ولا يمكن تنزيله.</string>
+    <string name="import_link_not_permitted">التنزيل غير مصرح به لهذا المصدر.</string>
+    <string name="import_link_unknown_permission">تعذر التحقق من إذن التنزيل لهذا الرابط.</string>
+    <string name="import_link_inspecting">جارٍ فحص الرابط…</string>
 </resources>

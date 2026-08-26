@@ -114,6 +114,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val downloadFolderLocation = MutableStateFlow(prefs.getString("download_folder_name", "Music/Lyrune/") ?: "Music/Lyrune/")
     val downloadFolderUri = MutableStateFlow(prefs.getString("download_folder_uri", null))
 
+    val mediaResolver: dev.auralis.studio.resolver.api.MediaResolver get() = container.mediaResolver
+
     private val providerRegistry = container.musicProviders
 
     fun setDownloadLocation(uri: Uri, folderName: String) {
@@ -346,6 +348,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ?.takeIf { it.status == DownloadStatus.DOWNLOADING.name || it.status == DownloadStatus.QUEUED.name }
                 ?.let { downloadsDao.updateStatus(it.id, DownloadStatus.CANCELLED.name, "") }
         }
+    }
+
+    fun enqueueResolverDownload(descriptor: dev.auralis.studio.resolver.api.ResolverDownloadDescriptor) {
+        if (descriptor.downloadCapability != dev.auralis.studio.resolver.api.DownloadCapability.PERMITTED) return
+        val app = getApplication<Application>()
+        dev.auralis.studio.library.enqueueDownload(app, descriptor)
+        Toast.makeText(app, app.getString(R.string.downloading_location, downloadFolderLocation.value), Toast.LENGTH_SHORT).show()
     }
 
     fun setDownloadQuality(quality: DownloadQuality) {

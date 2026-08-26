@@ -69,10 +69,10 @@ class DownloadIngestionManager(
         onlineTrack: OnlineTrack,
         customFolderUri: String? = null,
         onProgress: (bytesDownloaded: Long, bytesTotal: Long) -> Unit = { _, _ -> },
-    ): Result<Track> = withContext(Dispatchers.IO) {
+    ): Result<Track> {
         // ── Gate 1: never persist a preview as a "download". ────────────────
         if (!onlineTrack.isDownloadableFullTrack || onlineTrack.downloadUrl.isNullOrBlank()) {
-            return@withContext Result.failure(
+            return Result.failure(
                 PreviewDownloadRejectedException(
                     "No authorized full-track download available for \"${onlineTrack.title}\" " +
                         "(provider=${onlineTrack.provider}). Preview assets are not stored.",
@@ -80,11 +80,29 @@ class DownloadIngestionManager(
             )
         }
 
+        val request = DownloadIngestionRequest.fromOnlineTrack(
+            track = onlineTrack,
+            headers = requestHeadersFor(onlineTrack),
+        )
+        return download(request, customFolderUri, onProgress)
+    }
+
+    suspend fun download(
+        request: DownloadIngestionRequest,
+        customFolderUri: String? = null,
+        onProgress: (bytesDownloaded: Long, bytesTotal: Long) -> Unit = { _, _ -> },
+    ): Result<Track> = withContext(Dispatchers.IO) {
+        if (request.downloadUrl.isBlank()) {
+            return@withContext Result.failure(
+                PreviewDownloadRejectedException("No download URL provided for \"${request.title}\""),
+            )
+        }
+
         // ── Gate 2: one active job per DownloadKey (in-process). ────────────
         val acquired = startMutex.withLock {
-            if (onlineTrack.downloadKey in activeKeys || onlineTrack.recordingIdentity in activeRecordings) false else {
-                activeKeys += onlineTrack.downloadKey
-                activeRecordings += onlineTrack.recordingIdentity
+            if (request.downloadKey in activeKeys || request.recordingIdentity in activeRecordings) false else {
+                activeKeys += request.downloadKey
+                activeRecordings += request.recordingIdentity
                 true
             }
         }
@@ -95,26 +113,26 @@ class DownloadIngestionManager(
         }
 
         try {
-            performDownload(onlineTrack, customFolderUri, onProgress)
+            performDownload(request, customFolderUri, onProgress)
         } finally {
             synchronized(activeKeys) {
-                activeKeys -= onlineTrack.downloadKey
-                activeRecordings -= onlineTrack.recordingIdentity
+                activeKeys -= request.downloadKey
+                activeRecordings -= request.recordingIdentity
             }
         }
     }
 
     private suspend fun performDownload(
-        onlineTrack: OnlineTrack,
+        request: DownloadIngestionRequest,
         customFolderUri: String?,
         onProgress: (bytesDownloaded: Long, bytesTotal: Long) -> Unit,
     ): Result<Track> {
-        val downloadUrl = onlineTrack.downloadUrl ?: error("guarded by isDownloadableFullTrack")
+        val downloadUrl = request.downloadUrl
 
         // A recording already owned through another provider is not downloaded again by default.
-        val recordingOwner = downloadsDao.findOwnedByRecordingIdentity(onlineTrack.recordingIdentity)
+        val recordingOwner = downloadsDao.findOwnedByRecordingIdentity(request.recordingIdentity)
         if (recordingOwner != null &&
-            (recordingOwner.provider != onlineTrack.provider || recordingOwner.providerTrackId != onlineTrack.id)
+            (recordingOwner.provider != request.provider || recordingOwner.providerTrackId != request.providerTrackId)
         ) {
             return if (recordingOwner.status == DownloadStatus.COMPLETED.name) {
                 resolveExistingCompleted(recordingOwner)
@@ -124,7 +142,7 @@ class DownloadIngestionManager(
         }
 
         // ── Gate 3: DB-level uniqueness on the stable DownloadKey row. ──────
-        val existing = downloadsDao.findByKey(onlineTrack.provider, onlineTrack.id)
+        val existing = downloadsDao.findByKey(request.provider, request.providerTrackId)
         val rowId = if (existing != null && existing.status != DownloadStatus.COMPLETED.name) {
             downloadsDao.updateStatus(existing.id, DownloadStatus.DOWNLOADING.name, "")
             existing.id
@@ -132,19 +150,20 @@ class DownloadIngestionManager(
             // Already completed — nothing to do; resolve its local file again.
             return resolveExistingCompleted(existing)
         } else {
+            val safeArtist = request.artist ?: ""
             downloadsDao.insert(
                 DownloadEntity(
-                    provider = onlineTrack.provider,
-                    providerTrackId = onlineTrack.id,
+                    provider = request.provider,
+                    providerTrackId = request.providerTrackId,
                     remoteUrl = downloadUrl,
-                    fileName = "${onlineTrack.artist} - ${onlineTrack.title}",
-                    title = onlineTrack.title,
-                    artist = onlineTrack.artist,
-                    album = onlineTrack.album,
-                    artworkUrl = onlineTrack.artworkUrl.orEmpty(),
-                    durationMs = onlineTrack.durationMs,
-                    recordingIdentity = onlineTrack.recordingIdentity,
-                    isrc = onlineTrack.isrc.orEmpty(),
+                    fileName = if (safeArtist.isNotBlank()) "$safeArtist - ${request.title}" else request.title,
+                    title = request.title,
+                    artist = safeArtist,
+                    album = request.album.orEmpty(),
+                    artworkUrl = request.artworkUrl.orEmpty(),
+                    durationMs = request.durationMs,
+                    recordingIdentity = request.recordingIdentity,
+                    isrc = request.isrc.orEmpty(),
                     status = DownloadStatus.DOWNLOADING.name,
                 ),
             )
@@ -154,10 +173,18 @@ class DownloadIngestionManager(
             val requestBuilder = Request.Builder()
                 .url(downloadUrl)
                 .header("User-Agent", "Lyrune-Studio/2.0")
-            requestHeadersFor(onlineTrack).forEach { (name, value) -> requestBuilder.header(name, value) }
-            val request = requestBuilder.build()
+            request.httpHeaders.forEach { (name, value) ->
+                // Guard: range and sensitive authorization headers must never be injected from outside
+                if (!name.equals("Cookie", ignoreCase = true) &&
+                    !name.equals("Authorization", ignoreCase = true) &&
+                    !name.equals("Range", ignoreCase = true)
+                ) {
+                    requestBuilder.header(name, value)
+                }
+            }
+            val httpRequest = requestBuilder.build()
 
-            val response = okHttpClient.newCall(request).execute()
+            val response = okHttpClient.newCall(httpRequest).execute()
             if (!response.isSuccessful) {
                 val errorMsg = "HTTP download failed with code ${response.code}"
                 downloadsDao.updateStatus(rowId, DownloadStatus.FAILED.name, errorMsg)
@@ -183,8 +210,8 @@ class DownloadIngestionManager(
             val formatInfo = detectAudioFormat(contentType, downloadUrl, headerBytes.copyOf(bytesRead))
 
             // Clean filename with real extension
-            val safeArtist = onlineTrack.artist.replace(Regex("[^a-zA-Z0-9._ -]"), "_").take(30).trim()
-            val safeTitle = onlineTrack.title.replace(Regex("[^a-zA-Z0-9._ -]"), "_").take(40).trim()
+            val safeArtist = (request.artist ?: "").replace(Regex("[^a-zA-Z0-9._ -]"), "_").take(30).trim()
+            val safeTitle = request.title.replace(Regex("[^a-zA-Z0-9._ -]"), "_").take(40).trim()
             val fileName = if (safeArtist.isNotBlank()) "$safeArtist - $safeTitle.${formatInfo.extension}" else "$safeTitle.${formatInfo.extension}"
 
             var localFilePath: String? = null
@@ -240,7 +267,7 @@ class DownloadIngestionManager(
             }
 
             // ── Validation: duration plausibility vs expected FULL duration. ─
-            val expectedDurationMs = onlineTrack.durationMs
+            val expectedDurationMs = request.durationMs
             if (expectedDurationMs > 0L) {
                 val tolerance = durationToleranceMs(expectedDurationMs)
                 if (abs(actualDurationMs - expectedDurationMs) > tolerance) {
@@ -255,10 +282,10 @@ class DownloadIngestionManager(
             //   1. Trusted provider catalog metadata
             //   2. Embedded tags — accepted ONLY when they are not generic placeholders
             // Generic values ("Music", "Unknown", "Lyrune", blank) never override provider data.
-            var resolvedTitle = onlineTrack.title.takeIf { it.isNotBlank() }
-            var resolvedArtist = onlineTrack.artist
-                .takeIf { it.isNotBlank() && !it.equals("Music", true) && !it.equals("Lyrune", true) }
-            var resolvedAlbum = onlineTrack.album.takeIf { it.isNotBlank() }
+            var resolvedTitle = request.title.takeIf { it.isNotBlank() }
+            var resolvedArtist = request.artist
+                ?.takeIf { it.isNotBlank() && !it.equals("Music", true) && !it.equals("Lyrune", true) }
+            var resolvedAlbum = request.album?.takeIf { it.isNotBlank() }
             runCatching {
                 probeMetadata(finalPath, finalUriStr)?.let { embedded ->
                     // Embedded tags fill gaps only when they are not generic placeholders.
@@ -272,7 +299,7 @@ class DownloadIngestionManager(
                 rowId,
                 trackUri = finalUriStr,
                 path = finalPath,
-                title = resolvedTitle ?: onlineTrack.title,
+                title = resolvedTitle ?: request.title,
                 artist = resolvedArtist.orEmpty(),
                 album = resolvedAlbum.orEmpty(),
                 durationMs = actualDurationMs,
@@ -284,9 +311,9 @@ class DownloadIngestionManager(
             val resolvedTrack = mediaStoreRepository.track(finalUriStr) ?: Track(
                 id = rowId,
                 uri = finalUriStr,
-                title = resolvedTitle ?: onlineTrack.title,
-                artist = resolvedArtist ?: onlineTrack.artist,
-                album = resolvedAlbum ?: onlineTrack.album,
+                title = resolvedTitle ?: request.title,
+                artist = resolvedArtist ?: request.artist ?: "Unknown Artist",
+                album = resolvedAlbum ?: request.album.orEmpty(),
                 albumId = null,
                 durationMs = actualDurationMs,
                 dateAddedSeconds = System.currentTimeMillis() / 1000L,

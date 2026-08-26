@@ -69,6 +69,10 @@ object LrrIpcParser {
     }
 
     fun parseMediaJson(obj: kotlinx.serialization.json.JsonObject, sourceUrl: String): ResolvedMedia {
+        val source = obj["source"]?.jsonPrimitive?.contentOrNull ?: "Generic"
+        val webpageUrl = obj["webpageUrl"]?.jsonPrimitive?.contentOrNull ?: sourceUrl
+        val license = obj["license"]?.jsonPrimitive?.contentOrNull
+
         val formatsArray = obj["formats"]?.jsonArray ?: emptyList()
         val formats = formatsArray.mapNotNull { it as? kotlinx.serialization.json.JsonObject }.map { f ->
             val headersMap = mutableMapOf<String, String>()
@@ -81,6 +85,29 @@ object LrrIpcParser {
                 dev.auralis.studio.resolver.api.ResolutionMode.valueOf(modeStr)
             } catch (_: Exception) {
                 dev.auralis.studio.resolver.api.ResolutionMode.DIRECT_RESOURCE
+            }
+
+            val capStr = f["downloadCapability"]?.jsonPrimitive?.contentOrNull
+            val basisStr = f["downloadCapabilityBasis"]?.jsonPrimitive?.contentOrNull
+
+            val eval = if (!capStr.isNullOrBlank()) {
+                val cap = try {
+                    dev.auralis.studio.resolver.api.DownloadCapability.valueOf(capStr)
+                } catch (_: Exception) {
+                    dev.auralis.studio.resolver.api.DownloadCapability.UNKNOWN
+                }
+                val basis = try {
+                    dev.auralis.studio.resolver.api.DownloadCapabilityBasis.valueOf(basisStr ?: "NONE")
+                } catch (_: Exception) {
+                    dev.auralis.studio.resolver.api.DownloadCapabilityBasis.NONE
+                }
+                dev.auralis.studio.resolver.api.DownloadCapabilityEvaluator.EvaluationResult(cap, basis)
+            } else {
+                dev.auralis.studio.resolver.api.DownloadCapabilityEvaluator.evaluate(
+                    source = source,
+                    webpageUrl = webpageUrl,
+                    license = license,
+                )
             }
 
             ResolvedFormat(
@@ -98,13 +125,15 @@ object LrrIpcParser {
                 expiresAtEpochMs = f["expiresAtEpochMs"]?.jsonPrimitive?.longOrNull,
                 resolutionMode = mode,
                 isAudioOnly = f["isAudioOnly"]?.jsonPrimitive?.booleanOrNull ?: false,
+                downloadCapability = eval.capability,
+                downloadCapabilityBasis = eval.basis,
             )
         }
 
         return ResolvedMedia(
-            source = obj["source"]?.jsonPrimitive?.contentOrNull ?: "Generic",
+            source = source,
             sourceId = obj["sourceId"]?.jsonPrimitive?.contentOrNull,
-            webpageUrl = obj["webpageUrl"]?.jsonPrimitive?.contentOrNull ?: sourceUrl,
+            webpageUrl = webpageUrl,
             title = obj["title"]?.jsonPrimitive?.contentOrNull ?: "Unknown Title",
             artist = obj["artist"]?.jsonPrimitive?.contentOrNull,
             album = obj["album"]?.jsonPrimitive?.contentOrNull,

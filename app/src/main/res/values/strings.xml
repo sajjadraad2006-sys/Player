@@ -379,4 +379,12 @@
     <string name="not_installed">Not installed</string>
     <string name="optional_not_installed">Optional / Not installed</string>
     <string name="ready_isolated_process">Ready (:resolver process)</string>
+    <string name="import_from_link">Import from link</string>
+    <string name="import_link_hint">Enter media or audio link</string>
+    <string name="import_link_inspect">Inspect</string>
+    <string name="import_link_download">Download</string>
+    <string name="import_link_stream_only">This resource is stream-only and cannot be downloaded.</string>
+    <string name="import_link_not_permitted">Downloads are not permitted for this resource.</string>
+    <string name="import_link_unknown_permission">Download permission is unverified for this link.</string>
+    <string name="import_link_inspecting">Inspecting link…</string>
 </resources>
