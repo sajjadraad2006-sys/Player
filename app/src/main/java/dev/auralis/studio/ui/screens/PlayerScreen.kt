@@ -733,7 +733,7 @@ private fun LyricsPage(
         if (state is LyricsUiState.Found) {
             while (isActive) {
                 smoothPositionMs = lyricsClock?.tick() ?: positionMs
-                delay(35)
+                delay(16)
             }
         }
     }
@@ -950,14 +950,14 @@ private fun LyricsPage(
                 }
                 itemsIndexed(lyrics.lines, key = { i, line -> "$i:${line.timeMs}" }) { index, line ->
                     val isActive = index == activeIndex
-                    val scale by animateFloatAsState(if (isActive) 1.035f else 1f, tween(220), label = "lyric_scale")
+                    val scale by animateFloatAsState(if (isActive) 1.035f else 1f, tween(80), label = "lyric_scale")
                     val lineColor by animateColorAsState(
                         when {
                             isActive -> colors.primary
                             index < activeIndex -> colors.onSurface.copy(alpha = 0.44f)
                             else -> colors.onSurface.copy(alpha = 0.72f)
                         },
-                        tween(220),
+                        tween(80),
                         label = "lyric_color",
                     )
 

@@ -213,25 +213,97 @@ class AudiusClient(
     }
 }
 
+@Serializable
+internal data class DohResponse(
+    @SerialName("Status") val status: Int = 0,
+    @SerialName("Answer") val answer: List<DohAnswerDto> = emptyList(),
+)
+
+@Serializable
+internal data class DohAnswerDto(
+    val name: String = "",
+    val type: Int = 0,
+    val data: String = "",
+)
+
 /**
- * Fallback DNS resolver for Audius.
- * Tries standard system DNS first; if resolution fails due to local/ISP UDP DNS glitches,
- * falls back to the official Cloudflare Anycast IPs for api.audius.co.
+ * Robust DNS resolver for Audius with dynamic DNS-over-HTTPS (DoH) fallback.
+ *
+ * 1. Tries standard system DNS first, preserving normal Android networking behavior.
+ * 2. If system DNS fails (e.g. local UDP DNS / ISP stub failure for api.audius.co),
+ *    dynamically queries standard DNS-over-HTTPS (DoH) resolvers (Cloudflare DoH / Google DoH).
+ * 3. Does NOT rely on hardcoded CDN IP addresses.
+ * 4. Preserves full TLS SNI and strict hostname/certificate verification by binding
+ *    the resolved IP bytes to the original requested hostname.
  */
 internal object AudiusDns : okhttp3.Dns {
-    override fun lookup(hostname: String): List<java.net.InetAddress> = try {
-        okhttp3.Dns.SYSTEM.lookup(hostname)
-    } catch (e: java.net.UnknownHostException) {
-        if (hostname.equals("api.audius.co", ignoreCase = true) ||
-            hostname.equals("discoveryprovider.audius.co", ignoreCase = true)
-        ) {
-            listOf(
-                java.net.InetAddress.getByAddress(hostname, byteArrayOf(104.toByte(), 18.toByte(), 24.toByte(), 162.toByte())),
-                java.net.InetAddress.getByAddress(hostname, byteArrayOf(104.toByte(), 18.toByte(), 25.toByte(), 162.toByte())),
-            )
-        } else {
-            throw e
+    private val dohJson = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    override fun lookup(hostname: String): List<java.net.InetAddress> {
+        try {
+            val systemAddresses = okhttp3.Dns.SYSTEM.lookup(hostname)
+            if (systemAddresses.isNotEmpty()) return systemAddresses
+        } catch (_: java.net.UnknownHostException) {
+            // System DNS failed; attempt dynamic DoH resolution for Audius domains
         }
+
+        if (hostname.equals("api.audius.co", ignoreCase = true) ||
+            hostname.equals("discoveryprovider.audius.co", ignoreCase = true) ||
+            hostname.endsWith(".audius.co", ignoreCase = true)
+        ) {
+            val dohAddresses = resolveDoh(hostname)
+            if (dohAddresses.isNotEmpty()) return dohAddresses
+        }
+
+        throw java.net.UnknownHostException("Unable to resolve host \"$hostname\": No address associated with hostname")
+    }
+
+    internal fun resolveDoh(
+        hostname: String,
+        fetcher: (String) -> String? = ::fetchHttpString,
+    ): List<java.net.InetAddress> {
+        val dohUrls = listOf(
+            "https://cloudflare-dns.com/dns-query?name=$hostname&type=A",
+            "https://dns.google/resolve?name=$hostname&type=A",
+        )
+        for (urlStr in dohUrls) {
+            val body = fetcher(urlStr) ?: continue
+            val ips = parseDohAnswer(body)
+            if (ips.isNotEmpty()) {
+                val resolved = ips.mapNotNull { ipStr ->
+                    runCatching {
+                        val ipBytes = java.net.InetAddress.getByName(ipStr).address
+                        java.net.InetAddress.getByAddress(hostname, ipBytes)
+                    }.getOrNull()
+                }
+                if (resolved.isNotEmpty()) return resolved
+            }
+        }
+        return emptyList()
+    }
+
+    internal fun parseDohAnswer(jsonResponse: String): List<String> = runCatching {
+        val response = dohJson.decodeFromString<DohResponse>(jsonResponse)
+        response.answer.filter { it.type == 1 && it.data.isNotBlank() }.map { it.data.trim() }
+    }.getOrElse {
+        Regex("""\{[^}]*"type"\s*:\s*1[^}]*"data"\s*:\s*"([0-9.]+)"[^}]*\}""")
+            .findAll(jsonResponse)
+            .mapNotNull { it.groupValues.getOrNull(1) }
+            .toList()
+    }.distinct()
+
+    private fun fetchHttpString(urlStr: String): String? = try {
+        val conn = (java.net.URL(urlStr).openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 4_000
+            readTimeout = 4_000
+            setRequestProperty("Accept", "application/dns-json")
+            setRequestProperty("User-Agent", "Lyrune/0.2.0 (Android)")
+        }
+        if (conn.responseCode == 200) {
+            conn.inputStream.bufferedReader().use { it.readText() }
+        } else null
+    } catch (_: Throwable) {
+        null
     }
 }
 

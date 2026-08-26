@@ -116,4 +116,39 @@ class AudiusClientTest {
         assertEquals("public-client-key", apiKey)
         assertNull(authorization)
     }
+
+    @Test
+    fun `AudiusDns parses standard DNS-over-HTTPS JSON response`() {
+        val jsonPayload = """
+            {
+                "Status": 0,
+                "Answer": [
+                    {"name": "api.audius.co", "type": 1, "TTL": 300, "data": "104.18.24.162"},
+                    {"name": "api.audius.co", "type": 1, "TTL": 300, "data": "104.18.25.162"},
+                    {"name": "api.audius.co", "type": 28, "TTL": 300, "data": "2606:4700::6812:18a2"}
+                ]
+            }
+        """.trimIndent()
+
+        val parsedIps = AudiusDns.parseDohAnswer(jsonPayload)
+        assertEquals(listOf("104.18.24.162", "104.18.25.162"), parsedIps)
+    }
+
+    @Test
+    fun `AudiusDns resolveDoh constructs InetAddresses with original hostname for TLS SNI`() {
+        val mockPayload = """
+            {"Status": 0, "Answer": [{"name": "api.audius.co", "type": 1, "TTL": 60, "data": "192.0.2.1"}]}
+        """.trimIndent()
+
+        val addresses = AudiusDns.resolveDoh("api.audius.co", fetcher = { mockPayload })
+        assertEquals(1, addresses.size)
+        assertEquals("api.audius.co", addresses.first().hostName)
+        assertEquals("192.0.2.1", addresses.first().hostAddress)
+    }
+
+    @Test(expected = java.net.UnknownHostException::class)
+    fun `AudiusDns lookup throws UnknownHostException for nonexistent non-audius host`() {
+        AudiusDns.lookup("nonexistent.invalid.domain.12345")
+    }
 }
+
