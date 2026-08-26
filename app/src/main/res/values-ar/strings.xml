@@ -391,8 +391,10 @@
     <string name="import_link_hint">أدخل رابط وسائط أو صوت مباشر</string>
     <string name="import_link_inspect">فحص</string>
     <string name="import_link_download">تنزيل</string>
-    <string name="import_link_stream_only">هذا المصدر مخصص للبث فقط ولا يمكن تنزيله.</string>
-    <string name="import_link_not_permitted">التنزيل غير مصرح به لهذا المصدر.</string>
-    <string name="import_link_unknown_permission">تعذر التحقق من إذن التنزيل لهذا الرابط.</string>
+    <string name="import_link_download_available">التنزيل متاح</string>
+    <string name="import_link_stream_only">بث فقط</string>
+    <string name="import_link_unavailable">التنزيل غير متاح</string>
+    <string name="import_link_auth_required">يتطلب تفويضاً</string>
+    <string name="import_link_unknown_permission">حالة التنزيل غير مؤكدة</string>
     <string name="import_link_inspecting">جارٍ فحص الرابط…</string>
 </resources>

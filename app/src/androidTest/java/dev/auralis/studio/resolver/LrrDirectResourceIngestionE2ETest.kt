@@ -75,7 +75,11 @@ class LrrDirectResourceIngestionE2ETest {
             if (file.exists()) file.delete()
         }
         val lyruneDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Lyrune")
-        lyruneDir.listFiles()?.filter { it.name.startsWith("Test") }?.forEach { it.delete() }
+        lyruneDir.listFiles()?.filter {
+            it.name.startsWith("Test", ignoreCase = true) ||
+                it.name.startsWith("Auralis", ignoreCase = true) ||
+                it.name.contains("rapid", ignoreCase = true)
+        }?.forEach { it.delete() }
     }
 
     @Test
@@ -316,6 +320,50 @@ class LrrDirectResourceIngestionE2ETest {
 
         val row = database.downloadsDao().findByKey(ingestionReq.provider, ingestionReq.providerTrackId)
         assertEquals(DownloadStatus.FAILED.name, row?.status)
+    }
+
+    @Test
+    fun test6_FreshProcessRecreation_BootstrapLifecycle(): Unit = runBlocking {
+        // 1. Simulate process death: clear all static bridge state
+        DownloadWorkerBridge.manager = null
+        DownloadWorkerBridge.resolver = null
+
+        // 2. Simulate fresh application process bootstrap (as happens when WorkManager spawns in new process)
+        val freshContainer = dev.auralis.studio.core.AppContainer(context)
+
+        // 3. Verify bridge was populated eagerly by AppContainer during application bootstrap
+        assertNotNull("DownloadWorkerBridge.manager must be initialized by AppContainer bootstrap", DownloadWorkerBridge.manager)
+        assertNotNull("DownloadWorkerBridge.resolver must be initialized by AppContainer bootstrap", DownloadWorkerBridge.resolver)
+
+        // 4. Ingest a test fixture descriptor without any UI / Activity / ViewModel involvement
+        val wavBytes = generateTestWav(durationSeconds = 3)
+        testServer = LocalTestHttpServer {
+            HttpResponse(200, "audio/wav", wavBytes)
+        }.apply { start() }
+
+        val serverUrl = testServer!!.urlFor("/bootstrap_test.wav")
+        val descriptor = ResolverDownloadDescriptor(
+            source = "TestBootstrap",
+            sourceId = "boot_01",
+            canonicalUrl = serverUrl,
+            title = "Test Bootstrap Track",
+            downloadCapability = DownloadCapability.PERMITTED,
+            downloadCapabilityBasis = DownloadCapabilityBasis.TEST_FIXTURE,
+        )
+
+        val req = DownloadIngestionRequest.fromResolverResource(
+            descriptor = descriptor,
+            freshDirectUrl = serverUrl,
+            durationMs = 3000L,
+            formatExtension = "wav",
+        )
+
+        val result = freshContainer.downloadManager.download(req)
+        assertTrue("Download in fresh bootstrap environment must succeed: ${result.exceptionOrNull()?.message}", result.isSuccess)
+
+        val track = result.getOrNull()
+        assertNotNull("Resolved track must not be null", track)
+        assertEquals("Test Bootstrap Track", track?.title)
     }
 
     // ── Deterministic WAV Fixture Generator ─────────────────────────────────

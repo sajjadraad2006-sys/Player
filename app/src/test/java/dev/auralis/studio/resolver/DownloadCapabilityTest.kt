@@ -3,6 +3,7 @@ package dev.auralis.studio.resolver
 import dev.auralis.studio.resolver.api.DownloadCapability
 import dev.auralis.studio.resolver.api.DownloadCapabilityBasis
 import dev.auralis.studio.resolver.api.DownloadCapabilityEvaluator
+import dev.auralis.studio.resolver.api.RecognizedDownloadLicense
 import dev.auralis.studio.resolver.api.ResolutionMode
 import dev.auralis.studio.resolver.api.ResolvedFormat
 import dev.auralis.studio.resolver.api.ResolvedMedia
@@ -54,22 +55,108 @@ class DownloadCapabilityTest {
     }
 
     @Test
-    fun openLicenseMetadata_evaluatesToPermitted() {
-        val ccEval = DownloadCapabilityEvaluator.evaluate(
-            source = "ArchiveOrg",
-            webpageUrl = "https://archive.org/details/test_track",
-            license = "Creative Commons Attribution 4.0 (CC-BY)",
+    fun audiusAndJamendo_evaluateToProviderExplicit() {
+        val audiusEval = DownloadCapabilityEvaluator.evaluate(
+            source = "Audius",
+            webpageUrl = "https://audius.co/artist/track-123",
         )
-        assertEquals(DownloadCapability.PERMITTED, ccEval.capability)
-        assertEquals(DownloadCapabilityBasis.LICENSE_METADATA, ccEval.basis)
+        assertEquals(DownloadCapability.PERMITTED, audiusEval.capability)
+        assertEquals(DownloadCapabilityBasis.PROVIDER_EXPLICIT, audiusEval.basis)
+
+        val jamendoEval = DownloadCapabilityEvaluator.evaluate(
+            source = "Jamendo",
+            webpageUrl = "https://www.jamendo.com/track/456",
+        )
+        assertEquals(DownloadCapability.PERMITTED, jamendoEval.capability)
+        assertEquals(DownloadCapabilityBasis.PROVIDER_EXPLICIT, jamendoEval.basis)
+    }
+
+    @Test
+    fun strictLicenseModel_knownTrustedLicenses_evaluateToPermitted() {
+        val cc0Eval = DownloadCapabilityEvaluator.evaluate(
+            source = "ArchiveOrg",
+            webpageUrl = "https://archive.org/details/test_cc0",
+            license = "CC0 1.0",
+        )
+        assertEquals(DownloadCapability.PERMITTED, cc0Eval.capability)
+        assertEquals(DownloadCapabilityBasis.LICENSE_METADATA, cc0Eval.basis)
+        assertEquals(RecognizedDownloadLicense.CC0, cc0Eval.recognizedLicense)
 
         val pdEval = DownloadCapabilityEvaluator.evaluate(
             source = "PublicDomainTracks",
             webpageUrl = "https://example.org/pd.mp3",
-            license = "Public Domain / CC0",
+            license = "Public Domain",
         )
         assertEquals(DownloadCapability.PERMITTED, pdEval.capability)
         assertEquals(DownloadCapabilityBasis.LICENSE_METADATA, pdEval.basis)
+        assertEquals(RecognizedDownloadLicense.PUBLIC_DOMAIN, pdEval.recognizedLicense)
+
+        val ccByEval = DownloadCapabilityEvaluator.evaluate(
+            source = "OpenAudio",
+            webpageUrl = "https://example.org/audio",
+            license = "CC BY 4.0",
+        )
+        assertEquals(DownloadCapability.PERMITTED, ccByEval.capability)
+        assertEquals(DownloadCapabilityBasis.LICENSE_METADATA, ccByEval.basis)
+        assertEquals(RecognizedDownloadLicense.CC_BY, ccByEval.recognizedLicense)
+
+        val ccBySaUrlEval = DownloadCapabilityEvaluator.evaluate(
+            source = "OpenAudio",
+            webpageUrl = "https://example.org/audio",
+            licenseUrl = "https://creativecommons.org/licenses/by-sa/4.0/",
+        )
+        assertEquals(DownloadCapability.PERMITTED, ccBySaUrlEval.capability)
+        assertEquals(DownloadCapabilityBasis.LICENSE_METADATA, ccBySaUrlEval.basis)
+        assertEquals(RecognizedDownloadLicense.CC_BY_SA, ccBySaUrlEval.recognizedLicense)
+    }
+
+    @Test
+    fun strictLicenseModel_vagueOrUnverifiedClaims_evaluateToUnknown() {
+        // "Creative Commons" without specific license specifier
+        val vagueCc = DownloadCapabilityEvaluator.evaluate(
+            source = "Generic",
+            webpageUrl = "https://example.com/audio.mp3",
+            license = "Creative Commons",
+        )
+        assertEquals(DownloadCapability.UNKNOWN, vagueCc.capability)
+        assertEquals(DownloadCapabilityBasis.NONE, vagueCc.basis)
+        assertEquals(RecognizedDownloadLicense.UNRECOGNIZED, vagueCc.recognizedLicense)
+
+        // "No Copyright"
+        val noCopyright = DownloadCapabilityEvaluator.evaluate(
+            source = "Generic",
+            webpageUrl = "https://example.com/audio.mp3",
+            license = "No Copyright",
+        )
+        assertEquals(DownloadCapability.UNKNOWN, noCopyright.capability)
+        assertEquals(DownloadCapabilityBasis.NONE, noCopyright.basis)
+
+        // "Free download"
+        val freeDownload = DownloadCapabilityEvaluator.evaluate(
+            source = "Generic",
+            webpageUrl = "https://example.com/audio.mp3",
+            license = "Free download",
+        )
+        assertEquals(DownloadCapability.UNKNOWN, freeDownload.capability)
+        assertEquals(DownloadCapabilityBasis.NONE, freeDownload.basis)
+
+        // "Royalty Free"
+        val royaltyFree = DownloadCapabilityEvaluator.evaluate(
+            source = "Generic",
+            webpageUrl = "https://example.com/audio.mp3",
+            license = "Royalty Free",
+        )
+        assertEquals(DownloadCapability.UNKNOWN, royaltyFree.capability)
+        assertEquals(DownloadCapabilityBasis.NONE, royaltyFree.basis)
+
+        // Missing / empty license
+        val missing = DownloadCapabilityEvaluator.evaluate(
+            source = "Generic",
+            webpageUrl = "https://example.com/audio.mp3",
+            license = null,
+        )
+        assertEquals(DownloadCapability.UNKNOWN, missing.capability)
+        assertEquals(DownloadCapabilityBasis.NONE, missing.basis)
     }
 
     @Test

@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
@@ -107,20 +108,49 @@ fun SearchScreen(
     onPlayNext: (Track) -> Unit,
     onAddToQueue: (Track) -> Unit,
     onAddToPlaylist: (Long, String) -> Unit,
+    mediaResolver: dev.auralis.studio.resolver.api.MediaResolver? = null,
+    onEnqueueResolverDownload: (dev.auralis.studio.resolver.api.ResolverDownloadDescriptor) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var sourceSheetTrack by remember { mutableStateOf<UnifiedTrack?>(null) }
+    var showImportDialog by remember { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
 
-    Column(modifier.fillMaxSize()) {
-        Text(
-            stringResource(R.string.search),
-            style = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.Bold,
-            color = colors.onBackground,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
+    if (showImportDialog && mediaResolver != null) {
+        dev.auralis.studio.ui.components.ImportFromLinkDialog(
+            resolver = mediaResolver,
+            onDismiss = { showImportDialog = false },
+            onEnqueueDownload = onEnqueueResolverDownload,
         )
+    }
+
+    Column(modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(R.string.search),
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold,
+                color = colors.onBackground,
+            )
+            if (mediaResolver != null) {
+                IconButton(
+                    onClick = { showImportDialog = true },
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Link,
+                        contentDescription = stringResource(R.string.import_from_link),
+                        tint = colors.primary,
+                    )
+                }
+            }
+        }
 
         // Clean Natural Search Input Bar
         OutlinedTextField(

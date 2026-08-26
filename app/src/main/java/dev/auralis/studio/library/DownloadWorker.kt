@@ -7,12 +7,14 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import dev.auralis.studio.AuralisApplication
 import dev.auralis.studio.online.OnlineTrack
 import dev.auralis.studio.resolver.android.AndroidProcessMediaResolver
 import dev.auralis.studio.resolver.api.DownloadCapability
 import dev.auralis.studio.resolver.api.MediaResolver
 import dev.auralis.studio.resolver.api.ResolutionMode
 import dev.auralis.studio.resolver.api.ResolverDownloadDescriptor
+import dev.auralis.studio.resolver.api.ResolverErrorCode
 import dev.auralis.studio.resolver.api.ResolverFormatSelector
 import dev.auralis.studio.resolver.api.ResolverRequest
 import dev.auralis.studio.resolver.api.ResolverResult
@@ -157,6 +159,17 @@ internal data class OnlineTrackJson(
     }
 }
 
+/** Result classification for fresh resolution inside DownloadWorker. */
+internal sealed interface FreshResolutionResult {
+    data class Success(
+        val format: dev.auralis.studio.resolver.api.ResolvedFormat,
+        val safeHeaders: Map<String, String>,
+    ) : FreshResolutionResult
+
+    data class TerminalFailure(val message: String) : FreshResolutionResult
+    data class TransientFailure(val message: String) : FreshResolutionResult
+}
+
 /**
  * CoroutineWorker executing one unique download.
  *
@@ -169,7 +182,9 @@ class DownloadWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        val manager = DownloadWorkerBridge.manager
+        val app = applicationContext as? AuralisApplication
+        val container = app?.container
+        val manager = DownloadWorkerBridge.manager ?: container?.downloadManager
             ?: return Result.failure(workDataOf(KEY_ERROR to "DownloadIngestionManager not registered"))
 
         // ── Branch 1: Standard OnlineTrack ─────────────────────────────────
@@ -187,9 +202,16 @@ class DownloadWorker(
             return when (failure) {
                 is PreviewDownloadRejectedException ->
                     Result.failure(workDataOf(KEY_ERROR to PREVIEW_REJECTION))
-                else ->
-                    if (runAttemptCount < MAX_AUTO_RETRIES) Result.retry()
-                    else Result.failure(workDataOf(KEY_ERROR to failure.message))
+                else -> {
+                    val msg = failure.message.orEmpty()
+                    if (msg.contains("404")) {
+                        Result.failure(workDataOf(KEY_ERROR to msg))
+                    } else if (runAttemptCount < MAX_AUTO_RETRIES) {
+                        Result.retry()
+                    } else {
+                        Result.failure(workDataOf(KEY_ERROR to failure.message))
+                    }
+                }
             }
         }
 
@@ -203,7 +225,7 @@ class DownloadWorker(
                 return Result.failure(workDataOf(KEY_ERROR to "Download permission not granted for this resource"))
             }
 
-            val resolver = DownloadWorkerBridge.resolver ?: AndroidProcessMediaResolver(applicationContext)
+            val resolver = DownloadWorkerBridge.resolver ?: container?.mediaResolver ?: AndroidProcessMediaResolver(applicationContext)
 
             return processResolverDownload(descriptor, resolver, manager)
         }
@@ -218,61 +240,79 @@ class DownloadWorker(
     ): Result {
         // Fresh resolution attempt #1
         val res1 = resolveFreshFormat(descriptor, resolver)
-            ?: return if (runAttemptCount < MAX_AUTO_RETRIES) Result.retry()
-            else Result.failure(workDataOf(KEY_ERROR to "Fresh resolution failed to find permitted direct format"))
+        when (res1) {
+            is FreshResolutionResult.TerminalFailure -> {
+                return Result.failure(workDataOf(KEY_ERROR to res1.message))
+            }
+            is FreshResolutionResult.TransientFailure -> {
+                return if (runAttemptCount < MAX_AUTO_RETRIES) Result.retry()
+                else Result.failure(workDataOf(KEY_ERROR to res1.message))
+            }
+            is FreshResolutionResult.Success -> {
+                val format1 = res1.format
+                val safeHeaders1 = res1.safeHeaders
 
-        val (format1, safeHeaders1) = res1
-
-        val req1 = DownloadIngestionRequest.fromResolverResource(
-            descriptor = descriptor,
-            freshDirectUrl = format1.url,
-            durationMs = descriptor.expectedDurationMs,
-            safeHeaders = safeHeaders1,
-            formatExtension = format1.extension,
-        )
-
-        val result1 = manager.download(req1)
-        if (result1.isSuccess) {
-            return Result.success()
-        }
-
-        val failure1 = result1.exceptionOrNull()
-        val failureMsg1 = failure1?.message.orEmpty()
-
-        // ── One-shot stale resource recovery on HTTP 403 / expired token ─────
-        if (failureMsg1.contains("403") || failureMsg1.contains("expired", ignoreCase = true)) {
-            val res2 = resolveFreshFormat(descriptor, resolver)
-            if (res2 != null) {
-                val (format2, safeHeaders2) = res2
-                val req2 = DownloadIngestionRequest.fromResolverResource(
+                val req1 = DownloadIngestionRequest.fromResolverResource(
                     descriptor = descriptor,
-                    freshDirectUrl = format2.url,
+                    freshDirectUrl = format1.url,
                     durationMs = descriptor.expectedDurationMs,
-                    safeHeaders = safeHeaders2,
-                    formatExtension = format2.extension,
+                    safeHeaders = safeHeaders1,
+                    formatExtension = format1.extension,
                 )
-                val result2 = manager.download(req2)
-                if (result2.isSuccess) {
+
+                val result1 = manager.download(req1)
+                if (result1.isSuccess) {
                     return Result.success()
                 }
-                val failure2 = result2.exceptionOrNull()
-                return Result.failure(workDataOf(KEY_ERROR to (failure2?.message ?: "Re-resolution download failed")))
-            }
-        }
 
-        return when (failure1) {
-            is PreviewDownloadRejectedException ->
-                Result.failure(workDataOf(KEY_ERROR to PREVIEW_REJECTION))
-            else ->
-                if (runAttemptCount < MAX_AUTO_RETRIES) Result.retry()
-                else Result.failure(workDataOf(KEY_ERROR to failure1?.message))
+                val failure1 = result1.exceptionOrNull()
+                val failureMsg1 = failure1?.message.orEmpty()
+
+                // ── One-shot stale resource recovery on HTTP 403 / expired token ─────
+                if (failureMsg1.contains("403") || failureMsg1.contains("expired", ignoreCase = true)) {
+                    val res2 = resolveFreshFormat(descriptor, resolver)
+                    if (res2 is FreshResolutionResult.Success) {
+                        val format2 = res2.format
+                        val safeHeaders2 = res2.safeHeaders
+                        val req2 = DownloadIngestionRequest.fromResolverResource(
+                            descriptor = descriptor,
+                            freshDirectUrl = format2.url,
+                            durationMs = descriptor.expectedDurationMs,
+                            safeHeaders = safeHeaders2,
+                            formatExtension = format2.extension,
+                        )
+                        val result2 = manager.download(req2)
+                        if (result2.isSuccess) {
+                            return Result.success()
+                        }
+                        val failure2 = result2.exceptionOrNull()
+                        return Result.failure(workDataOf(KEY_ERROR to (failure2?.message ?: "Re-resolution download failed")))
+                    } else if (res2 is FreshResolutionResult.TerminalFailure) {
+                        return Result.failure(workDataOf(KEY_ERROR to res2.message))
+                    } else if (res2 is FreshResolutionResult.TransientFailure) {
+                        return if (runAttemptCount < MAX_AUTO_RETRIES) Result.retry()
+                        else Result.failure(workDataOf(KEY_ERROR to res2.message))
+                    }
+                }
+
+                return when {
+                    failure1 is PreviewDownloadRejectedException ->
+                        Result.failure(workDataOf(KEY_ERROR to PREVIEW_REJECTION))
+                    failureMsg1.contains("404") ->
+                        Result.failure(workDataOf(KEY_ERROR to failureMsg1))
+                    runAttemptCount < MAX_AUTO_RETRIES ->
+                        Result.retry()
+                    else ->
+                        Result.failure(workDataOf(KEY_ERROR to failure1?.message))
+                }
+            }
         }
     }
 
     private suspend fun resolveFreshFormat(
         descriptor: ResolverDownloadDescriptor,
         resolver: MediaResolver,
-    ): Pair<dev.auralis.studio.resolver.api.ResolvedFormat, Map<String, String>>? {
+    ): FreshResolutionResult {
         val resolverReq = ResolverRequest(
             sourceUrl = descriptor.canonicalUrl,
             sourceId = descriptor.sourceId,
@@ -281,7 +321,19 @@ class DownloadWorker(
 
         val resolveResult = resolver.resolve(resolverReq)
         if (resolveResult !is ResolverResult.Success) {
-            return null
+            val error = (resolveResult as? ResolverResult.Failure)?.error
+            val msg = error?.safeUserMessage ?: "Resolution failed"
+            val isTerminal = when (error?.technicalCode) {
+                ResolverErrorCode.NotFound,
+                ResolverErrorCode.UnsupportedUrl,
+                ResolverErrorCode.DownloadNotPermitted,
+                ResolverErrorCode.AccessRestricted,
+                ResolverErrorCode.AuthenticationRequired,
+                -> true
+                else -> error?.isRetryable == false
+            }
+            return if (isTerminal) FreshResolutionResult.TerminalFailure(msg)
+            else FreshResolutionResult.TransientFailure(msg)
         }
 
         val media = resolveResult.media
@@ -289,12 +341,12 @@ class DownloadWorker(
             formats = media.formats,
             preference = descriptor.qualityPreference,
             formatHint = descriptor.formatHint,
-        ) ?: return null
+        ) ?: return FreshResolutionResult.TerminalFailure("No permitted direct formats available")
 
         if (selectedFormat.resolutionMode != ResolutionMode.DIRECT_RESOURCE ||
             selectedFormat.downloadCapability != DownloadCapability.PERMITTED
         ) {
-            return null
+            return FreshResolutionResult.TerminalFailure("Resource format is not permitted for direct download")
         }
 
         // Strict allowlist for safe ephemeral HTTP headers (never Cookie / Authorization / Range)
@@ -305,7 +357,7 @@ class DownloadWorker(
                 key.equals("Accept", ignoreCase = true)
         }
 
-        return Pair(selectedFormat, safeHeaders)
+        return FreshResolutionResult.Success(selectedFormat, safeHeaders)
     }
 
     companion object {

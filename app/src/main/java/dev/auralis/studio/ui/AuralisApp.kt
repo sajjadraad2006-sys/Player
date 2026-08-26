@@ -313,6 +313,8 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                             onPlayNext            = viewModel::playNext,
                             onAddToQueue          = viewModel::addToQueue,
                             onAddToPlaylist       = viewModel::addToPlaylist,
+                            mediaResolver         = viewModel.mediaResolver,
+                            onEnqueueResolverDownload = viewModel::enqueueResolverDownload,
                             modifier              = commonModifier,
                         )
                         MainDestination.AUDIO_LAB -> AudioLabScreen(

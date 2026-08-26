@@ -383,8 +383,10 @@
     <string name="import_link_hint">Enter media or audio link</string>
     <string name="import_link_inspect">Inspect</string>
     <string name="import_link_download">Download</string>
-    <string name="import_link_stream_only">This resource is stream-only and cannot be downloaded.</string>
-    <string name="import_link_not_permitted">Downloads are not permitted for this resource.</string>
-    <string name="import_link_unknown_permission">Download permission is unverified for this link.</string>
+    <string name="import_link_download_available">Download available</string>
+    <string name="import_link_stream_only">Streaming only</string>
+    <string name="import_link_unavailable">Download unavailable</string>
+    <string name="import_link_auth_required">Authorization required</string>
+    <string name="import_link_unknown_permission">Download status unverified</string>
     <string name="import_link_inspecting">Inspecting link…</string>
 </resources>

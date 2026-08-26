@@ -204,7 +204,7 @@ fun ImportFromLinkDialog(
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = "Permitted direct audio download available",
+                                        text = stringResource(R.string.import_link_download_available),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.primary,
                                         fontWeight = FontWeight.Medium,
@@ -215,7 +215,9 @@ fun ImportFromLinkDialog(
                                     media.formats.any { it.downloadCapability == DownloadCapability.STREAM_ONLY } ->
                                         stringResource(R.string.import_link_stream_only)
                                     media.formats.any { it.downloadCapability == DownloadCapability.NOT_PERMITTED } ->
-                                        stringResource(R.string.import_link_not_permitted)
+                                        stringResource(R.string.import_link_unavailable)
+                                    media.formats.any { it.downloadCapability == DownloadCapability.REQUIRES_AUTHORIZATION } ->
+                                        stringResource(R.string.import_link_auth_required)
                                     else ->
                                         stringResource(R.string.import_link_unknown_permission)
                                 }

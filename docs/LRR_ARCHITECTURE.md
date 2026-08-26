@@ -158,3 +158,32 @@ Every native `.so` library packaged in the final APK was extracted and audited u
 3. **Fresh Resolution at Worker Start**: CDN URLs and signed tokens expire. The worker re-resolves the source URL freshly upon execution.
 4. **One-Shot 403 Recovery**: If a freshly resolved URL returns HTTP 403 upon initial request execution, the worker makes exactly one additional resolution to obtain a refreshed signed URL and retries once before logging a terminal failure.
 5. **No Parallel Download Pipelines**: Both `OnlineTrack` and `ResolverDownloadDescriptor` adapt into the unified `DownloadIngestionRequest` handled by `DownloadIngestionManager`.
+
+---
+
+## 8. Production Hardening (Phase 4.5)
+
+### Network Security Policy Architecture:
+- **Production / Release Builds:** Strict default TLS policy globally (`<base-config cleartextTrafficPermitted="false" />`). Cleartext HTTP is prohibited across all remote domains.
+- **Debug / Instrumentation Test Builds:** Permissive configuration is scoped exclusively to `src/debug/res/xml/network_security_config.xml`, permitting cleartext traffic solely for `127.0.0.1` and `localhost` local MockWebServer fixtures.
+
+### WorkManager Cold-Start & Process-Recreation Safety:
+- `AuralisApplication` eagerly initializes `container` in `onCreate()`.
+- If Android creates the application process exclusively to execute background `DownloadWorker`, `DownloadWorkerBridge` is automatically wired with singleton `DownloadIngestionManager` and `AndroidProcessMediaResolver`.
+- `DownloadWorker.doWork()` contains defensive fallback to `(applicationContext as? AuralisApplication)?.container`, guaranteeing zero `NullPointerException` or `lateinit` crashes regardless of UI state.
+
+### Conservative License Model (`RecognizedDownloadLicense`):
+- Strict machine-readable license parser recognizes canonical Creative Commons URIs and canonical identifiers (`CC0`, `PUBLIC_DOMAIN`, `CC_BY`, `CC_BY_SA`, `MIT`, `APACHE_2_0`).
+- Ambiguous or generic human claims (`"Creative Commons"`, `"Free"`, `"Royalty Free"`, `"No Copyright"`, `"Download allowed"`) default to `DownloadCapability.UNKNOWN` with `DownloadCapabilityBasis.NONE`.
+
+### Network Failure & Retry Matrix:
+- **Stale 403 / Expired Token:** One-shot fresh re-resolution (maximum 2 total resolutions). If retry succeeds -> download completes; if retry fails -> terminal failure.
+- **Transient Failures (429, 500, 503, timeout, network unavailable):** Bounded auto-retry up to `MAX_AUTO_RETRIES = 2`.
+- **Terminal Failures (404, NotFound, DownloadNotPermitted, AccessRestricted, UnsupportedUrl):** Immediate terminal failure (`Result.failure()`).
+- **Unverified Permissions (UNKNOWN):** Rejected before entering the downloader pipeline.
+
+### User Interface Reachability & Localization:
+- Accessible Material Link icon button integrated into `SearchScreen` top app bar.
+- Single in-flight inspection state machine with disabled interactions during loading.
+- 100% key parity between English (`values/strings.xml`) and Arabic (`values-ar/strings.xml`) with objective authorization status phrasing.
+
