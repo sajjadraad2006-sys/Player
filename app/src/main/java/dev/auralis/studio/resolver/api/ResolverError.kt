@@ -105,6 +105,30 @@ data class ResolverError(
             debugDetails = details,
         )
 
+        fun jsRuntimeUnavailable(source: String, details: String? = null) = ResolverError(
+            source = source,
+            technicalCode = ResolverErrorCode.JsRuntimeUnavailable,
+            isRetryable = false,
+            safeUserMessage = "JavaScript runtime is required for this media provider.",
+            debugDetails = details,
+        )
+
+        fun ejsIncompatible(source: String, details: String? = null) = ResolverError(
+            source = source,
+            technicalCode = ResolverErrorCode.EjsIncompatible,
+            isRetryable = false,
+            safeUserMessage = "Extractor JavaScript bundle is incompatible with this provider version.",
+            debugDetails = details,
+        )
+
+        fun challengeFailed(source: String, details: String? = null) = ResolverError(
+            source = source,
+            technicalCode = ResolverErrorCode.ChallengeFailed,
+            isRetryable = true,
+            safeUserMessage = "Could not resolve provider challenge.",
+            debugDetails = details,
+        )
+
         fun unknown(source: String, message: String? = null, details: String? = null) = ResolverError(
             source = source,
             technicalCode = ResolverErrorCode.Unknown,

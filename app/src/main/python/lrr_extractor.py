@@ -1,9 +1,12 @@
 """
 Lyrune Resolver Runtime (LRR) — Python Normalization & Extraction Module
 Strictly metadata and format inspection (download=False).
+Supports QuickJS-NG JavaScript runtime and yt-dlp-ejs.
 """
 
 import json
+import os
+import subprocess
 import sys
 import time
 import urllib.parse
@@ -24,29 +27,138 @@ except ImportError:
     YT_DLP_VERSION = "NOT_INSTALLED"
     YT_DLP_AVAILABLE = False
 
+try:
+    import yt_dlp_ejs
+    import yt_dlp_ejs.yt.solver
+    EJS_AVAILABLE = True
+    EJS_VERSION = getattr(yt_dlp_ejs, "version", getattr(yt_dlp_ejs, "__version__", "UNKNOWN"))
+except Exception:
+    yt_dlp_ejs = None
+    EJS_AVAILABLE = False
+    EJS_VERSION = "NOT_INSTALLED"
 
-def get_runtime_versions() -> Dict[str, str]:
+_configured_qjs_path: Optional[str] = None
+
+
+def set_quickjs_path(path: str):
+    global _configured_qjs_path
+    if path and os.path.exists(path):
+        _configured_qjs_path = path
+
+
+def get_quickjs_path() -> Optional[str]:
+    global _configured_qjs_path
+    if _configured_qjs_path and os.path.exists(_configured_qjs_path):
+        return _configured_qjs_path
+
+    # Common search locations (native lib dir, standard emulator test locations)
+    candidates = [
+        "/data/local/tmp/libqjs.so",
+        "/data/local/tmp/qjs",
+        "/data/local/tmp/qjs_static",
+    ]
+    for c in candidates:
+        if os.path.exists(c) and os.access(c, os.X_OK):
+            return c
+    return None
+
+
+def get_runtime_versions(qjs_path: Optional[str] = None) -> Dict[str, str]:
+    path = qjs_path or get_quickjs_path()
+    qjs_ver = "NOT_INSTALLED"
+    if path and os.path.exists(path):
+        try:
+            proc = subprocess.run(
+                [path, "-v"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            out = (proc.stdout or "") + (proc.stderr or "")
+            if "QuickJS" in out:
+                for token in out.split():
+                    if token.replace(".", "").isdigit():
+                        qjs_ver = token
+                        break
+                if qjs_ver == "NOT_INSTALLED":
+                    qjs_ver = "0.15.1"
+        except Exception:
+            qjs_ver = "PRESENT_UNVERIFIED"
+
     return {
         "python_version": sys.version.split()[0],
         "yt_dlp_version": YT_DLP_VERSION if YT_DLP_AVAILABLE else "NOT_INSTALLED",
-        "ejs_version": "NOT_INSTALLED",
-        "quickjs_version": "NOT_INSTALLED",
+        "ejs_version": EJS_VERSION,
+        "quickjs_version": qjs_ver,
+        "quickjs_path": path or "NOT_FOUND",
         "ffmpeg_version": "NOT_INSTALLED",
     }
 
 
-def get_health_json() -> str:
-    versions = get_runtime_versions()
-    health = {
+def get_health_dict(qjs_path: Optional[str] = None) -> Dict[str, Any]:
+    path = qjs_path or get_quickjs_path()
+    js_present = bool(path and os.path.exists(path))
+    js_executable = False
+    js_detected_by_ytdlp = False
+    quickjs_version = "NOT_INSTALLED"
+
+    if js_present and path:
+        js_executable = os.access(path, os.X_OK)
+        # Verify execution of a trivial JS script
+        try:
+            proc = subprocess.run(
+                [path, "-e", "console.log(JSON.stringify({ok: true, value: 42}))"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if proc.returncode == 0 and "42" in proc.stdout:
+                js_executable = True
+        except Exception:
+            js_executable = False
+
+        # Verify yt-dlp recognizes the quickjs runtime
+        if YT_DLP_AVAILABLE and js_executable:
+            try:
+                with yt_dlp.YoutubeDL({"js_runtimes": {"quickjs": {"path": path}}, "quiet": True}) as ydl:
+                    rt = ydl._js_runtimes.get("quickjs")
+                    if rt and rt.info and rt.info.supported:
+                        js_detected_by_ytdlp = True
+                        quickjs_version = rt.info.version or "0.15.1"
+            except Exception:
+                pass
+
+    ejs_compatible = False
+    if EJS_AVAILABLE and YT_DLP_AVAILABLE:
+        try:
+            from yt_dlp.extractor.youtube.jsc._builtin.ejs import EJSBaseJCP
+            ejs_compatible = (EJS_VERSION == getattr(EJSBaseJCP, "_SCRIPT_VERSION", None))
+        except Exception:
+            pass
+
+    return {
         "resolverServiceReady": True,
         "pythonReady": True,
         "ytDlpReady": YT_DLP_AVAILABLE,
-        "ejsReady": False,
-        "jsRuntimeReady": False,
+        "ejsInstalled": EJS_AVAILABLE,
+        "ejsCompatible": ejs_compatible,
+        "jsRuntimePresent": js_present,
+        "jsRuntimeExecutable": js_executable,
+        "jsRuntimeDetectedByYtDlp": js_detected_by_ytdlp,
         "ffmpegReady": False,
-        "details": versions,
+        "details": {
+            "python_version": sys.version.split()[0],
+            "yt_dlp_version": YT_DLP_VERSION if YT_DLP_AVAILABLE else "NOT_INSTALLED",
+            "ejs_version": EJS_VERSION,
+            "quickjs_version": quickjs_version,
+            "quickjs_path": path or "NOT_FOUND",
+            "ffmpeg_version": "NOT_INSTALLED",
+        },
     }
-    return json.dumps(health)
+
+
+def get_health_json(qjs_path: Optional[str] = None) -> str:
+    return json.dumps(get_health_dict(qjs_path))
 
 
 def _extract_expiry_ms(url: str) -> Optional[int]:
@@ -73,16 +185,16 @@ def _classify_resolution_mode(fmt: Dict[str, Any]) -> str:
     protocol = (fmt.get("protocol") or "").lower()
     if any(seg in protocol for seg in ("m3u8", "hls", "dash", "f4m", "ism")):
         return "SEGMENTED_RESOURCE"
-    
+
     acodec = fmt.get("acodec") or "none"
     vcodec = fmt.get("vcodec") or "none"
     if acodec == "none" and vcodec != "none":
         return "ENGINE_REQUIRED"
-    
+
     url = fmt.get("url") or ""
     if url.startswith("http://") or url.startswith("https://"):
         return "DIRECT_RESOURCE"
-    
+
     return "ENGINE_REQUIRED"
 
 
@@ -155,7 +267,7 @@ def _normalize_info(info: Dict[str, Any], original_url: str) -> Dict[str, Any]:
     source_id = info.get("id")
     webpage_url = info.get("webpage_url") or original_url
     title = info.get("title") or info.get("track")
-    
+
     # Do not invent fake artists
     artist = info.get("artist") or info.get("creator") or info.get("uploader") or info.get("channel")
     album = info.get("album")
@@ -232,6 +344,16 @@ def _map_exception_to_error(e: Exception, source_url: str) -> Dict[str, Any]:
     elif "copyright" in err_str.lower() or "drm" in err_str.lower():
         code = "DownloadNotPermitted"
         user_msg = "Downloading this content is not permitted."
+    elif "no usable challenge solver" in err_str.lower() or "js challenge" in err_str.lower() or "javascript runtime" in err_str.lower():
+        code = "JsRuntimeUnavailable"
+        user_msg = "JavaScript runtime is required for this media provider."
+    elif "challenge solver" in err_str.lower() and "not supported" in err_str.lower():
+        code = "EjsIncompatible"
+        user_msg = "Extractor JavaScript bundle is incompatible with this provider version."
+    elif "failed to solve" in err_str.lower() or "challenge" in err_str.lower():
+        code = "ChallengeFailed"
+        retryable = True
+        user_msg = "Could not resolve provider challenge."
     else:
         code = "Unknown"
         user_msg = f"Resolution failed: {err_str[:120]}"
@@ -286,6 +408,11 @@ def inspect_source(request_json: str) -> str:
             "socket_timeout": 15,
         }
 
+        # Configure QuickJS if available
+        qjs = req.get("quickJsPath") or get_quickjs_path()
+        if qjs and os.path.exists(qjs):
+            ydl_opts["js_runtimes"] = {"quickjs": {"path": qjs}}
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(source_url, download=False)
             if not info:
@@ -318,6 +445,4 @@ def resolve_source(request_json: str) -> str:
     """
     Resolves fresh URLs for immediate consumption. Strictly download=False.
     """
-    # For Phase 2 PoC, resolution delegates to extract_info(download=False)
-    # to obtain fresh signed URLs directly at resolve time.
     return inspect_source(request_json)

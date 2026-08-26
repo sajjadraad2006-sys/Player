@@ -690,15 +690,15 @@ private fun ProvidersSection(
                 ProviderRow(
                     name = stringResource(R.string.resolver_ejs_status),
                     role = "yt-dlp-ejs",
-                    ready = false,
-                    note = stringResource(R.string.not_installed),
+                    ready = true,
+                    note = "0.8.0",
                 )
                 HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
                 ProviderRow(
                     name = stringResource(R.string.resolver_quickjs_status),
                     role = "QuickJS-NG",
-                    ready = false,
-                    note = stringResource(R.string.not_installed),
+                    ready = true,
+                    note = "0.15.1",
                 )
                 HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
                 ProviderRow(

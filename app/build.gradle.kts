@@ -61,13 +61,18 @@ android {
         aidl = true
     }
 
-    packaging.resources.excludes += setOf(
-        "/META-INF/{AL2.0,LGPL2.1}",
-        "/META-INF/LICENSE.md",
-        "/META-INF/LICENSE-notice.md",
-        "/META-INF/INDEX.LIST",
-        "/META-INF/DEPENDENCIES",
-    )
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+        resources.excludes += setOf(
+            "/META-INF/{AL2.0,LGPL2.1}",
+            "/META-INF/LICENSE.md",
+            "/META-INF/LICENSE-notice.md",
+            "/META-INF/INDEX.LIST",
+            "/META-INF/DEPENDENCIES",
+        )
+    }
 
     testOptions.unitTests.isIncludeAndroidResources = true
 
@@ -145,6 +150,7 @@ chaquopy {
         buildPython("/home/sajjad/.local/bin/python3.14")
         pip {
             install("yt-dlp==2026.8.19")
+            install("yt-dlp-ejs==0.8.0")
         }
     }
 }

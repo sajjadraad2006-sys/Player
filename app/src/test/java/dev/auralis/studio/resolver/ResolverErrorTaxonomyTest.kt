@@ -22,10 +22,12 @@ class ResolverErrorTaxonomyTest {
         val networkErr = ResolverError.networkUnavailable("https://example.com")
         val timeoutErr = ResolverError.timeout("https://example.com")
         val crashErr = ResolverError.runtimeCrashed("https://example.com")
+        val challengeErr = ResolverError.challengeFailed("https://example.com")
 
         assertTrue(networkErr.isRetryable)
         assertTrue(timeoutErr.isRetryable)
         assertTrue(crashErr.isRetryable)
+        assertTrue(challengeErr.isRetryable)
     }
 
     @Test
@@ -35,12 +37,16 @@ class ResolverErrorTaxonomyTest {
         val restricted = ResolverError.accessRestricted("https://example.com")
         val downloadDenied = ResolverError.downloadNotPermitted("https://example.com")
         val cancelled = ResolverError.cancelled("https://example.com")
+        val jsUnavailable = ResolverError.jsRuntimeUnavailable("https://example.com")
+        val ejsIncompatible = ResolverError.ejsIncompatible("https://example.com")
 
         assertFalse(unsupported.isRetryable)
         assertFalse(notFound.isRetryable)
         assertFalse(restricted.isRetryable)
         assertFalse(downloadDenied.isRetryable)
         assertFalse(cancelled.isRetryable)
+        assertFalse(jsUnavailable.isRetryable)
+        assertFalse(ejsIncompatible.isRetryable)
     }
 
     @Test

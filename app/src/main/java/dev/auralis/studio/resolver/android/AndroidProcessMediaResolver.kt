@@ -158,8 +158,16 @@ object LrrIpcParser {
             val svcReady = root["resolverServiceReady"]?.jsonPrimitive?.booleanOrNull ?: true
             val pyReady = root["pythonReady"]?.jsonPrimitive?.booleanOrNull ?: false
             val ytReady = root["ytDlpReady"]?.jsonPrimitive?.booleanOrNull ?: false
-            val ejsReady = root["ejsReady"]?.jsonPrimitive?.booleanOrNull ?: false
-            val jsReady = root["jsRuntimeReady"]?.jsonPrimitive?.booleanOrNull ?: false
+            val ejsInst = root["ejsInstalled"]?.jsonPrimitive?.booleanOrNull
+                ?: root["ejsReady"]?.jsonPrimitive?.booleanOrNull ?: false
+            val ejsComp = root["ejsCompatible"]?.jsonPrimitive?.booleanOrNull
+                ?: root["ejsReady"]?.jsonPrimitive?.booleanOrNull ?: false
+            val jsPres = root["jsRuntimePresent"]?.jsonPrimitive?.booleanOrNull
+                ?: root["jsRuntimeReady"]?.jsonPrimitive?.booleanOrNull ?: false
+            val jsExec = root["jsRuntimeExecutable"]?.jsonPrimitive?.booleanOrNull
+                ?: root["jsRuntimeReady"]?.jsonPrimitive?.booleanOrNull ?: false
+            val jsYt = root["jsRuntimeDetectedByYtDlp"]?.jsonPrimitive?.booleanOrNull
+                ?: root["jsRuntimeReady"]?.jsonPrimitive?.booleanOrNull ?: false
             val ffReady = root["ffmpegReady"]?.jsonPrimitive?.booleanOrNull ?: false
 
             val details = mutableMapOf<String, String>()
@@ -171,8 +179,11 @@ object LrrIpcParser {
                 resolverServiceReady = svcReady,
                 pythonReady = pyReady,
                 ytDlpReady = ytReady,
-                ejsReady = ejsReady,
-                jsRuntimeReady = jsReady,
+                ejsInstalled = ejsInst,
+                ejsCompatible = ejsComp,
+                jsRuntimePresent = jsPres,
+                jsRuntimeExecutable = jsExec,
+                jsRuntimeDetectedByYtDlp = jsYt,
                 ffmpegReady = ffReady,
                 details = details,
             )
@@ -291,8 +302,11 @@ class AndroidProcessMediaResolver(
                 resolverServiceReady = false,
                 pythonReady = false,
                 ytDlpReady = false,
-                ejsReady = false,
-                jsRuntimeReady = false,
+                ejsInstalled = false,
+                ejsCompatible = false,
+                jsRuntimePresent = false,
+                jsRuntimeExecutable = false,
+                jsRuntimeDetectedByYtDlp = false,
                 ffmpegReady = false,
                 details = mapOf("error" to "SERVICE_UNAVAILABLE"),
             )

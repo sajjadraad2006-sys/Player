@@ -37,7 +37,7 @@ class ChaquopyYtDlpEngine(private val context: Context) {
                 val platformConstructor = platformClass.getConstructor(Context::class.java)
                 val platformInstance = platformConstructor.newInstance(context.applicationContext)
 
-                val startMethod = pythonClass.getMethod("start", Class.forName("com.chaquo.python.PythonPlatform"))
+                val startMethod = pythonClass.methods.first { it.name == "start" && it.parameterTypes.size == 1 }
                 startMethod.invoke(null, platformInstance)
             }
 
@@ -45,12 +45,34 @@ class ChaquopyYtDlpEngine(private val context: Context) {
             val pythonInstance = getInstanceMethod.invoke(null)
 
             val getModuleMethod = pythonClass.getMethod("getModule", String::class.java)
-            pythonModule = getModuleMethod.invoke(pythonInstance, "lrr_extractor")
+            val module = getModuleMethod.invoke(pythonInstance, "lrr_extractor")
+            pythonModule = module
+
+            if (module != null) {
+                configureQuickJs(module)
+            }
+
             isInitialized = true
             Log.i(TAG, "Chaquopy Python engine initialized successfully in process PID ${android.os.Process.myPid()}")
         } catch (t: Throwable) {
             initError = "${t.javaClass.simpleName}: ${t.message}"
             Log.w(TAG, "Python runtime initialization failed: $initError", t)
+        }
+    }
+
+    private fun configureQuickJs(module: Any) {
+        try {
+            val nativeLibDir = context.applicationInfo.nativeLibraryDir
+            val qjsFile = java.io.File(nativeLibDir, "libqjs.so")
+            if (qjsFile.exists() && qjsFile.canExecute()) {
+                val setPathMethod = module.javaClass.getMethod("callAttr", String::class.java, Array<Any>::class.java)
+                setPathMethod.invoke(module, "set_quickjs_path", arrayOf<Any>(qjsFile.absolutePath))
+                Log.i(TAG, "Configured QuickJS runtime from nativeLibraryDir: ${qjsFile.absolutePath}")
+            } else {
+                Log.d(TAG, "QuickJS native library not found or not executable at $nativeLibDir/libqjs.so")
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Could not configure QuickJS path in Python module", t)
         }
     }
 
