@@ -187,3 +187,22 @@ Every native `.so` library packaged in the final APK was extracted and audited u
 - Single in-flight inspection state machine with disabled interactions during loading.
 - 100% key parity between English (`values/strings.xml`) and Arabic (`values-ar/strings.xml`) with objective authorization status phrasing.
 
+---
+
+## 9. Multi-Process Bootstrap & Process-Role Hardening (Phase 4.6)
+
+### Process Role Isolation Architecture:
+- `ProcessUtils.kt` provides deterministic OS process identification across Android API 26-36.
+- `AuralisApplication.onCreate()` branches on `ProcessRole`:
+  - `ProcessRole.MAIN` (`dev.auralis.studio`): Instantiates `AppContainer(this)`, initializes Room DB, `DownloadWorkerBridge`, and `AndroidProcessMediaResolver` client.
+  - `ProcessRole.RESOLVER` (`dev.auralis.studio:resolver`): Lightweight bootstrap ONLY. Zero `AppContainer`, zero Room DB, zero `DownloadWorkerBridge`, zero `AndroidProcessMediaResolver` client.
+  - `ProcessRole.OTHER`: Minimal auxiliary bootstrap.
+
+### Guard Against Self-Binding:
+- `AndroidProcessMediaResolver` validates that it is never instantiated inside the `:resolver` process (`ProcessUtils.detectProcessRole(context) != ProcessRole.RESOLVER`), preventing recursive or redundant Binder self-connections.
+
+### Conservative Media-Only License Model:
+- `RecognizedDownloadLicense` exclusively recognizes vetted open audio/content licenses (`CC0`, `PUBLIC_DOMAIN`, `CC_BY`, `CC_BY_SA`, `CC_BY_NC`, `CC_BY_NC_SA`, `CC_BY_ND`, `CC_BY_NC_ND`).
+- General software licenses (`MIT`, `Apache-2.0`) attached to arbitrary online media are rejected (`UNRECOGNIZED` -> `DownloadCapability.UNKNOWN`).
+
+

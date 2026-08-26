@@ -224,6 +224,13 @@ class AndroidProcessMediaResolver(
     private val idleTimeoutMs: Long = 60_000L,
 ) : MediaResolver {
 
+    init {
+        val role = dev.auralis.studio.core.ProcessUtils.detectProcessRole(context)
+        check(role != dev.auralis.studio.core.ProcessRole.RESOLVER) {
+            "AndroidProcessMediaResolver client cannot be instantiated inside the :resolver process"
+        }
+    }
+
     private val json = Json { ignoreUnknownKeys = true }
     private var service: ILrrResolverService? = null
     private val isBinding = AtomicBoolean(false)

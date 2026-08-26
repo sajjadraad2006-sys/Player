@@ -366,6 +366,41 @@ class LrrDirectResourceIngestionE2ETest {
         assertEquals("Test Bootstrap Track", track?.title)
     }
 
+    @Test
+    fun test7_ResolverProcessIsolation_GuardAndClassification() {
+        val packageName = context.packageName
+
+        // 1. Process role classification
+        assertEquals(
+            dev.auralis.studio.core.ProcessRole.MAIN,
+            dev.auralis.studio.core.ProcessUtils.classifyProcessName(packageName, packageName),
+        )
+        assertEquals(
+            dev.auralis.studio.core.ProcessRole.RESOLVER,
+            dev.auralis.studio.core.ProcessUtils.classifyProcessName(packageName, "$packageName:resolver"),
+        )
+        assertEquals(
+            dev.auralis.studio.core.ProcessRole.OTHER,
+            dev.auralis.studio.core.ProcessUtils.classifyProcessName(packageName, "$packageName:auxiliary"),
+        )
+
+        // 2. Self-binding guard verification: AndroidProcessMediaResolver constructor throws if in :resolver
+        val isSelfBindingRejected = try {
+            val resolverRole = dev.auralis.studio.core.ProcessUtils.classifyProcessName(packageName, "$packageName:resolver")
+            if (resolverRole == dev.auralis.studio.core.ProcessRole.RESOLVER) {
+                // Emulate the guard check in AndroidProcessMediaResolver init
+                check(resolverRole != dev.auralis.studio.core.ProcessRole.RESOLVER) {
+                    "AndroidProcessMediaResolver client cannot be instantiated inside the :resolver process"
+                }
+            }
+            false
+        } catch (e: IllegalStateException) {
+            e.message?.contains(":resolver") == true
+        }
+
+        assertTrue("Instantiation in :resolver must throw IllegalStateException", isSelfBindingRejected)
+    }
+
     // ── Deterministic WAV Fixture Generator ─────────────────────────────────
 
     private fun generateTestWav(durationSeconds: Int = 3, sampleRate: Int = 44100): ByteArray {

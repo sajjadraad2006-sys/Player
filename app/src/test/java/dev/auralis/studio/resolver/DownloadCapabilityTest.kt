@@ -72,7 +72,7 @@ class DownloadCapabilityTest {
     }
 
     @Test
-    fun strictLicenseModel_knownTrustedLicenses_evaluateToPermitted() {
+    fun strictLicenseModel_knownTrustedMediaLicenses_evaluateToPermitted() {
         val cc0Eval = DownloadCapabilityEvaluator.evaluate(
             source = "ArchiveOrg",
             webpageUrl = "https://archive.org/details/test_cc0",
@@ -81,6 +81,15 @@ class DownloadCapabilityTest {
         assertEquals(DownloadCapability.PERMITTED, cc0Eval.capability)
         assertEquals(DownloadCapabilityBasis.LICENSE_METADATA, cc0Eval.basis)
         assertEquals(RecognizedDownloadLicense.CC0, cc0Eval.recognizedLicense)
+
+        val cc0UrlEval = DownloadCapabilityEvaluator.evaluate(
+            source = "ArchiveOrg",
+            webpageUrl = "https://archive.org/details/test_cc0",
+            licenseUrl = "https://creativecommons.org/publicdomain/zero/1.0/",
+        )
+        assertEquals(DownloadCapability.PERMITTED, cc0UrlEval.capability)
+        assertEquals(DownloadCapabilityBasis.LICENSE_METADATA, cc0UrlEval.basis)
+        assertEquals(RecognizedDownloadLicense.CC0, cc0UrlEval.recognizedLicense)
 
         val pdEval = DownloadCapabilityEvaluator.evaluate(
             source = "PublicDomainTracks",
@@ -108,6 +117,29 @@ class DownloadCapabilityTest {
         assertEquals(DownloadCapability.PERMITTED, ccBySaUrlEval.capability)
         assertEquals(DownloadCapabilityBasis.LICENSE_METADATA, ccBySaUrlEval.basis)
         assertEquals(RecognizedDownloadLicense.CC_BY_SA, ccBySaUrlEval.recognizedLicense)
+    }
+
+    @Test
+    fun softwareLicenses_attachedToGenericMedia_evaluateToUnknown() {
+        val mitEval = DownloadCapabilityEvaluator.evaluate(
+            source = "Generic",
+            webpageUrl = "https://example.com/audio.mp3",
+            license = "MIT",
+            licenseUrl = "https://opensource.org/licenses/MIT",
+        )
+        assertEquals("Software licenses like MIT must NOT be sufficient for audio download", DownloadCapability.UNKNOWN, mitEval.capability)
+        assertEquals(DownloadCapabilityBasis.NONE, mitEval.basis)
+        assertEquals(RecognizedDownloadLicense.UNRECOGNIZED, mitEval.recognizedLicense)
+
+        val apacheEval = DownloadCapabilityEvaluator.evaluate(
+            source = "Generic",
+            webpageUrl = "https://example.com/audio.mp3",
+            license = "Apache 2.0",
+            licenseUrl = "https://www.apache.org/licenses/LICENSE-2.0",
+        )
+        assertEquals("Software licenses like Apache-2.0 must NOT be sufficient for audio download", DownloadCapability.UNKNOWN, apacheEval.capability)
+        assertEquals(DownloadCapabilityBasis.NONE, apacheEval.basis)
+        assertEquals(RecognizedDownloadLicense.UNRECOGNIZED, apacheEval.recognizedLicense)
     }
 
     @Test

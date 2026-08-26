@@ -1,10 +1,11 @@
 package dev.auralis.studio.resolver.api
 
 /**
- * Recognized machine-readable open licenses that permit offline audio download.
+ * Recognized machine-readable open media/content licenses that permit offline audio download.
  *
- * Strict Rule: Vague human-readable claims (e.g. "Creative Commons", "Free", "No Copyright")
- * are NOT trusted automatically unless they match a canonical verified license specification.
+ * Strict Rule: Media licenses must be vetted open content licenses (CC0, Public Domain, CC-BY, CC-BY-SA, etc.).
+ * Software licenses (e.g. MIT, Apache-2.0) and vague human claims (e.g. "Creative Commons", "Free", "No Copyright")
+ * are NOT sufficient evidence that arbitrary resolved audio may be downloaded.
  */
 enum class RecognizedDownloadLicense {
     CC0,
@@ -15,8 +16,6 @@ enum class RecognizedDownloadLicense {
     CC_BY_NC_SA,
     CC_BY_ND,
     CC_BY_NC_ND,
-    MIT,
-    APACHE_2_0,
     UNRECOGNIZED;
 
     val isPermittedDownload: Boolean
@@ -27,7 +26,7 @@ enum class RecognizedDownloadLicense {
             val url = (licenseUrl ?: "").lowercase().trim()
             val text = (licenseString ?: "").lowercase().trim()
 
-            // 1. Strict Canonical License URLs
+            // 1. Strict Canonical Open Media License URLs
             if (url.contains("creativecommons.org/publicdomain/zero/1.0") ||
                 url.contains("creativecommons.org/publicdomain/zero")
             ) return CC0
@@ -42,11 +41,9 @@ enum class RecognizedDownloadLicense {
             if (url.contains("creativecommons.org/licenses/by-nc-sa/")) return CC_BY_NC_SA
             if (url.contains("creativecommons.org/licenses/by-nd/")) return CC_BY_ND
             if (url.contains("creativecommons.org/licenses/by-nc-nd/")) return CC_BY_NC_ND
-            if (url.contains("opensource.org/licenses/mit")) return MIT
-            if (url.contains("apache.org/licenses/license-2.0")) return APACHE_2_0
 
             // 2. Strict Explicit Machine-Readable or Canonical Text Tokens
-            // Reject vague strings like "Creative Commons", "Free", "No Copyright", "Royalty Free", "Download allowed"
+            // Software licenses (MIT, Apache) and vague claims ("Creative Commons", "Free", "No Copyright") -> UNRECOGNIZED
             return when {
                 text == "cc0" || text == "cc0 1.0" || text.startsWith("cc0 1.0 universal") -> CC0
                 text == "public domain" || text == "pd" || text == "public domain / cc0" || text.startsWith("cc-pd") -> PUBLIC_DOMAIN
@@ -56,9 +53,7 @@ enum class RecognizedDownloadLicense {
                 text.matches(Regex("""^cc[ -_]?by[ -_]?nc[ -_]?sa([ -_]?(1\.0|2\.0|2\.5|3\.0|4\.0))?(\.0)?(\s+.*)?$""")) -> CC_BY_NC_SA
                 text.matches(Regex("""^cc[ -_]?by[ -_]?nd([ -_]?(1\.0|2\.0|2\.5|3\.0|4\.0))?(\.0)?(\s+.*)?$""")) -> CC_BY_ND
                 text.matches(Regex("""^cc[ -_]?by[ -_]?nc[ -_]?nd([ -_]?(1\.0|2\.0|2\.5|3\.0|4\.0))?(\.0)?(\s+.*)?$""")) -> CC_BY_NC_ND
-                text == "mit" || text == "mit license" -> MIT
-                text == "apache 2.0" || text == "apache-2.0" || text == "apache license 2.0" -> APACHE_2_0
-                // Vague, informal, or unverified claims remain UNRECOGNIZED -> UNKNOWN
+                // All other claims (including software licenses) remain UNRECOGNIZED -> UNKNOWN
                 else -> UNRECOGNIZED
             }
         }
@@ -116,7 +111,7 @@ object DownloadCapabilityEvaluator {
             return EvaluationResult(DownloadCapability.PERMITTED, DownloadCapabilityBasis.PROVIDER_EXPLICIT)
         }
 
-        // ── 3. Strict Recognized Open License Metadata ────────────────────────
+        // ── 3. Strict Recognized Open Content License Metadata ────────────────
         val parsedLicense = RecognizedDownloadLicense.parse(license, licenseUrl)
         if (parsedLicense.isPermittedDownload) {
             return EvaluationResult(
