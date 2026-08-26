@@ -52,5 +52,10 @@
                 android:value="true" />
         </service>
 
+        <service
+            android:name="dev.auralis.studio.resolver.android.LrrResolverService"
+            android:exported="false"
+            android:process=":resolver" />
+
     </application>
 </manifest>

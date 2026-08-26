@@ -53,4 +53,5 @@ class AppContainer(context: Context) {
         dev.auralis.studio.library.DownloadWorkerBridge.attach(it)
     }
     val downloadRepair = dev.auralis.studio.library.DownloadRepairManager(context, database.downloadsDao(), library)
+    val mediaResolver: dev.auralis.studio.resolver.api.MediaResolver = dev.auralis.studio.resolver.android.AndroidProcessMediaResolver(context)
 }

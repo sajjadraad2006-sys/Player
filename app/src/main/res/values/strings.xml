@@ -368,4 +368,15 @@
     <string name="catalog_preview_only">Catalog and preview only</string>
     <string name="youtube_not_configured">Discovery not configured</string>
     <string name="youtube_discovery_not_enabled">Key configured; discovery is not enabled</string>
+    <string name="resolver_runtime">Resolver Runtime (LRR)</string>
+    <string name="resolver_runtime_description">Isolated resolver process status and embedded engines.</string>
+    <string name="resolver_service_status">Service</string>
+    <string name="resolver_python_status">Python</string>
+    <string name="resolver_ytdlp_status">yt-dlp</string>
+    <string name="resolver_ejs_status">EJS</string>
+    <string name="resolver_quickjs_status">QuickJS</string>
+    <string name="resolver_ffmpeg_status">FFmpeg</string>
+    <string name="not_installed">Not installed</string>
+    <string name="optional_not_installed">Optional / Not installed</string>
+    <string name="ready_isolated_process">Ready (:resolver process)</string>
 </resources>

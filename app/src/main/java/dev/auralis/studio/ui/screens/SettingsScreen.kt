@@ -663,6 +663,53 @@ private fun ProvidersSection(
             }
         }
         item {
+            SettingsCard(stringResource(R.string.resolver_runtime)) {
+                Text(stringResource(R.string.resolver_runtime_description), style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.65f))
+                Spacer(Modifier.height(8.dp))
+                ProviderRow(
+                    name = stringResource(R.string.resolver_service_status),
+                    role = "LrrResolverService",
+                    ready = true,
+                    note = stringResource(R.string.ready_isolated_process),
+                )
+                HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
+                ProviderRow(
+                    name = stringResource(R.string.resolver_python_status),
+                    role = "CPython / Chaquopy 17",
+                    ready = true,
+                    note = "3.14.7",
+                )
+                HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
+                ProviderRow(
+                    name = stringResource(R.string.resolver_ytdlp_status),
+                    role = "yt-dlp Python API",
+                    ready = true,
+                    note = "2026.08.19",
+                )
+                HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
+                ProviderRow(
+                    name = stringResource(R.string.resolver_ejs_status),
+                    role = "yt-dlp-ejs",
+                    ready = false,
+                    note = stringResource(R.string.not_installed),
+                )
+                HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
+                ProviderRow(
+                    name = stringResource(R.string.resolver_quickjs_status),
+                    role = "QuickJS-NG",
+                    ready = false,
+                    note = stringResource(R.string.not_installed),
+                )
+                HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
+                ProviderRow(
+                    name = stringResource(R.string.resolver_ffmpeg_status),
+                    role = "FFmpeg",
+                    ready = false,
+                    note = stringResource(R.string.optional_not_installed),
+                )
+            }
+        }
+        item {
             GlassCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text(stringResource(R.string.enable_jamendo), style = MaterialTheme.typography.titleSmall, color = colors.onSurface)

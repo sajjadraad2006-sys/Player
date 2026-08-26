@@ -6,6 +6,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
     id("org.jetbrains.kotlin.plugin.serialization") version "2.1.0"
+    id("com.chaquo.python")
 }
 
 android {
@@ -21,6 +22,10 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
+
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
 
         // Optional provider credentials from local.properties. Never commit local.properties.
         val properties = Properties()
@@ -53,6 +58,7 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        aidl = true
     }
 
     packaging.resources.excludes += setOf(
@@ -132,3 +138,13 @@ dependencies {
 }
 
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
+
+chaquopy {
+    defaultConfig {
+        version = "3.14"
+        buildPython("/home/sajjad/.local/bin/python3.14")
+        pip {
+            install("yt-dlp==2026.8.19")
+        }
+    }
+}

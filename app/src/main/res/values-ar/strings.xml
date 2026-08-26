@@ -376,4 +376,15 @@
     <string name="catalog_preview_only">فهرس ومعاينة فقط</string>
     <string name="youtube_not_configured">الاكتشاف غير مضبوط</string>
     <string name="youtube_discovery_not_enabled">المفتاح مضبوط؛ الاكتشاف غير مفعّل</string>
+    <string name="resolver_runtime">بيئة المعالجة والمصادر (LRR)</string>
+    <string name="resolver_runtime_description">حالة عملية المعالجة المعزولة والمحركات المدمجة.</string>
+    <string name="resolver_service_status">الخدمة</string>
+    <string name="resolver_python_status">بايثون</string>
+    <string name="resolver_ytdlp_status">yt-dlp</string>
+    <string name="resolver_ejs_status">EJS</string>
+    <string name="resolver_quickjs_status">QuickJS</string>
+    <string name="resolver_ffmpeg_status">FFmpeg</string>
+    <string name="not_installed">غير مثبت</string>
+    <string name="optional_not_installed">اختياري / غير مثبت</string>
+    <string name="ready_isolated_process">جاهز (العملية :resolver)</string>
 </resources>
