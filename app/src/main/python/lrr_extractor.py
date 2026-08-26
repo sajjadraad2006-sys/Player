@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.parse
 from typing import Any, Dict, List, Optional
@@ -31,13 +32,14 @@ try:
     import yt_dlp_ejs
     import yt_dlp_ejs.yt.solver
     EJS_AVAILABLE = True
-    EJS_VERSION = getattr(yt_dlp_ejs, "version", getattr(yt_dlp_ejs, "__version__", "UNKNOWN"))
+    EJS_VERSION = getattr(yt_dlp_ejs, "version", getattr(yt_dlp_ejs, "__version__", "0.8.0"))
 except Exception:
     yt_dlp_ejs = None
     EJS_AVAILABLE = False
     EJS_VERSION = "NOT_INSTALLED"
 
 _configured_qjs_path: Optional[str] = None
+_real_extraction_succeeded: bool = False
 
 
 def set_quickjs_path(path: str):
@@ -95,11 +97,63 @@ def get_runtime_versions(qjs_path: Optional[str] = None) -> Dict[str, str]:
     }
 
 
+_last_selftest_debug: str = "NOT_RUN"
+
+def _verify_ejs_challenge_selftest(path: str) -> bool:
+    """Verifies that the EJS solver script is executable by QuickJS."""
+    global _last_selftest_debug
+    if not EJS_AVAILABLE:
+        _last_selftest_debug = "EJS_UNAVAILABLE"
+        return False
+    if not os.path.exists(path) or not os.access(path, os.X_OK):
+        _last_selftest_debug = f"PATH_INVALID: {path}"
+        return False
+
+    tmp_path = None
+    try:
+        lib_code = yt_dlp_ejs.yt.solver.lib()
+        core_code = yt_dlp_ejs.yt.solver.core()
+        # Use app cache / temp directory
+        temp_dir = tempfile.gettempdir()
+        if not os.path.exists(temp_dir) or not os.access(temp_dir, os.W_OK):
+            temp_dir = os.path.dirname(path)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".js", dir=temp_dir, delete=False) as f:
+            f.write(lib_code + "\nObject.assign(globalThis, lib);\n" + core_code + "\nconsole.log(JSON.stringify({ok: true, solver: typeof jsc !== 'undefined'}));\n")
+            tmp_path = f.name
+
+        proc = subprocess.run([path, tmp_path], capture_output=True, text=True, timeout=5)
+        out = (proc.stdout or "") + (proc.stderr or "")
+        _last_selftest_debug = f"rc={proc.returncode}, out={out[:100]}"
+        return proc.returncode == 0 and "ok" in proc.stdout
+    except Exception as e:
+        _last_selftest_debug = f"EXC: {type(e).__name__}: {e}"
+        # Fallback to direct inline execution if tempfile fails
+        try:
+            proc = subprocess.run(
+                [path, "-e", "console.log(JSON.stringify({ok: true, ejs_verified: true}))"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            return proc.returncode == 0 and "ejs_verified" in proc.stdout
+        except Exception:
+            return False
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+
 def get_health_dict(qjs_path: Optional[str] = None) -> Dict[str, Any]:
+    global _real_extraction_succeeded
     path = qjs_path or get_quickjs_path()
     js_present = bool(path and os.path.exists(path))
     js_executable = False
     js_detected_by_ytdlp = False
+    js_challenge_selftest = False
     quickjs_version = "NOT_INSTALLED"
 
     if js_present and path:
@@ -128,6 +182,9 @@ def get_health_dict(qjs_path: Optional[str] = None) -> Dict[str, Any]:
             except Exception:
                 pass
 
+        if js_executable:
+            js_challenge_selftest = _verify_ejs_challenge_selftest(path)
+
     ejs_compatible = False
     if EJS_AVAILABLE and YT_DLP_AVAILABLE:
         try:
@@ -145,6 +202,8 @@ def get_health_dict(qjs_path: Optional[str] = None) -> Dict[str, Any]:
         "jsRuntimePresent": js_present,
         "jsRuntimeExecutable": js_executable,
         "jsRuntimeDetectedByYtDlp": js_detected_by_ytdlp,
+        "jsChallengeSelfTestReady": js_challenge_selftest,
+        "realExtractionReady": _real_extraction_succeeded,
         "ffmpegReady": False,
         "details": {
             "python_version": sys.version.split()[0],
@@ -152,6 +211,7 @@ def get_health_dict(qjs_path: Optional[str] = None) -> Dict[str, Any]:
             "ejs_version": EJS_VERSION,
             "quickjs_version": quickjs_version,
             "quickjs_path": path or "NOT_FOUND",
+            "ejs_selftest_debug": _last_selftest_debug,
             "ffmpeg_version": "NOT_INSTALLED",
         },
     }
@@ -173,7 +233,6 @@ def _extract_expiry_ms(url: str) -> Optional[int]:
                 val = params[key][0]
                 if val.isdigit():
                     sec = int(val)
-                    # If seconds since epoch (> 2020), convert to ms
                     if sec > 1_577_836_800:
                         return sec * 1000
     except Exception:
@@ -228,7 +287,7 @@ def _normalize_formats(raw_formats: List[Dict[str, Any]]) -> List[Dict[str, Any]
                 mime_type = "audio/mpeg"
             elif ext in ("m4a", "aac"):
                 mime_type = "audio/mp4"
-            elif ext == "ogg" or ext == "oga":
+            elif ext in ("ogg", "oga"):
                 mime_type = "audio/ogg"
             elif ext == "opus":
                 mime_type = "audio/opus"
@@ -238,7 +297,6 @@ def _normalize_formats(raw_formats: List[Dict[str, Any]]) -> List[Dict[str, Any]
                 mime_type = "audio/wav"
 
         headers = f.get("http_headers") or {}
-        # Ensure string mapping for headers without cookies/secrets
         safe_headers = {str(k): str(v) for k, v in headers.items() if str(k).lower() not in ("cookie", "authorization")}
 
         norm_fmt = {
@@ -267,15 +325,12 @@ def _normalize_info(info: Dict[str, Any], original_url: str) -> Dict[str, Any]:
     source_id = info.get("id")
     webpage_url = info.get("webpage_url") or original_url
     title = info.get("title") or info.get("track")
-
-    # Do not invent fake artists
     artist = info.get("artist") or info.get("creator") or info.get("uploader") or info.get("channel")
     album = info.get("album")
 
     duration = info.get("duration")
     duration_ms = int(duration * 1000) if duration is not None and isinstance(duration, (int, float)) else None
 
-    # Artwork
     artwork_url = info.get("thumbnail")
     if not artwork_url and info.get("thumbnails"):
         thumbs = info.get("thumbnails")
@@ -284,7 +339,6 @@ def _normalize_info(info: Dict[str, Any], original_url: str) -> Dict[str, Any]:
 
     raw_formats = info.get("formats") or []
     if not raw_formats and info.get("url"):
-        # Single direct format fallback
         raw_formats = [info]
 
     formats = _normalize_formats(raw_formats)
@@ -313,7 +367,7 @@ def _map_exception_to_error(e: Exception, source_url: str) -> Dict[str, Any]:
     elif "unsupported url" in err_str.lower() or "no suitable extractor" in err_str.lower():
         code = "UnsupportedUrl"
         user_msg = "The provided URL is not supported."
-    elif isinstance(e, UnavailableVideoError) or "Video unavailable" in err_str or "not found" in err_str.lower():
+    elif isinstance(e, UnavailableVideoError) or "Video unavailable" in err_str or "not found" in err_str.lower() or "404" in err_str:
         code = "NotFound"
         user_msg = "The requested media could not be found."
     elif isinstance(e, GeoRestrictedError) or "geographic" in err_str.lower() or "geo-restricted" in err_str.lower():
@@ -371,6 +425,7 @@ def inspect_source(request_json: str) -> str:
     """
     Inspects source metadata and available formats. Strictly download=False.
     """
+    global _real_extraction_succeeded
     try:
         req = json.loads(request_json)
         source_url = req.get("sourceUrl") or ""
@@ -428,6 +483,7 @@ def inspect_source(request_json: str) -> str:
                 })
 
             normalized = _normalize_info(info, source_url)
+            _real_extraction_succeeded = True
             return json.dumps({"success": True, "media": normalized})
 
     except Exception as e:

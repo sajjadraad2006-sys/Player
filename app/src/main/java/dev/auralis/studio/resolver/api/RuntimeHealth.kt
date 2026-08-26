@@ -5,7 +5,8 @@ import kotlinx.serialization.Serializable
 /**
  * Health diagnostic report for the Lyrune Resolver Runtime (LRR).
  *
- * Explicitly distinguishes EJS package installation from operational JS execution.
+ * Explicitly distinguishes EJS package installation from operational JS execution
+ * and real extractor challenge readiness.
  */
 @Serializable
 data class RuntimeHealth(
@@ -17,10 +18,12 @@ data class RuntimeHealth(
     val jsRuntimePresent: Boolean = false,
     val jsRuntimeExecutable: Boolean = false,
     val jsRuntimeDetectedByYtDlp: Boolean = false,
+    val jsChallengeSelfTestReady: Boolean = false,
+    val realExtractionReady: Boolean = false,
     val ffmpegReady: Boolean = false,
     val details: Map<String, String> = emptyMap(),
 ) {
-    /** Backward compatibility helper for legacy UI checks */
+    /** Backward compatibility helpers */
     val ejsReady: Boolean get() = ejsInstalled && ejsCompatible
     val jsRuntimeReady: Boolean get() = jsRuntimeDetectedByYtDlp
 
@@ -34,9 +37,10 @@ data class RuntimeHealth(
             jsRuntimePresent = false,
             jsRuntimeExecutable = false,
             jsRuntimeDetectedByYtDlp = false,
+            jsChallengeSelfTestReady = false,
+            realExtractionReady = false,
             ffmpegReady = false,
             details = mapOf("status" to "NOT_INITIALIZED"),
         )
     }
 }
-

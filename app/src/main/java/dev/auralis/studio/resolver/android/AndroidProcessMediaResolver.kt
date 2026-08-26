@@ -8,7 +8,6 @@ import android.os.IBinder
 import android.os.RemoteException
 import android.util.Log
 import dev.auralis.studio.resolver.api.MediaResolver
-import dev.auralis.studio.resolver.api.ResolutionMode
 import dev.auralis.studio.resolver.api.ResolvedFormat
 import dev.auralis.studio.resolver.api.ResolvedMedia
 import dev.auralis.studio.resolver.api.ResolverError
@@ -17,7 +16,12 @@ import dev.auralis.studio.resolver.api.ResolverRequest
 import dev.auralis.studio.resolver.api.ResolverResult
 import dev.auralis.studio.resolver.api.RuntimeHealth
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -34,119 +38,98 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 
 /**
- * Parser utility for LRR IPC payloads.
+ * Parser utilities for LRR IPC payloads.
  */
 object LrrIpcParser {
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun parseIpcResponse(responseJson: String, fallbackSource: String): ResolverResult {
+    fun parseIpcResponse(resultJson: String, sourceUrl: String): ResolverResult {
         return try {
-            val root = json.parseToJsonElement(responseJson).jsonObject
-            val isSuccess = root["success"]?.jsonPrimitive?.booleanOrNull ?: false
-            if (isSuccess && root.containsKey("media")) {
-                val mediaObj = root["media"]!!.jsonObject
-                val media = parseResolvedMedia(mediaObj, fallbackSource)
-                ResolverResult.Success(media)
+            val root = json.parseToJsonElement(resultJson).jsonObject
+            val success = root["success"]?.jsonPrimitive?.booleanOrNull ?: false
+
+            if (success) {
+                val mediaObj = root["media"]?.jsonObject
+                    ?: return ResolverResult.Failure(ResolverError.unknown(sourceUrl, details = "Missing media payload"))
+                ResolverResult.Success(parseMediaJson(mediaObj, sourceUrl))
             } else {
                 val errorObj = root["error"]?.jsonObject
-                val error = if (errorObj != null) {
-                    parseResolverError(errorObj, fallbackSource)
-                } else {
-                    ResolverError.unknown(fallbackSource, "Invalid response from resolver")
-                }
-                ResolverResult.Failure(error)
+                    ?: return ResolverResult.Failure(ResolverError.unknown(sourceUrl, details = "Missing error payload"))
+                ResolverResult.Failure(parseErrorJson(errorObj, sourceUrl))
             }
-        } catch (t: Throwable) {
+        } catch (e: Exception) {
             ResolverResult.Failure(
                 ResolverError.unknown(
-                    source = fallbackSource,
-                    message = "Failed to parse resolver response.",
-                    details = "${t.javaClass.simpleName}: ${t.message}",
+                    source = sourceUrl,
+                    message = "Malformed resolver response payload.",
+                    details = "${e.javaClass.simpleName}: ${e.message}",
                 ),
             )
         }
     }
 
-    fun parseResolvedMedia(obj: kotlinx.serialization.json.JsonObject, fallbackSource: String): ResolvedMedia {
-        val source = obj["source"]?.jsonPrimitive?.contentOrNull ?: fallbackSource
-        val sourceId = obj["sourceId"]?.jsonPrimitive?.contentOrNull
-        val webpageUrl = obj["webpageUrl"]?.jsonPrimitive?.contentOrNull
-        val title = obj["title"]?.jsonPrimitive?.contentOrNull
-        val artist = obj["artist"]?.jsonPrimitive?.contentOrNull
-        val album = obj["album"]?.jsonPrimitive?.contentOrNull
-        val durationMs = obj["durationMs"]?.jsonPrimitive?.longOrNull
-        val artworkUrl = obj["artworkUrl"]?.jsonPrimitive?.contentOrNull
-
-        val formats = obj["formats"]?.jsonArray?.mapNotNull { fmtElement ->
-            val fmtObj = fmtElement.jsonObject
-            val url = fmtObj["url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-            val formatId = fmtObj["formatId"]?.jsonPrimitive?.contentOrNull
-            val ext = fmtObj["extension"]?.jsonPrimitive?.contentOrNull
-            val mimeType = fmtObj["mimeType"]?.jsonPrimitive?.contentOrNull
-            val acodec = fmtObj["audioCodec"]?.jsonPrimitive?.contentOrNull
-            val vcodec = fmtObj["videoCodec"]?.jsonPrimitive?.contentOrNull
-            val bitrateKbps = fmtObj["bitrateKbps"]?.jsonPrimitive?.intOrNull
-            val sampleRateHz = fmtObj["sampleRateHz"]?.jsonPrimitive?.intOrNull
-            val fileSizeBytes = fmtObj["fileSizeBytes"]?.jsonPrimitive?.longOrNull
-            val protocol = fmtObj["protocol"]?.jsonPrimitive?.contentOrNull
-            val expiresAtEpochMs = fmtObj["expiresAtEpochMs"]?.jsonPrimitive?.longOrNull
-            val isAudioOnly = fmtObj["isAudioOnly"]?.jsonPrimitive?.booleanOrNull ?: true
-
-            val modeStr = fmtObj["resolutionMode"]?.jsonPrimitive?.contentOrNull
-            val resolutionMode = when (modeStr) {
-                "SEGMENTED_RESOURCE" -> ResolutionMode.SEGMENTED_RESOURCE
-                "ENGINE_REQUIRED" -> ResolutionMode.ENGINE_REQUIRED
-                else -> ResolutionMode.DIRECT_RESOURCE
+    fun parseMediaJson(obj: kotlinx.serialization.json.JsonObject, sourceUrl: String): ResolvedMedia {
+        val formatsArray = obj["formats"]?.jsonArray ?: emptyList()
+        val formats = formatsArray.mapNotNull { it as? kotlinx.serialization.json.JsonObject }.map { f ->
+            val headersMap = mutableMapOf<String, String>()
+            f["httpHeaders"]?.jsonObject?.forEach { (k, v) ->
+                v.jsonPrimitive.contentOrNull?.let { headersMap[k] = it }
             }
 
-            val headers = mutableMapOf<String, String>()
-            fmtObj["httpHeaders"]?.jsonObject?.forEach { (k, v) ->
-                v.jsonPrimitive.contentOrNull?.let { headers[k] = it }
+            val modeStr = f["resolutionMode"]?.jsonPrimitive?.contentOrNull ?: "DIRECT_RESOURCE"
+            val mode = try {
+                dev.auralis.studio.resolver.api.ResolutionMode.valueOf(modeStr)
+            } catch (_: Exception) {
+                dev.auralis.studio.resolver.api.ResolutionMode.DIRECT_RESOURCE
             }
 
             ResolvedFormat(
-                formatId = formatId,
-                url = url,
-                extension = ext,
-                mimeType = mimeType,
-                audioCodec = acodec,
-                videoCodec = vcodec,
-                bitrateKbps = bitrateKbps,
-                sampleRateHz = sampleRateHz,
-                fileSizeBytes = fileSizeBytes,
-                protocol = protocol,
-                httpHeaders = headers,
-                expiresAtEpochMs = expiresAtEpochMs,
-                resolutionMode = resolutionMode,
-                isAudioOnly = isAudioOnly,
+                formatId = f["formatId"]?.jsonPrimitive?.contentOrNull ?: "unknown",
+                url = f["url"]?.jsonPrimitive?.contentOrNull ?: "",
+                extension = f["extension"]?.jsonPrimitive?.contentOrNull,
+                mimeType = f["mimeType"]?.jsonPrimitive?.contentOrNull,
+                audioCodec = f["audioCodec"]?.jsonPrimitive?.contentOrNull,
+                videoCodec = f["videoCodec"]?.jsonPrimitive?.contentOrNull,
+                bitrateKbps = f["bitrateKbps"]?.jsonPrimitive?.intOrNull,
+                sampleRateHz = f["sampleRateHz"]?.jsonPrimitive?.intOrNull,
+                fileSizeBytes = f["fileSizeBytes"]?.jsonPrimitive?.longOrNull,
+                protocol = f["protocol"]?.jsonPrimitive?.contentOrNull,
+                httpHeaders = headersMap,
+                expiresAtEpochMs = f["expiresAtEpochMs"]?.jsonPrimitive?.longOrNull,
+                resolutionMode = mode,
+                isAudioOnly = f["isAudioOnly"]?.jsonPrimitive?.booleanOrNull ?: false,
             )
-        } ?: emptyList()
+        }
 
         return ResolvedMedia(
-            source = source,
-            sourceId = sourceId,
-            webpageUrl = webpageUrl,
-            title = title,
-            artist = artist,
-            album = album,
-            durationMs = durationMs,
-            artworkUrl = artworkUrl,
+            source = obj["source"]?.jsonPrimitive?.contentOrNull ?: "Generic",
+            sourceId = obj["sourceId"]?.jsonPrimitive?.contentOrNull,
+            webpageUrl = obj["webpageUrl"]?.jsonPrimitive?.contentOrNull ?: sourceUrl,
+            title = obj["title"]?.jsonPrimitive?.contentOrNull ?: "Unknown Title",
+            artist = obj["artist"]?.jsonPrimitive?.contentOrNull,
+            album = obj["album"]?.jsonPrimitive?.contentOrNull,
+            durationMs = obj["durationMs"]?.jsonPrimitive?.longOrNull,
+            artworkUrl = obj["artworkUrl"]?.jsonPrimitive?.contentOrNull,
             formats = formats,
         )
     }
 
-    fun parseResolverError(obj: kotlinx.serialization.json.JsonObject, fallbackSource: String): ResolverError {
-        val source = obj["source"]?.jsonPrimitive?.contentOrNull ?: fallbackSource
+    fun parseErrorJson(obj: kotlinx.serialization.json.JsonObject, fallbackSource: String): ResolverError {
+        val src = obj["source"]?.jsonPrimitive?.contentOrNull ?: fallbackSource
         val codeStr = obj["technicalCode"]?.jsonPrimitive?.contentOrNull ?: "Unknown"
-        val code = runCatching { ResolverErrorCode.valueOf(codeStr) }.getOrDefault(ResolverErrorCode.Unknown)
-        val isRetryable = obj["isRetryable"]?.jsonPrimitive?.booleanOrNull ?: false
-        val userMsg = obj["safeUserMessage"]?.jsonPrimitive?.contentOrNull ?: "Resolution failed."
+        val code = try {
+            ResolverErrorCode.valueOf(codeStr)
+        } catch (_: Exception) {
+            ResolverErrorCode.Unknown
+        }
+        val retryable = obj["isRetryable"]?.jsonPrimitive?.booleanOrNull ?: false
+        val userMsg = obj["safeUserMessage"]?.jsonPrimitive?.contentOrNull ?: "Unable to resolve media from this source."
         val debugDetails = obj["debugDetails"]?.jsonPrimitive?.contentOrNull
 
         return ResolverError(
-            source = source,
+            source = src,
             technicalCode = code,
-            isRetryable = isRetryable,
+            isRetryable = retryable,
             safeUserMessage = userMsg,
             debugDetails = debugDetails,
         )
@@ -168,6 +151,8 @@ object LrrIpcParser {
                 ?: root["jsRuntimeReady"]?.jsonPrimitive?.booleanOrNull ?: false
             val jsYt = root["jsRuntimeDetectedByYtDlp"]?.jsonPrimitive?.booleanOrNull
                 ?: root["jsRuntimeReady"]?.jsonPrimitive?.booleanOrNull ?: false
+            val jsChallengeSelfTest = root["jsChallengeSelfTestReady"]?.jsonPrimitive?.booleanOrNull ?: false
+            val realExtraction = root["realExtractionReady"]?.jsonPrimitive?.booleanOrNull ?: false
             val ffReady = root["ffmpegReady"]?.jsonPrimitive?.booleanOrNull ?: false
 
             val details = mutableMapOf<String, String>()
@@ -184,6 +169,8 @@ object LrrIpcParser {
                 jsRuntimePresent = jsPres,
                 jsRuntimeExecutable = jsExec,
                 jsRuntimeDetectedByYtDlp = jsYt,
+                jsChallengeSelfTestReady = jsChallengeSelfTest,
+                realExtractionReady = realExtraction,
                 ffmpegReady = ffReady,
                 details = details,
             )
@@ -198,25 +185,33 @@ object LrrIpcParser {
  *
  * Communicates with [LrrResolverService] running in the isolated :resolver process
  * via asynchronous Binder IPC. Translates raw Binder responses into stable Kotlin contracts.
+ *
+ * Implements a conservative idle policy: unbinds after [idleTimeoutMs] of inactivity,
+ * allowing the Android OS to reclaim the :resolver process when idle.
  */
 class AndroidProcessMediaResolver(
     private val context: Context,
     private val defaultTimeoutMs: Long = 25_000L,
+    private val idleTimeoutMs: Long = 60_000L,
 ) : MediaResolver {
 
     private val json = Json { ignoreUnknownKeys = true }
     private var service: ILrrResolverService? = null
     private val isBinding = AtomicBoolean(false)
+    private var isBound = false
     private var bindDeferred = CompletableDeferred<ILrrResolverService?>()
     private val pendingRequests = ConcurrentHashMap<String, (Result<String>) -> Unit>()
+
+    private val resolverScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var idleJob: Job? = null
 
     private val deathRecipient = IBinder.DeathRecipient {
         Log.w(TAG, "LrrResolverService (:resolver process) died!")
         synchronized(this) {
             service = null
+            isBound = false
             bindDeferred = CompletableDeferred()
         }
-        // Fail any pending requests with RuntimeCrashed
         val errorJson = buildCrashedJson()
         pendingRequests.values.forEach { it(Result.failure(RemoteException(errorJson))) }
         pendingRequests.clear()
@@ -233,6 +228,7 @@ class AndroidProcessMediaResolver(
             }
             synchronized(this@AndroidProcessMediaResolver) {
                 service = boundService
+                isBound = true
                 isBinding.set(false)
                 bindDeferred.complete(boundService)
             }
@@ -242,6 +238,7 @@ class AndroidProcessMediaResolver(
             Log.w(TAG, "Disconnected from LrrResolverService")
             synchronized(this@AndroidProcessMediaResolver) {
                 service = null
+                isBound = false
                 isBinding.set(false)
                 bindDeferred = CompletableDeferred()
             }
@@ -250,6 +247,8 @@ class AndroidProcessMediaResolver(
 
     private suspend fun getOrBindService(): ILrrResolverService? {
         synchronized(this) {
+            idleJob?.cancel()
+            idleJob = null
             service?.let { return it }
         }
 
@@ -268,17 +267,65 @@ class AndroidProcessMediaResolver(
         }
     }
 
+    private fun scheduleIdleUnbind() {
+        if (idleTimeoutMs <= 0) return
+        synchronized(this) {
+            idleJob?.cancel()
+            if (pendingRequests.isEmpty() && isBound) {
+                idleJob = resolverScope.launch {
+                    delay(idleTimeoutMs)
+                    synchronized(this@AndroidProcessMediaResolver) {
+                        if (pendingRequests.isEmpty() && isBound) {
+                            try {
+                                context.unbindService(connection)
+                                Log.i(TAG, "Resolver idle timeout reached (${idleTimeoutMs}ms), unbound service to allow :resolver process termination")
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Error unbinding idle resolver service", e)
+                            }
+                            service = null
+                            isBound = false
+                            bindDeferred = CompletableDeferred()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fun unbind() {
+        synchronized(this) {
+            idleJob?.cancel()
+            idleJob = null
+            if (isBound) {
+                try {
+                    context.unbindService(connection)
+                } catch (_: Exception) {}
+                service = null
+                isBound = false
+                bindDeferred = CompletableDeferred()
+            }
+        }
+    }
+
     override suspend fun inspect(request: ResolverRequest): ResolverResult = withContext(Dispatchers.IO) {
         val requestJson = json.encodeToString(ResolverRequest.serializer(), request)
-        executeIpc(request.requestId, request.sourceUrl.orEmpty()) { svc, cb ->
-            svc.inspect(requestJson, cb)
+        try {
+            executeIpc(request.requestId, request.sourceUrl.orEmpty()) { svc, cb ->
+                svc.inspect(requestJson, cb)
+            }
+        } finally {
+            scheduleIdleUnbind()
         }
     }
 
     override suspend fun resolve(request: ResolverRequest): ResolverResult = withContext(Dispatchers.IO) {
         val requestJson = json.encodeToString(ResolverRequest.serializer(), request)
-        executeIpc(request.requestId, request.sourceUrl.orEmpty()) { svc, cb ->
-            svc.resolve(requestJson, cb)
+        try {
+            executeIpc(request.requestId, request.sourceUrl.orEmpty()) { svc, cb ->
+                svc.resolve(requestJson, cb)
+            }
+        } finally {
+            scheduleIdleUnbind()
         }
     }
 
@@ -292,6 +339,7 @@ class AndroidProcessMediaResolver(
                 }
             }
             pendingRequests.remove(requestId)
+            scheduleIdleUnbind()
         }
     }
 
@@ -307,6 +355,8 @@ class AndroidProcessMediaResolver(
                 jsRuntimePresent = false,
                 jsRuntimeExecutable = false,
                 jsRuntimeDetectedByYtDlp = false,
+                jsChallengeSelfTestReady = false,
+                realExtractionReady = false,
                 ffmpegReady = false,
                 details = mapOf("error" to "SERVICE_UNAVAILABLE"),
             )
@@ -330,6 +380,8 @@ class AndroidProcessMediaResolver(
                 ytDlpReady = false,
                 details = mapOf("error" to (e.message ?: "Health check failed")),
             )
+        } finally {
+            scheduleIdleUnbind()
         }
     }
 
@@ -395,7 +447,6 @@ class AndroidProcessMediaResolver(
         }
 
         if (resultJson == null) {
-            // Timed out
             try {
                 svc.cancelRequest(requestId)
             } catch (_: RemoteException) {}

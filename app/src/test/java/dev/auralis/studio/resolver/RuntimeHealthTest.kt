@@ -24,6 +24,8 @@ class RuntimeHealthTest {
         assertFalse(health.jsRuntimePresent)
         assertFalse(health.jsRuntimeExecutable)
         assertFalse(health.jsRuntimeDetectedByYtDlp)
+        assertFalse(health.jsChallengeSelfTestReady)
+        assertFalse(health.realExtractionReady)
         assertFalse(health.ejsReady)
         assertFalse(health.jsRuntimeReady)
         assertFalse(health.ffmpegReady)
@@ -41,6 +43,8 @@ class RuntimeHealthTest {
             jsRuntimePresent = true,
             jsRuntimeExecutable = true,
             jsRuntimeDetectedByYtDlp = true,
+            jsChallengeSelfTestReady = true,
+            realExtractionReady = true,
             ffmpegReady = false,
             details = mapOf(
                 "python_version" to "3.14.7",
@@ -61,6 +65,8 @@ class RuntimeHealthTest {
         assertTrue(decoded.jsRuntimePresent)
         assertTrue(decoded.jsRuntimeExecutable)
         assertTrue(decoded.jsRuntimeDetectedByYtDlp)
+        assertTrue(decoded.jsChallengeSelfTestReady)
+        assertTrue(decoded.realExtractionReady)
         assertTrue(decoded.ejsReady)
         assertTrue(decoded.jsRuntimeReady)
         assertEquals("3.14.7", decoded.details["python_version"])
@@ -70,7 +76,7 @@ class RuntimeHealthTest {
     }
 
     @Test
-    fun runtimeHealth_parser_handlesPhase3Payload() {
+    fun runtimeHealth_parser_handlesPhase35Payload() {
         val jsonPayload = """
             {
                 "resolverServiceReady": true,
@@ -81,6 +87,8 @@ class RuntimeHealthTest {
                 "jsRuntimePresent": true,
                 "jsRuntimeExecutable": true,
                 "jsRuntimeDetectedByYtDlp": true,
+                "jsChallengeSelfTestReady": true,
+                "realExtractionReady": true,
                 "ffmpegReady": false,
                 "details": {
                     "python_version": "3.14.0",
@@ -102,6 +110,8 @@ class RuntimeHealthTest {
         assertTrue(parsed.jsRuntimePresent)
         assertTrue(parsed.jsRuntimeExecutable)
         assertTrue(parsed.jsRuntimeDetectedByYtDlp)
+        assertTrue(parsed.jsChallengeSelfTestReady)
+        assertTrue(parsed.realExtractionReady)
         assertEquals("0.8.0", parsed.details["ejs_version"])
         assertEquals("0.15.1", parsed.details["quickjs_version"])
     }
