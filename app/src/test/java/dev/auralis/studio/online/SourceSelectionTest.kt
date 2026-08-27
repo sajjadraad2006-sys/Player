@@ -41,9 +41,10 @@ class SourceSelectionTest {
         title = "Track Title",
         artist = "Artist Name",
         playbackCapability = PlaybackCapability.LOCAL,
-        downloadCapability = DownloadCapability.PERMITTED,
-        downloadCapabilityBasis = DownloadCapabilityBasis.PROVIDER_EXPLICIT,
+        downloadCapability = DownloadCapability.NOT_PERMITTED,
+        downloadCapabilityBasis = DownloadCapabilityBasis.NONE,
         resolutionMode = ResolutionMode.DIRECT_RESOURCE,
+        canonicalUrl = null,
     )
 
     @Test
@@ -154,5 +155,14 @@ class SourceSelectionTest {
 
         assertNotNull(selected)
         assertEquals("Data saver preference should prioritize compact format over FLAC", "mp3_track", selected?.providerTrackId)
+    }
+
+    @Test
+    fun testLocalRecordingSource_semantics() {
+        val local = createLocal("content://media/external/audio/media/42")
+        org.junit.Assert.assertFalse("Local recording source must NEVER be downloadable full track", local.isDownloadableFullTrack)
+        assertNull("Local recording source canonicalUrl must be null", local.canonicalUrl)
+        assertEquals("content://media/external/audio/media/42", (local as LocalRecordingSource).contentUri)
+        assertNull("Download selector must never choose a local recording source", DownloadSourceSelector.select(listOf(local)))
     }
 }

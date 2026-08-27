@@ -96,4 +96,45 @@ class SearchResilienceTest {
         // Either 0 or 1 snapshots collected, but the slow provider's result should not have arrived
         assertTrue("After cancellation, at most partial snapshots", collectedSnapshots.size <= 1)
     }
+
+    @Test
+    fun testEmptyProvidersAndEmptyLocal_emitsCompleteSnapshot() = runTest {
+        val aggregator = UnifiedSearchAggregator(
+            providers = emptyList(),
+            localDiscovery = null,
+        )
+
+        val snapshot = aggregator.searchOnce("Adele Hello")
+
+        assertTrue("Empty search flow must emit a complete snapshot", snapshot.isComplete)
+        assertEquals(0, snapshot.recordings.size)
+        assertEquals(0, snapshot.providersPending)
+        assertEquals(0, snapshot.failures.size)
+    }
+
+    @Test
+    fun testOrdinaryTextSearch_doesNotInvokeResolver() = runTest {
+        var resolverCallCount = 0
+        val mockResolver = object : dev.auralis.studio.resolver.api.MediaResolver {
+            override suspend fun inspect(request: dev.auralis.studio.resolver.api.ResolverRequest): dev.auralis.studio.resolver.api.ResolverResult {
+                resolverCallCount++
+                throw UnsupportedOperationException("Resolver should never be invoked during text search")
+            }
+            override suspend fun resolve(request: dev.auralis.studio.resolver.api.ResolverRequest): dev.auralis.studio.resolver.api.ResolverResult {
+                resolverCallCount++
+                throw UnsupportedOperationException("Resolver should never be invoked during text search")
+            }
+            override suspend fun health(): dev.auralis.studio.resolver.api.RuntimeHealth = dev.auralis.studio.resolver.api.RuntimeHealth.UNINITIALIZED
+            override suspend fun cancel(requestId: String) {}
+        }
+
+        val audiusProvider = FakeProvider("audius", tracks = listOf(sampleTrack("audius", "a1", "Hello")))
+        val aggregator = UnifiedSearchAggregator(listOf(audiusProvider))
+
+        val result = aggregator.searchOnce("Hello")
+
+        assertEquals(1, result.recordings.size)
+        assertEquals("Hello", result.recordings.first().title)
+        assertEquals("Ordinary text search must NEVER invoke or bind the media resolver", 0, resolverCallCount)
+    }
 }

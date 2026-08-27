@@ -150,6 +150,13 @@ fun OnlineTrack.toRecordingSource(): RecordingSource {
     val normIsrc = RecordingIdentity.normalizedIsrc(isrc)
     val isrcEv = normIsrc?.let { IsrcEvidence(it, IsrcEvidenceBasis.PROVIDER_EXPLICIT) }
 
+    // Strip ephemeral delivery URLs so canonical sources are strictly metadata-only
+    val metadataBridgeTrack = this.copy(
+        previewUrl = null,
+        streamUrl = null,
+        downloadUrl = null,
+    )
+
     return OnlineRecordingSource(
         provider = provider,
         providerTrackId = id,
@@ -171,7 +178,7 @@ fun OnlineTrack.toRecordingSource(): RecordingSource {
         canonicalUrl = sourceUrl.takeIf { it.isNotBlank() },
         license = license,
         licenseUrl = licenseUrl,
-        originalTrack = this,
+        originalTrack = metadataBridgeTrack,
     )
 }
 

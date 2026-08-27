@@ -142,9 +142,11 @@ class UnifiedTrackMergerTest {
         val unified = UnifiedTrackMerger.merge(listOf(audiusTrack, itunesTrack)).single()
         val audiusSource = unified.sources.first { it.provider == "audius" } as OnlineRecordingSource
         val itunesSource = unified.sources.first { it.provider == "itunes" } as OnlineRecordingSource
-        assertEquals("https://stream.example/audius", audiusSource.originalTrack?.streamUrl)
-        assertEquals("https://download.example/audius", audiusSource.originalTrack?.downloadUrl)
-        assertEquals("https://preview.example/itunes", itunesSource.originalTrack?.previewUrl)
+        assertEquals("audius-id", audiusSource.providerTrackId)
+        assertEquals("itunes-id", itunesSource.providerTrackId)
+        org.junit.Assert.assertNull("Ephemeral streamUrl must not be stored in canonical source", audiusSource.originalTrack?.streamUrl)
+        org.junit.Assert.assertNull("Ephemeral downloadUrl must not be stored in canonical source", audiusSource.originalTrack?.downloadUrl)
+        org.junit.Assert.assertNull("Ephemeral previewUrl must not be stored in canonical source", itunesSource.originalTrack?.previewUrl)
         assertFalse(itunesSource.isDownloadableFullTrack)
     }
 
