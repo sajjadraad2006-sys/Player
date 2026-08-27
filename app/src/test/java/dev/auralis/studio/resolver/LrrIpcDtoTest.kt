@@ -1,6 +1,7 @@
 package dev.auralis.studio.resolver
 
 import dev.auralis.studio.resolver.android.LrrIpcParser
+import dev.auralis.studio.resolver.api.MediaKind
 import dev.auralis.studio.resolver.api.ResolutionMode
 import dev.auralis.studio.resolver.api.ResolverErrorCode
 import dev.auralis.studio.resolver.api.ResolverResult
@@ -17,6 +18,7 @@ class LrrIpcDtoTest {
             {
                 "success": true,
                 "media": {
+                    "schemaVersion": 1,
                     "source": "SoundCloud",
                     "sourceId": "sc-123456",
                     "webpageUrl": "https://soundcloud.com/artist/track",
@@ -28,21 +30,37 @@ class LrrIpcDtoTest {
                     "formats": [
                         {
                             "formatId": "http_mp3",
-                            "url": "https://cf-media.sndcdn.com/stream.mp3?token=signed",
+                            "mediaKind": "AUDIO_ONLY",
+                            "container": "mp3",
                             "extension": "mp3",
-                            "mimeType": "audio/mpeg",
                             "audioCodec": "mp3",
                             "videoCodec": null,
-                            "bitrateKbps": 128,
+                            "bitrateKbps": 128.0,
                             "sampleRateHz": 44100,
                             "fileSizeBytes": 3360000,
                             "protocol": "https",
-                            "httpHeaders": {"User-Agent": "Lyrune"},
-                            "expiresAtEpochMs": 1780000000000,
+                            "resolutionMode": "DIRECT_RESOURCE",
+                            "drmState": "NONE"
+                        }
+                    ],
+                    "rawFormats": [
+                        {
+                            "formatId": "http_mp3",
+                            "url": "https://cf-media.sndcdn.com/stream.mp3?token=signed",
+                            "extension": "mp3",
                             "resolutionMode": "DIRECT_RESOURCE",
                             "isAudioOnly": true
                         }
                     ]
+                },
+                "lease": {
+                    "requestId": "req-1",
+                    "formatId": "http_mp3",
+                    "url": "https://cf-media.sndcdn.com/stream.mp3?token=signed",
+                    "headers": {"User-Agent": "Lyrune"},
+                    "resolvedAtElapsedRealtimeMs": 1000,
+                    "resolutionMode": "DIRECT_RESOURCE",
+                    "mediaKind": "AUDIO_ONLY"
                 }
             }
         """.trimIndent()
@@ -50,7 +68,9 @@ class LrrIpcDtoTest {
         val result = LrrIpcParser.parseIpcResponse(successJson, "https://soundcloud.com/artist/track")
         assertTrue(result is ResolverResult.Success)
 
-        val media = (result as ResolverResult.Success).media
+        val success = result as ResolverResult.Success
+        val media = success.media
+        assertEquals(1, media.schemaVersion)
         assertEquals("SoundCloud", media.source)
         assertEquals("sc-123456", media.sourceId)
         assertEquals("Nightfall Drive", media.title)
@@ -60,10 +80,12 @@ class LrrIpcDtoTest {
 
         val fmt = media.formats.first()
         assertEquals("http_mp3", fmt.formatId)
-        assertEquals("https://cf-media.sndcdn.com/stream.mp3?token=signed", fmt.url)
-        assertEquals("audio/mpeg", fmt.mimeType)
+        assertEquals(MediaKind.AUDIO_ONLY, fmt.mediaKind)
         assertEquals(ResolutionMode.DIRECT_RESOURCE, fmt.resolutionMode)
-        assertTrue(fmt.isAudioOnly)
+
+        val lease = success.lease
+        assertNotNull(lease)
+        assertEquals("https://cf-media.sndcdn.com/stream.mp3?token=signed", lease?.url)
     }
 
     @Test

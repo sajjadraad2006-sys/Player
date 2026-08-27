@@ -243,17 +243,15 @@ class DownloadCapabilityTest {
 
     @Test
     fun resolvedMedia_derivedDownloadCapability_reflectsFormatPermissions() {
-        val permittedFormat = ResolvedFormat(
+        val permittedFormat = dev.auralis.studio.resolver.api.ResolvedFormatDescriptor(
             formatId = "fmt_direct_permitted",
-            url = "https://example.org/cc_audio.m4a",
             resolutionMode = ResolutionMode.DIRECT_RESOURCE,
             downloadCapability = DownloadCapability.PERMITTED,
             downloadCapabilityBasis = DownloadCapabilityBasis.LICENSE_METADATA,
         )
 
-        val streamOnlyFormat = ResolvedFormat(
+        val streamOnlyFormat = dev.auralis.studio.resolver.api.ResolvedFormatDescriptor(
             formatId = "fmt_stream_only",
-            url = "https://rr---sn.googlevideo.com/videoplayback?...",
             resolutionMode = ResolutionMode.DIRECT_RESOURCE,
             downloadCapability = DownloadCapability.STREAM_ONLY,
             downloadCapabilityBasis = DownloadCapabilityBasis.PROVIDER_EXPLICIT,

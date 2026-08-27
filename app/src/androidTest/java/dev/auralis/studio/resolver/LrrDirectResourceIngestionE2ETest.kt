@@ -222,12 +222,21 @@ class LrrDirectResourceIngestionE2ETest {
                 resolveCalls++
                 val chosenUrl = if (resolveCalls == 1) expiredUrl else freshUrl
                 return ResolverResult.Success(
-                    ResolvedMedia(
+                    media = ResolvedMedia(
                         source = descriptor.source,
                         sourceId = descriptor.sourceId,
                         webpageUrl = descriptor.canonicalUrl,
                         title = descriptor.title,
                         formats = listOf(
+                            dev.auralis.studio.resolver.api.ResolvedFormatDescriptor(
+                                formatId = "fmt_wav",
+                                extension = "wav",
+                                resolutionMode = ResolutionMode.DIRECT_RESOURCE,
+                                downloadCapability = DownloadCapability.PERMITTED,
+                                downloadCapabilityBasis = DownloadCapabilityBasis.TEST_FIXTURE,
+                            ),
+                        ),
+                        rawFormats = listOf(
                             ResolvedFormat(
                                 formatId = "fmt_wav",
                                 url = chosenUrl,
@@ -238,6 +247,11 @@ class LrrDirectResourceIngestionE2ETest {
                             ),
                         ),
                     ),
+                    lease = dev.auralis.studio.resolver.api.EphemeralResourceLease(
+                        requestId = request.requestId,
+                        formatId = "fmt_wav",
+                        url = chosenUrl,
+                    ),
                 )
             }
             override suspend fun cancel(requestId: String) {}
@@ -246,18 +260,18 @@ class LrrDirectResourceIngestionE2ETest {
 
         // Attempt download with first URL (which returns 403)
         val res1 = fakeResolver.resolve(ResolverRequest(sourceUrl = descriptor.canonicalUrl))
-        val fmt1 = (res1 as ResolverResult.Success).media.formats.first()
-        val req1 = DownloadIngestionRequest.fromResolverResource(descriptor, fmt1.url, 3000L, formatExtension = "wav")
+        val url1 = (res1 as ResolverResult.Success).lease?.url ?: (res1 as ResolverResult.Success).media.rawFormats.first().url
+        val req1 = DownloadIngestionRequest.fromResolverResource(descriptor, url1, 3000L, formatExtension = "wav")
         val result1 = ingestionManager.download(req1)
 
         assertTrue("First attempt on 403 must fail", result1.isFailure)
 
         // One-shot recovery: re-resolve fresh and retry
         val res2 = fakeResolver.resolve(ResolverRequest(sourceUrl = descriptor.canonicalUrl))
-        val fmt2 = (res2 as ResolverResult.Success).media.formats.first()
-        assertEquals("Re-resolution must obtain freshUrl", freshUrl, fmt2.url)
+        val url2 = (res2 as ResolverResult.Success).lease?.url ?: (res2 as ResolverResult.Success).media.rawFormats.first().url
+        assertEquals("Re-resolution must obtain freshUrl", freshUrl, url2)
 
-        val req2 = DownloadIngestionRequest.fromResolverResource(descriptor, fmt2.url, 3000L, formatExtension = "wav")
+        val req2 = DownloadIngestionRequest.fromResolverResource(descriptor, url2, 3000L, formatExtension = "wav")
         val result2 = ingestionManager.download(req2)
         assertTrue("Second attempt with freshUrl must succeed", result2.isSuccess)
 

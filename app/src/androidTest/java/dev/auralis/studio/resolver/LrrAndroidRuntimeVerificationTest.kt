@@ -79,7 +79,7 @@ class LrrAndroidRuntimeVerificationTest {
         when (resA) {
             is ResolverResult.Success -> {
                 val media = resA.media
-                val audioOnlyCount = media.formats.count { it.isAudioOnly }
+                val audioOnlyCount = media.formats.count { it.mediaKind == dev.auralis.studio.resolver.api.MediaKind.AUDIO_ONLY }
                 Log.i(TAG, "Case A Success: title='${media.title}', source='${media.source}', formats=${media.formats.size}, audioOnly=$audioOnlyCount")
                 assertTrue("Case A must have a non-empty title", !media.title.isNullOrBlank())
                 assertTrue("Case A must have formats", media.formats.isNotEmpty())

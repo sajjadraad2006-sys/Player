@@ -338,7 +338,7 @@ class DownloadWorker(
 
         val media = resolveResult.media
         val selectedFormat = ResolverFormatSelector.selectBestAudioFormat(
-            formats = media.formats,
+            formats = media.rawFormats,
             preference = descriptor.qualityPreference,
             formatHint = descriptor.formatHint,
         ) ?: return FreshResolutionResult.TerminalFailure("No permitted direct formats available")

@@ -6,12 +6,13 @@ Supports QuickJS-NG JavaScript runtime and yt-dlp-ejs.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.parse
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import yt_dlp
@@ -41,6 +42,48 @@ except Exception:
 _configured_qjs_path: Optional[str] = None
 _real_extraction_succeeded: bool = False
 
+# Maximum allowed serialized IPC payload size (512 KB)
+MAX_BINDER_PAYLOAD_BYTES = 512 * 1024
+
+# Disallowed / dangerous URL schemes for SSRF hardening
+FORBIDDEN_SCHEMES = {"file", "content", "javascript", "data", "ftp", "about", "intent"}
+
+# Private / loopback host patterns for SSRF hardening
+PRIVATE_HOST_REGEX = re.compile(
+    r"^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|::1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|169\.254\.\d+\.\d+)$",
+    re.IGNORECASE,
+)
+
+# Safe header names whitelist
+SAFE_HEADER_KEYS = {
+    "user-agent",
+    "referer",
+    "origin",
+    "accept",
+    "accept-language",
+    "range",
+}
+
+# Sensitive header names
+SENSITIVE_HEADER_KEYS = {
+    "cookie",
+    "authorization",
+    "proxy-authorization",
+    "x-api-key",
+    "x-auth-token",
+    "set-cookie",
+}
+
+SEGMENTED_PROTOCOLS = {
+    "m3u8",
+    "m3u8_native",
+    "http_dash_segments",
+    "dash",
+    "mss",
+    "ism",
+    "f4m",
+}
+
 
 def set_quickjs_path(path: str):
     global _configured_qjs_path
@@ -53,7 +96,6 @@ def get_quickjs_path() -> Optional[str]:
     if _configured_qjs_path and os.path.exists(_configured_qjs_path):
         return _configured_qjs_path
 
-    # Common search locations (native lib dir, standard emulator test locations)
     candidates = [
         "/data/local/tmp/libqjs.so",
         "/data/local/tmp/qjs",
@@ -99,6 +141,7 @@ def get_runtime_versions(qjs_path: Optional[str] = None) -> Dict[str, str]:
 
 _last_selftest_debug: str = "NOT_RUN"
 
+
 def _verify_ejs_challenge_selftest(path: str) -> bool:
     """Verifies that the EJS solver script is executable by QuickJS."""
     global _last_selftest_debug
@@ -113,7 +156,6 @@ def _verify_ejs_challenge_selftest(path: str) -> bool:
     try:
         lib_code = yt_dlp_ejs.yt.solver.lib()
         core_code = yt_dlp_ejs.yt.solver.core()
-        # Use app cache / temp directory
         temp_dir = tempfile.gettempdir()
         if not os.path.exists(temp_dir) or not os.access(temp_dir, os.W_OK):
             temp_dir = os.path.dirname(path)
@@ -128,7 +170,6 @@ def _verify_ejs_challenge_selftest(path: str) -> bool:
         return proc.returncode == 0 and "ok" in proc.stdout
     except Exception as e:
         _last_selftest_debug = f"EXC: {type(e).__name__}: {e}"
-        # Fallback to direct inline execution if tempfile fails
         try:
             proc = subprocess.run(
                 [path, "-e", "console.log(JSON.stringify({ok: true, ejs_verified: true}))"],
@@ -158,7 +199,6 @@ def get_health_dict(qjs_path: Optional[str] = None) -> Dict[str, Any]:
 
     if js_present and path:
         js_executable = os.access(path, os.X_OK)
-        # Verify execution of a trivial JS script
         try:
             proc = subprocess.run(
                 [path, "-e", "console.log(JSON.stringify({ok: true, value: 42}))"],
@@ -171,7 +211,6 @@ def get_health_dict(qjs_path: Optional[str] = None) -> Dict[str, Any]:
         except Exception:
             js_executable = False
 
-        # Verify yt-dlp recognizes the quickjs runtime
         if YT_DLP_AVAILABLE and js_executable:
             try:
                 with yt_dlp.YoutubeDL({"js_runtimes": {"quickjs": {"path": path}}, "quiet": True}) as ydl:
@@ -222,7 +261,6 @@ def get_health_json(qjs_path: Optional[str] = None) -> str:
 
 
 def _extract_expiry_ms(url: str) -> Optional[int]:
-    """Attempt to parse expiry timestamps from signed URLs if present."""
     if not url:
         return None
     try:
@@ -240,87 +278,227 @@ def _extract_expiry_ms(url: str) -> Optional[int]:
     return None
 
 
-def _classify_resolution_mode(fmt: Dict[str, Any]) -> str:
+def _sanitize_url(url: str) -> str:
+    """Strips sensitive query parameters from logged or descriptor URLs."""
+    if not url:
+        return ""
+    q_idx = url.find("?")
+    if q_idx == -1:
+        return url
+    return url[:q_idx] + "?<redacted>"
+
+
+def _is_safe_url_for_extraction(url: str) -> Tuple[bool, Optional[str]]:
+    """SSRF & scheme validation."""
+    if not url or not url.strip():
+        return False, "Empty URL"
+    try:
+        parsed = urllib.parse.urlparse(url.strip())
+        scheme = parsed.scheme.lower()
+        if scheme in FORBIDDEN_SCHEMES or scheme not in ("http", "https"):
+            return False, f"Forbidden URL scheme: '{scheme}'"
+        host = (parsed.hostname or "").strip()
+        if not host:
+            return False, "Missing URL host"
+        if PRIVATE_HOST_REGEX.match(host):
+            return False, f"Forbidden private/loopback host: '{host}'"
+        return True, None
+    except Exception as e:
+        return False, f"Malformed URL: {e}"
+
+
+def _classify_media_kind(fmt: Dict[str, Any]) -> str:
+    acodec = (fmt.get("acodec") or "none").lower()
+    vcodec = (fmt.get("vcodec") or "none").lower()
+
+    if acodec != "none" and (not vcodec or vcodec == "none"):
+        return "AUDIO_ONLY"
+    if (not acodec or acodec == "none") and vcodec != "none":
+        return "VIDEO_ONLY"
+    if acodec != "none" and vcodec != "none":
+        return "MUXED_AUDIO_VIDEO"
+    return "UNKNOWN"
+
+
+def _classify_drm_state(fmt: Dict[str, Any], info: Dict[str, Any]) -> str:
+    if fmt.get("has_drm") is True or info.get("has_drm") is True:
+        return "PRESENT"
+    if fmt.get("drm") or info.get("drm"):
+        return "PRESENT"
+    return "NONE"
+
+
+def _classify_format_delivery(fmt: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """
+    Evaluates Format Delivery Classification Matrix.
+    url != null does NOT imply DIRECT_RESOURCE.
+    """
     protocol = (fmt.get("protocol") or "").lower()
-    if any(seg in protocol for seg in ("m3u8", "hls", "dash", "f4m", "ism")):
-        return "SEGMENTED_RESOURCE"
+    manifest_url = fmt.get("manifest_url")
+    fragments = fmt.get("fragments")
+    request_data = fmt.get("request_data") or fmt.get("post_data")
+    has_drm = fmt.get("has_drm") is True
+    impersonate = fmt.get("impersonate")
+    headers = fmt.get("http_headers") or {}
 
-    acodec = fmt.get("acodec") or "none"
-    vcodec = fmt.get("vcodec") or "none"
-    if acodec == "none" and vcodec != "none":
-        return "ENGINE_REQUIRED"
+    has_sensitive_header = any(str(k).lower() in SENSITIVE_HEADER_KEYS for k in headers.keys())
+    is_segmented = bool(
+        any(seg in protocol for seg in SEGMENTED_PROTOCOLS) or
+        manifest_url or
+        fragments or
+        "m3u8" in protocol or
+        "dash" in protocol
+    )
 
-    url = fmt.get("url") or ""
-    if url.startswith("http://") or url.startswith("https://"):
-        return "DIRECT_RESOURCE"
+    reqs = {
+        "requiresCustomHeaders": bool(headers),
+        "requiredSafeHeaderKeys": [str(k) for k in headers.keys() if str(k).lower() in SAFE_HEADER_KEYS],
+        "requiresBrowserImpersonation": bool(impersonate),
+        "requiresPostRequestData": bool(request_data),
+        "isSegmented": is_segmented,
+        "hasDrm": has_drm,
+    }
 
-    return "ENGINE_REQUIRED"
+    if has_drm or request_data or impersonate or has_sensitive_header:
+        mode = "ENGINE_REQUIRED"
+    elif is_segmented:
+        mode = "SEGMENTED_RESOURCE"
+    else:
+        url = fmt.get("url") or ""
+        if url.startswith("http://") or url.startswith("https://"):
+            mode = "DIRECT_RESOURCE"
+        else:
+            mode = "ENGINE_REQUIRED"
+
+    return mode, reqs
 
 
-def _normalize_formats(raw_formats: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    normalized: List[Dict[str, Any]] = []
+def _normalize_format_descriptors(
+    raw_formats: List[Dict[str, Any]],
+    info: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    descriptors: List[Dict[str, Any]] = []
     if not raw_formats:
-        return normalized
+        return descriptors
 
     for f in raw_formats:
         url = f.get("url")
         if not url:
             continue
 
-        acodec = f.get("acodec")
-        vcodec = f.get("vcodec")
-        is_audio_only = bool(acodec and acodec != "none" and (not vcodec or vcodec == "none"))
+        media_kind = _classify_media_kind(f)
+        mode, reqs = _classify_format_delivery(f)
+        drm_state = _classify_drm_state(f, info)
 
         tbr = f.get("tbr") or f.get("abr")
-        bitrate_kbps = int(tbr) if tbr is not None and str(tbr).replace(".", "", 1).isdigit() else None
+        bitrate_kbps = float(tbr) if tbr is not None and str(tbr).replace(".", "", 1).isdigit() else None
 
         asr = f.get("asr")
         sample_rate_hz = int(asr) if asr is not None and str(asr).isdigit() else None
 
-        filesize = f.get("filesize") or f.get("filesize_approx")
+        channels = f.get("audio_channels")
+        channels_int = int(channels) if channels is not None and str(channels).isdigit() else None
+
+        filesize = f.get("filesize")
         file_size_bytes = int(filesize) if filesize is not None and str(filesize).isdigit() else None
 
+        filesize_approx = f.get("filesize_approx")
+        approx_bytes = int(filesize_approx) if filesize_approx is not None and str(filesize_approx).isdigit() else None
+
         ext = f.get("ext")
-        mime_type = None
-        if ext:
-            if ext == "mp3":
-                mime_type = "audio/mpeg"
-            elif ext in ("m4a", "aac"):
-                mime_type = "audio/mp4"
-            elif ext in ("ogg", "oga"):
-                mime_type = "audio/ogg"
-            elif ext == "opus":
-                mime_type = "audio/opus"
-            elif ext == "flac":
-                mime_type = "audio/flac"
-            elif ext == "wav":
-                mime_type = "audio/wav"
+        container = f.get("container") or ext
+        acodec = f.get("acodec")
+        vcodec = f.get("vcodec")
 
-        headers = f.get("http_headers") or {}
-        safe_headers = {str(k): str(v) for k, v in headers.items() if str(k).lower() not in ("cookie", "authorization")}
-
-        norm_fmt = {
-            "formatId": f.get("format_id"),
-            "url": url,
+        descriptor = {
+            "formatId": str(f.get("format_id") or "unknown"),
+            "mediaKind": media_kind,
+            "container": container,
             "extension": ext,
-            "mimeType": mime_type,
-            "audioCodec": acodec if acodec != "none" else None,
-            "videoCodec": vcodec if vcodec != "none" else None,
+            "audioCodec": acodec if acodec and acodec != "none" else None,
+            "videoCodec": vcodec if vcodec and vcodec != "none" else None,
             "bitrateKbps": bitrate_kbps,
             "sampleRateHz": sample_rate_hz,
+            "channels": channels_int,
             "fileSizeBytes": file_size_bytes,
+            "approximateFileSizeBytes": approx_bytes,
             "protocol": f.get("protocol"),
-            "httpHeaders": safe_headers,
-            "expiresAtEpochMs": _extract_expiry_ms(url),
-            "resolutionMode": _classify_resolution_mode(f),
-            "isAudioOnly": is_audio_only,
+            "resolutionMode": mode,
+            "drmState": drm_state,
+            "deliveryRequirements": reqs,
+            "downloadCapability": "UNKNOWN",
+            "downloadCapabilityBasis": "NONE",
         }
-        normalized.append(norm_fmt)
+        descriptors.append(descriptor)
 
-    return normalized
+    # Deterministic ranking and bounding to top 20 formats to prevent giant Binder payloads
+    descriptors.sort(
+        key=lambda d: (
+            1 if d["mediaKind"] == "AUDIO_ONLY" else 0,
+            1 if d["resolutionMode"] == "DIRECT_RESOURCE" else 0,
+            1 if d["drmState"] == "NONE" else 0,
+            d["bitrateKbps"] or 0,
+            d["formatId"],
+        ),
+        reverse=True,
+    )
+    return descriptors[:20]
 
 
-def _normalize_info(info: Dict[str, Any], original_url: str) -> Dict[str, Any]:
+def _extract_best_lease(
+    raw_formats: List[Dict[str, Any]],
+    request_id: str,
+    format_hint: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    if not raw_formats:
+        return None
+
+    candidate = None
+    if format_hint:
+        for f in raw_formats:
+            if str(f.get("format_id")) == str(format_hint):
+                candidate = f
+                break
+
+    if not candidate:
+        # Pick best audio format
+        audio_formats = [f for f in raw_formats if _classify_media_kind(f) == "AUDIO_ONLY"]
+        if audio_formats:
+            candidate = audio_formats[0]
+        else:
+            candidate = raw_formats[0]
+
+    url = candidate.get("url") or ""
+    if not url:
+        return None
+
+    raw_headers = candidate.get("http_headers") or {}
+    safe_headers = {
+        str(k): str(v)
+        for k, v in raw_headers.items()
+        if str(k).lower() in SAFE_HEADER_KEYS
+    }
+
+    mode, _ = _classify_format_delivery(candidate)
+    media_kind = _classify_media_kind(candidate)
+
+    return {
+        "requestId": request_id,
+        "formatId": str(candidate.get("format_id") or "unknown"),
+        "url": url,
+        "headers": safe_headers,
+        "resolvedAtElapsedRealtimeMs": int(time.time() * 1000),
+        "knownExpiryEpochMs": _extract_expiry_ms(url),
+        "resolutionMode": mode,
+        "mediaKind": media_kind,
+    }
+
+
+def _normalize_media(
+    info: Dict[str, Any],
+    original_url: str,
+    raw_formats: List[Dict[str, Any]],
+) -> Dict[str, Any]:
     source = info.get("extractor_key") or info.get("extractor") or "Generic"
     source_id = info.get("id")
     webpage_url = info.get("webpage_url") or original_url
@@ -337,13 +515,34 @@ def _normalize_info(info: Dict[str, Any], original_url: str) -> Dict[str, Any]:
         if isinstance(thumbs, list) and len(thumbs) > 0:
             artwork_url = thumbs[-1].get("url")
 
-    raw_formats = info.get("formats") or []
-    if not raw_formats and info.get("url"):
-        raw_formats = [info]
+    formats = _normalize_format_descriptors(raw_formats, info)
 
-    formats = _normalize_formats(raw_formats)
+    # Legacy raw format list for backward compatibility
+    raw_formats_dto = []
+    for f in raw_formats[:20]:
+        u = f.get("url") or ""
+        if u:
+            raw_formats_dto.append({
+                "formatId": str(f.get("format_id") or "unknown"),
+                "url": u,
+                "extension": f.get("ext"),
+                "mimeType": None,
+                "audioCodec": f.get("acodec") if f.get("acodec") != "none" else None,
+                "videoCodec": f.get("vcodec") if f.get("vcodec") != "none" else None,
+                "bitrateKbps": int(f.get("tbr") or f.get("abr") or 0) or None,
+                "sampleRateHz": int(f.get("asr") or 0) or None,
+                "fileSizeBytes": int(f.get("filesize") or 0) or None,
+                "protocol": f.get("protocol"),
+                "httpHeaders": {str(k): str(v) for k, v in (f.get("http_headers") or {}).items() if str(k).lower() in SAFE_HEADER_KEYS},
+                "expiresAtEpochMs": _extract_expiry_ms(u),
+                "resolutionMode": _classify_format_delivery(f)[0],
+                "isAudioOnly": _classify_media_kind(f) == "AUDIO_ONLY",
+                "downloadCapability": "UNKNOWN",
+                "downloadCapabilityBasis": "NONE",
+            })
 
     return {
+        "schemaVersion": 1,
         "source": source,
         "sourceId": str(source_id) if source_id is not None else None,
         "webpageUrl": webpage_url,
@@ -352,7 +551,9 @@ def _normalize_info(info: Dict[str, Any], original_url: str) -> Dict[str, Any]:
         "album": album,
         "durationMs": duration_ms,
         "artworkUrl": artwork_url,
+        "availability": "AVAILABLE",
         "formats": formats,
+        "rawFormats": raw_formats_dto,
     }
 
 
@@ -421,24 +622,30 @@ def _map_exception_to_error(e: Exception, source_url: str) -> Dict[str, Any]:
     }
 
 
-def inspect_source(request_json: str) -> str:
-    """
-    Inspects source metadata and available formats. Strictly download=False.
-    """
+def _execute_extraction(request_json: str, is_resolve: bool) -> str:
+    """Internal core extraction engine enforcing bounded Binder payloads and SSRF validation."""
     global _real_extraction_succeeded
+    source_url = ""
+    request_id = ""
     try:
         req = json.loads(request_json)
         source_url = req.get("sourceUrl") or ""
-        if not source_url:
+        request_id = req.get("requestId") or "req-default"
+        intent = req.get("intent") or ("DOWNLOAD" if is_resolve else "INSPECT")
+        format_hint = req.get("formatHint")
+
+        # 1. URL scheme and SSRF validation
+        is_safe, error_reason = _is_safe_url_for_extraction(source_url)
+        if not is_safe:
             return json.dumps({
                 "success": False,
                 "error": {
-                    "source": "",
+                    "source": source_url,
                     "technicalCode": "UnsupportedUrl",
                     "isRetryable": False,
-                    "safeUserMessage": "No URL provided.",
-                    "debugDetails": "sourceUrl was empty",
-                }
+                    "safeUserMessage": f"Invalid link: {error_reason}",
+                    "debugDetails": f"SSRF / scheme check failed: {error_reason}",
+                },
             })
 
         if not YT_DLP_AVAILABLE:
@@ -450,7 +657,7 @@ def inspect_source(request_json: str) -> str:
                     "isRetryable": False,
                     "safeUserMessage": "yt-dlp is not available.",
                     "debugDetails": "ImportError: yt_dlp",
-                }
+                },
             })
 
         ydl_opts = {
@@ -463,7 +670,6 @@ def inspect_source(request_json: str) -> str:
             "socket_timeout": 15,
         }
 
-        # Configure QuickJS if available
         qjs = req.get("quickJsPath") or get_quickjs_path()
         if qjs and os.path.exists(qjs):
             ydl_opts["js_runtimes"] = {"quickjs": {"path": qjs}}
@@ -479,26 +685,90 @@ def inspect_source(request_json: str) -> str:
                         "isRetryable": False,
                         "safeUserMessage": "No media information found.",
                         "debugDetails": "extract_info returned None",
-                    }
+                    },
                 })
 
-            normalized = _normalize_info(info, source_url)
+            # Check for playlist/collection
+            if info.get("_type") == "playlist" or (info.get("entries") and isinstance(info.get("entries"), list)):
+                entries = info.get("entries")
+                if not entries:
+                    return json.dumps({
+                        "success": False,
+                        "error": {
+                            "source": source_url,
+                            "technicalCode": "CollectionNotSupported",
+                            "isRetryable": False,
+                            "safeUserMessage": "Empty playlist.",
+                            "debugDetails": "Playlist had 0 entries",
+                        },
+                    })
+                # Single-recording contract: use first valid entry if single-recording was requested
+                first_entry = None
+                for e in entries:
+                    if e and isinstance(e, dict):
+                        first_entry = e
+                        break
+                if not first_entry:
+                    return json.dumps({
+                        "success": False,
+                        "error": {
+                            "source": source_url,
+                            "technicalCode": "CollectionNotSupported",
+                            "isRetryable": False,
+                            "safeUserMessage": "Playlist collections are not supported for single track resolution.",
+                            "debugDetails": "No playable entries found in playlist",
+                        },
+                    })
+                info = first_entry
+
+            # Use sanitize_info internally
+            info_sanitized = ydl.sanitize_info(info)
+
+            raw_formats = info_sanitized.get("formats") or []
+            if not raw_formats and info_sanitized.get("url"):
+                raw_formats = [info_sanitized]
+
+            media_dto = _normalize_media(info_sanitized, source_url, raw_formats)
+
+            response_payload = {
+                "success": True,
+                "media": media_dto,
+            }
+
+            if is_resolve or intent in ("PLAYBACK", "DOWNLOAD"):
+                lease_dto = _extract_best_lease(raw_formats, request_id, format_hint)
+                if lease_dto:
+                    response_payload["lease"] = lease_dto
+
+            serialized = json.dumps(response_payload)
+
+            # Binder payload preflight ceiling (< 512 KB)
+            payload_bytes = len(serialized.encode("utf-8"))
+            if payload_bytes > MAX_BINDER_PAYLOAD_BYTES:
+                return json.dumps({
+                    "success": False,
+                    "error": {
+                        "source": source_url,
+                        "technicalCode": "PayloadTooLarge",
+                        "isRetryable": False,
+                        "safeUserMessage": "The media resolution response exceeded safe communication limits.",
+                        "debugDetails": f"Payload size {payload_bytes} bytes exceeds ceiling {MAX_BINDER_PAYLOAD_BYTES}",
+                    },
+                })
+
             _real_extraction_succeeded = True
-            return json.dumps({"success": True, "media": normalized})
+            return serialized
 
     except Exception as e:
-        source_url = ""
-        try:
-            req = json.loads(request_json)
-            source_url = req.get("sourceUrl") or ""
-        except Exception:
-            pass
         error_dto = _map_exception_to_error(e, source_url)
         return json.dumps({"success": False, "error": error_dto})
 
 
+def inspect_source(request_json: str) -> str:
+    """Inspects source metadata and available format descriptors. Strictly download=False."""
+    return _execute_extraction(request_json, is_resolve=False)
+
+
 def resolve_source(request_json: str) -> str:
-    """
-    Resolves fresh URLs for immediate consumption. Strictly download=False.
-    """
-    return inspect_source(request_json)
+    """Resolves fresh ephemeral resource lease for immediate playback/download. Strictly download=False."""
+    return _execute_extraction(request_json, is_resolve=True)

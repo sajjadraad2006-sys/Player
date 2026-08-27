@@ -1,14 +1,15 @@
 package dev.auralis.studio.resolver
 
-import dev.auralis.studio.library.DownloadIngestionRequest
-import dev.auralis.studio.library.DownloadWorker
 import dev.auralis.studio.library.PreviewDownloadRejectedException
-import dev.auralis.studio.resolver.api.AudioQualityPreference
 import dev.auralis.studio.resolver.api.DownloadCapability
 import dev.auralis.studio.resolver.api.DownloadCapabilityBasis
+import dev.auralis.studio.resolver.api.DrmState
+import dev.auralis.studio.resolver.api.EphemeralResourceLease
+import dev.auralis.studio.resolver.api.MediaKind
 import dev.auralis.studio.resolver.api.MediaResolver
 import dev.auralis.studio.resolver.api.ResolutionMode
 import dev.auralis.studio.resolver.api.ResolvedFormat
+import dev.auralis.studio.resolver.api.ResolvedFormatDescriptor
 import dev.auralis.studio.resolver.api.ResolvedMedia
 import dev.auralis.studio.resolver.api.ResolverDownloadDescriptor
 import dev.auralis.studio.resolver.api.ResolverError
@@ -21,9 +22,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.IOException
-import java.net.SocketTimeoutException
-import java.net.UnknownHostException
 import java.util.concurrent.atomic.AtomicInteger
 
 class NetworkFailureAndRetryMatrixTest {
@@ -48,12 +46,22 @@ class NetworkFailureAndRetryMatrixTest {
                 val callIdx = resolutionCount.incrementAndGet()
                 val url = if (callIdx == 1) expiredUrl else freshUrl
                 return ResolverResult.Success(
-                    ResolvedMedia(
+                    media = ResolvedMedia(
                         source = descriptor.source,
                         sourceId = descriptor.sourceId,
                         webpageUrl = descriptor.canonicalUrl,
                         title = descriptor.title,
                         formats = listOf(
+                            ResolvedFormatDescriptor(
+                                formatId = "fmt_1",
+                                mediaKind = MediaKind.AUDIO_ONLY,
+                                resolutionMode = ResolutionMode.DIRECT_RESOURCE,
+                                drmState = DrmState.NONE,
+                                downloadCapability = DownloadCapability.PERMITTED,
+                                downloadCapabilityBasis = DownloadCapabilityBasis.TEST_FIXTURE,
+                            ),
+                        ),
+                        rawFormats = listOf(
                             ResolvedFormat(
                                 formatId = "fmt_1",
                                 url = url,
@@ -62,6 +70,11 @@ class NetworkFailureAndRetryMatrixTest {
                                 downloadCapabilityBasis = DownloadCapabilityBasis.TEST_FIXTURE,
                             ),
                         ),
+                    ),
+                    lease = EphemeralResourceLease(
+                        requestId = request.requestId,
+                        formatId = "fmt_1",
+                        url = url,
                     ),
                 )
             }
@@ -72,8 +85,8 @@ class NetworkFailureAndRetryMatrixTest {
         // 1. Initial resolution (attempt 1)
         val res1 = resolver.resolve(ResolverRequest(sourceUrl = descriptor.canonicalUrl))
         assertTrue(res1 is ResolverResult.Success)
-        val format1 = (res1 as ResolverResult.Success).media.formats.first()
-        assertEquals(expiredUrl, format1.url)
+        val lease1 = (res1 as ResolverResult.Success).lease
+        assertEquals(expiredUrl, lease1?.url)
         assertEquals(1, resolutionCount.get())
 
         // Simulated HTTP 403 failure from download
@@ -84,8 +97,8 @@ class NetworkFailureAndRetryMatrixTest {
         // 2. Re-resolution (attempt 2 - exactly once)
         val res2 = resolver.resolve(ResolverRequest(sourceUrl = descriptor.canonicalUrl))
         assertTrue(res2 is ResolverResult.Success)
-        val format2 = (res2 as ResolverResult.Success).media.formats.first()
-        assertEquals(freshUrl, format2.url)
+        val lease2 = (res2 as ResolverResult.Success).lease
+        assertEquals(freshUrl, lease2?.url)
         assertEquals(2, resolutionCount.get())
 
         // Max resolution count caused by stale 403 is exactly 2

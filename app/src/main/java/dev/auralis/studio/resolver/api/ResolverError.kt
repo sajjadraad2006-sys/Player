@@ -26,6 +26,9 @@ enum class ResolverErrorCode {
     ProviderChanged,
     RuntimeCrashed,
     Cancelled,
+    PayloadTooLarge,
+    IncompatibleSchemaVersion,
+    CollectionNotSupported,
     Unknown,
 }
 
@@ -129,6 +132,30 @@ data class ResolverError(
             debugDetails = details,
         )
 
+        fun payloadTooLarge(source: String, details: String? = null) = ResolverError(
+            source = source,
+            technicalCode = ResolverErrorCode.PayloadTooLarge,
+            isRetryable = false,
+            safeUserMessage = "The media resolution response exceeded safe communication limits.",
+            debugDetails = details,
+        )
+
+        fun incompatibleSchemaVersion(source: String, version: Int) = ResolverError(
+            source = source,
+            technicalCode = ResolverErrorCode.IncompatibleSchemaVersion,
+            isRetryable = false,
+            safeUserMessage = "Unsupported resolver response schema version ($version). Please update the application.",
+            debugDetails = "schemaVersion=$version is incompatible",
+        )
+
+        fun collectionNotSupported(source: String, details: String? = null) = ResolverError(
+            source = source,
+            technicalCode = ResolverErrorCode.CollectionNotSupported,
+            isRetryable = false,
+            safeUserMessage = "Playlists and media collections are not supported for single track resolution.",
+            debugDetails = details,
+        )
+
         fun unknown(source: String, message: String? = null, details: String? = null) = ResolverError(
             source = source,
             technicalCode = ResolverErrorCode.Unknown,
@@ -145,7 +172,10 @@ data class ResolverError(
 @Serializable
 sealed interface ResolverResult {
     @Serializable
-    data class Success(val media: ResolvedMedia) : ResolverResult
+    data class Success(
+        val media: ResolvedMedia,
+        val lease: EphemeralResourceLease? = null,
+    ) : ResolverResult
 
     @Serializable
     data class Failure(val error: ResolverError) : ResolverResult

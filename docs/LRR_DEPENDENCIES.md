@@ -45,9 +45,9 @@ Zip Alignment: 4-byte zip alignment verified across all shared object entries.
 
 ---
 
-## 4. Test Verification Totals (Phase 4 Ingestion)
+## 4. Test Verification Totals (Phase 4 Contract & Ephemeral Safety)
 
 | Test Type | Total Tests | Passed | Failed | Errors | Skipped |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Unit Tests (testDebugUnitTest)** | 191 | 190 | 0 | 0 | 1 |
-| **Android Tests (connectedDebugAndroidTest)** | 13 | 12 | 0 | 0 | 1 |
+| **Unit Tests (testDebugUnitTest)** | 283 | 282 | 0 | 0 | 1 |
+| **Android Tests (connectedDebugAndroidTest)** | 15 | 14 | 0 | 0 | 1 |

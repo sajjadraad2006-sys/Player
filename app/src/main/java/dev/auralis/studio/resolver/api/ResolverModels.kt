@@ -5,7 +5,21 @@ import java.security.MessageDigest
 import java.util.UUID
 
 /**
- * Stable resolver request containing canonical source identity.
+ * Explicit intent for a resolver request.
+ *
+ * - [INSPECT]: Inspect metadata and available format descriptors without generating delivery leases.
+ * - [PLAYBACK]: Resolve a fresh, immediately usable playback resource lease.
+ * - [DOWNLOAD]: Resolve a fresh, immediately usable download resource lease.
+ */
+@Serializable
+enum class ResolveIntent {
+    INSPECT,
+    PLAYBACK,
+    DOWNLOAD,
+}
+
+/**
+ * Stable resolver request containing canonical source identity and intent.
  *
  * Signed temporary media URLs must NEVER be persisted as canonical source identity.
  */
@@ -15,7 +29,9 @@ data class ResolverRequest(
     val sourceUrl: String? = null,
     val sourceId: String? = null,
     val sourceType: ResolverSourceType = ResolverSourceType.GENERIC_URL,
+    val intent: ResolveIntent = ResolveIntent.INSPECT,
     val preferredAudioQuality: AudioQualityPreference = AudioQualityPreference.BEST,
+    val formatHint: String? = null,
     val extraOptions: Map<String, String> = emptyMap(),
 )
 
@@ -32,6 +48,67 @@ enum class AudioQualityPreference {
     HIGH,
     MEDIUM,
     LOW,
+}
+
+/**
+ * High-level availability state of a resolved media source.
+ */
+@Serializable
+enum class AvailabilityState {
+    AVAILABLE,
+    RESTRICTED,
+    UNAVAILABLE,
+    UNKNOWN,
+}
+
+/**
+ * Digital Rights Management (DRM) state.
+ *
+ * Conservative rule: [PRESENT] and [POSSIBLE] cannot be direct download candidates.
+ */
+@Serializable
+enum class DrmState {
+    NONE,
+    PRESENT,
+    POSSIBLE,
+    UNKNOWN,
+}
+
+/**
+ * Media stream classification.
+ */
+@Serializable
+enum class MediaKind {
+    AUDIO_ONLY,
+    VIDEO_ONLY,
+    MUXED_AUDIO_VIDEO,
+    UNKNOWN,
+}
+
+/**
+ * Technical delivery requirements and constraints for a format.
+ */
+@Serializable
+data class DeliveryRequirements(
+    val requiresCustomHeaders: Boolean = false,
+    val requiredSafeHeaderKeys: List<String> = emptyList(),
+    val requiresBrowserImpersonation: Boolean = false,
+    val requiresPostRequestData: Boolean = false,
+    val isSegmented: Boolean = false,
+    val hasDrm: Boolean = false,
+)
+
+/**
+ * Mode required to process or deliver a resolved format.
+ */
+@Serializable
+enum class ResolutionMode {
+    /** Direct HTTP(S) stream/file that standard OkHttp/WorkManager can download. */
+    DIRECT_RESOURCE,
+    /** Segmented stream (e.g. HLS/DASH) requiring segment parsing/assembly. */
+    SEGMENTED_RESOURCE,
+    /** Complex resource requiring native engine processing or demuxing. */
+    ENGINE_REQUIRED,
 }
 
 /**
@@ -68,44 +145,67 @@ enum class DownloadCapabilityBasis {
 }
 
 /**
- * Normalized result representing resolved media metadata and available formats.
+ * Stable format descriptor representing a media representation.
  *
- * Does not force nonexistent metadata (e.g. no fake artist names).
+ * CRITICAL INVARIANT: This descriptor MUST NOT contain:
+ * - signed delivery URLs
+ * - temporary stream/download URLs
+ * - cookies or session tokens
+ * - Authorization headers
+ * - temporary EJS solver tokens
  */
 @Serializable
-data class ResolvedMedia(
-    val source: String,
-    val sourceId: String? = null,
-    val webpageUrl: String? = null,
-    val title: String? = null,
-    val artist: String? = null,
-    val album: String? = null,
-    val durationMs: Long? = null,
-    val artworkUrl: String? = null,
-    val formats: List<ResolvedFormat> = emptyList(),
-) {
-    /** Returns true if any format is technically direct and legally permitted for download. */
-    val hasPermittedDirectDownload: Boolean
-        get() = formats.any {
-            it.resolutionMode == ResolutionMode.DIRECT_RESOURCE &&
-                it.downloadCapability == DownloadCapability.PERMITTED
-        }
+data class ResolvedFormatDescriptor(
+    val formatId: String,
+    val mediaKind: MediaKind = MediaKind.AUDIO_ONLY,
+    val container: String? = null,
+    val extension: String? = null,
+    val audioCodec: String? = null,
+    val videoCodec: String? = null,
+    val bitrateKbps: Double? = null,
+    val sampleRateHz: Int? = null,
+    val channels: Int? = null,
+    val fileSizeBytes: Long? = null,
+    val approximateFileSizeBytes: Long? = null,
+    val protocol: String? = null,
+    val resolutionMode: ResolutionMode = ResolutionMode.DIRECT_RESOURCE,
+    val drmState: DrmState = DrmState.NONE,
+    val deliveryRequirements: DeliveryRequirements = DeliveryRequirements(),
+    val downloadCapability: DownloadCapability = DownloadCapability.UNKNOWN,
+    val downloadCapabilityBasis: DownloadCapabilityBasis = DownloadCapabilityBasis.NONE,
+)
 
-    /** All direct formats that are authorized for download. */
-    val permittedDirectFormats: List<ResolvedFormat>
-        get() = formats.filter {
-            it.resolutionMode == ResolutionMode.DIRECT_RESOURCE &&
-                it.downloadCapability == DownloadCapability.PERMITTED
-        }
+/**
+ * Short-lived, in-memory lease for immediate media playback or download execution.
+ *
+ * CRITICAL INVARIANT:
+ * - Strictly in-memory; NEVER persisted to Room, DataStore, or persistent storage.
+ * - NEVER persisted across process death.
+ * - Fresh re-resolution is required whenever a lease expires.
+ */
+@Serializable
+data class EphemeralResourceLease(
+    val requestId: String,
+    val formatId: String,
+    val url: String,
+    val headers: Map<String, String> = emptyMap(),
+    val resolvedAtElapsedRealtimeMs: Long = System.currentTimeMillis(),
+    val knownExpiryEpochMs: Long? = null,
+    val resolutionMode: ResolutionMode = ResolutionMode.DIRECT_RESOURCE,
+    val mediaKind: MediaKind = MediaKind.AUDIO_ONLY,
+) {
+    val isExpired: Boolean
+        get() = knownExpiryEpochMs != null && System.currentTimeMillis() >= knownExpiryEpochMs
 }
 
 /**
  * Details of an individual media format available from a resolved resource.
+ * Maintained for backward compatibility with direct callers.
  */
 @Serializable
 data class ResolvedFormat(
     val formatId: String? = null,
-    val url: String,
+    val url: String = "",
     val extension: String? = null,
     val mimeType: String? = null,
     val audioCodec: String? = null,
@@ -123,16 +223,40 @@ data class ResolvedFormat(
 )
 
 /**
- * Mode required to process or download a resolved format.
+ * Normalized result representing resolved media metadata and available format descriptors.
+ *
+ * Does not force nonexistent metadata (nullable means unknown; no fake placeholder strings).
  */
 @Serializable
-enum class ResolutionMode {
-    /** Direct HTTP(S) stream/file that standard OkHttp/WorkManager can download. */
-    DIRECT_RESOURCE,
-    /** Segmented stream (e.g. HLS/DASH) requiring segment parsing/assembly. */
-    SEGMENTED_RESOURCE,
-    /** Complex resource requiring native engine processing or demuxing. */
-    ENGINE_REQUIRED,
+data class ResolvedMedia(
+    val schemaVersion: Int = 1,
+    val source: String,
+    val sourceId: String? = null,
+    val webpageUrl: String? = null,
+    val title: String? = null,
+    val artist: String? = null,
+    val album: String? = null,
+    val durationMs: Long? = null,
+    val artworkUrl: String? = null,
+    val availability: AvailabilityState = AvailabilityState.AVAILABLE,
+    val formats: List<ResolvedFormatDescriptor> = emptyList(),
+    val rawFormats: List<ResolvedFormat> = emptyList(),
+) {
+    /** Returns true if any format is technically direct, non-DRM, and legally permitted for download. */
+    val hasPermittedDirectDownload: Boolean
+        get() = formats.any {
+            it.resolutionMode == ResolutionMode.DIRECT_RESOURCE &&
+                it.downloadCapability == DownloadCapability.PERMITTED &&
+                it.drmState == DrmState.NONE
+        }
+
+    /** All direct formats that are authorized for download. */
+    val permittedDirectFormats: List<ResolvedFormatDescriptor>
+        get() = formats.filter {
+            it.resolutionMode == ResolutionMode.DIRECT_RESOURCE &&
+                it.downloadCapability == DownloadCapability.PERMITTED &&
+                it.drmState == DrmState.NONE
+        }
 }
 
 /**
@@ -161,11 +285,6 @@ data class ResolverDownloadDescriptor(
     val downloadCapability: DownloadCapability = DownloadCapability.PERMITTED,
     val downloadCapabilityBasis: DownloadCapabilityBasis = DownloadCapabilityBasis.NONE,
 ) {
-    /**
-     * Stable unique download key.
-     * Uses sourceId when present; falls back to SHA-256 of canonical URL.
-     * Never uses String.hashCode() or transient query tokens.
-     */
     val downloadKey: String
         get() {
             val cleanSource = source.lowercase().trim().replace(Regex("[^a-z0-9_]"), "_")
@@ -187,6 +306,113 @@ data class ResolverDownloadDescriptor(
         fun sha256Hex(input: String): String {
             val digest = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
             return digest.joinToString("") { "%02x".format(it) }
+        }
+    }
+}
+
+/**
+ * Central secret and URL sanitizer for LRR logs, DTOs, and error messages.
+ */
+object SecretSanitizer {
+    private val SENSITIVE_HEADER_KEYS = setOf(
+        "cookie",
+        "authorization",
+        "proxy-authorization",
+        "x-api-key",
+        "x-auth-token",
+        "set-cookie",
+    )
+
+    private val SAFE_HEADER_KEYS = setOf(
+        "user-agent",
+        "referer",
+        "origin",
+        "accept",
+        "accept-language",
+        "range",
+    )
+
+    fun isSensitiveHeader(name: String): Boolean {
+        val lower = name.trim().lowercase()
+        return lower in SENSITIVE_HEADER_KEYS ||
+            lower.contains("token") ||
+            lower.contains("secret") ||
+            lower.contains("password")
+    }
+
+    fun isSafeHeader(name: String): Boolean =
+        name.trim().lowercase() in SAFE_HEADER_KEYS
+
+    fun sanitizeHeaders(headers: Map<String, String>): Map<String, String> {
+        return headers.mapValues { (k, v) ->
+            if (isSensitiveHeader(k)) "<redacted>" else v
+        }
+    }
+
+    fun extractSafeHeaders(headers: Map<String, String>): Map<String, String> {
+        return headers.filter { (k, _) -> isSafeHeader(k) }
+    }
+
+    fun sanitizeUrl(url: String): String {
+        if (url.isBlank()) return url
+        val queryIndex = url.indexOf('?')
+        if (queryIndex == -1) return url
+        val base = url.substring(0, queryIndex)
+        return "$base?<redacted>"
+    }
+
+    fun sanitizeLog(message: String): String {
+        var clean = message
+        clean = clean.replace(Regex("""https?://[^\s"'<>]+(?:\?[^\s"'<>]+)""")) { match ->
+            sanitizeUrl(match.value)
+        }
+        clean = clean.replace(Regex("""(?i)(bearer|token|key|cookie)[:=\s]+[a-zA-Z0-9_\-\.]+""")) { match ->
+            "${match.groupValues[1]}: <redacted>"
+        }
+        return clean
+    }
+}
+
+/**
+ * Dedicated classifier enforcing the Delivery Classification Matrix.
+ *
+ * Invariant: url != null does NOT imply DIRECT_RESOURCE.
+ */
+object FormatDeliveryClassifier {
+    private val SEGMENTED_PROTOCOLS = setOf(
+        "m3u8",
+        "m3u8_native",
+        "http_dash_segments",
+        "dash",
+        "mss",
+        "ism",
+        "f4m",
+    )
+
+    fun classify(
+        protocol: String?,
+        manifestUrl: String?,
+        hasFragments: Boolean,
+        hasRequestData: Boolean,
+        hasDrm: Boolean,
+        impersonate: String?,
+        headers: Map<String, String> = emptyMap(),
+    ): ResolutionMode {
+        val proto = protocol?.lowercase()?.trim().orEmpty()
+        val isSegmented = proto in SEGMENTED_PROTOCOLS ||
+            !manifestUrl.isNullOrBlank() ||
+            hasFragments ||
+            proto.contains("m3u8") ||
+            proto.contains("dash")
+
+        return when {
+            hasDrm -> ResolutionMode.ENGINE_REQUIRED
+            hasRequestData -> ResolutionMode.ENGINE_REQUIRED
+            !impersonate.isNullOrBlank() -> ResolutionMode.ENGINE_REQUIRED
+            headers.keys.any { SecretSanitizer.isSensitiveHeader(it) } -> ResolutionMode.ENGINE_REQUIRED
+            isSegmented -> ResolutionMode.SEGMENTED_RESOURCE
+            proto.startsWith("http") || proto.isBlank() -> ResolutionMode.DIRECT_RESOURCE
+            else -> ResolutionMode.ENGINE_REQUIRED
         }
     }
 }

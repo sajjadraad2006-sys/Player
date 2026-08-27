@@ -115,6 +115,14 @@ class ExpiringUrlResolutionTest {
                         webpageUrl = descriptor.canonicalUrl,
                         title = descriptor.title,
                         formats = listOf(
+                            dev.auralis.studio.resolver.api.ResolvedFormatDescriptor(
+                                formatId = "audio_best",
+                                resolutionMode = ResolutionMode.DIRECT_RESOURCE,
+                                downloadCapability = DownloadCapability.PERMITTED,
+                                downloadCapabilityBasis = DownloadCapabilityBasis.PROVIDER_EXPLICIT,
+                            ),
+                        ),
+                        rawFormats = listOf(
                             ResolvedFormat(
                                 formatId = "audio_best",
                                 url = expiredCdnUrl,
@@ -123,6 +131,11 @@ class ExpiringUrlResolutionTest {
                                 downloadCapabilityBasis = DownloadCapabilityBasis.PROVIDER_EXPLICIT,
                             ),
                         ),
+                    ),
+                    lease = dev.auralis.studio.resolver.api.EphemeralResourceLease(
+                        requestId = request.requestId,
+                        formatId = "audio_best",
+                        url = expiredCdnUrl,
                     ),
                 )
             }
@@ -136,6 +149,14 @@ class ExpiringUrlResolutionTest {
                         webpageUrl = descriptor.canonicalUrl,
                         title = descriptor.title,
                         formats = listOf(
+                            dev.auralis.studio.resolver.api.ResolvedFormatDescriptor(
+                                formatId = "audio_best",
+                                resolutionMode = ResolutionMode.DIRECT_RESOURCE,
+                                downloadCapability = DownloadCapability.PERMITTED,
+                                downloadCapabilityBasis = DownloadCapabilityBasis.PROVIDER_EXPLICIT,
+                            ),
+                        ),
+                        rawFormats = listOf(
                             ResolvedFormat(
                                 formatId = "audio_best",
                                 url = freshCdnUrl,
@@ -144,6 +165,11 @@ class ExpiringUrlResolutionTest {
                                 downloadCapabilityBasis = DownloadCapabilityBasis.PROVIDER_EXPLICIT,
                             ),
                         ),
+                    ),
+                    lease = dev.auralis.studio.resolver.api.EphemeralResourceLease(
+                        requestId = request.requestId,
+                        formatId = "audio_best",
+                        url = freshCdnUrl,
                     ),
                 )
             }
@@ -154,9 +180,12 @@ class ExpiringUrlResolutionTest {
 
         val resolveResult = fakeResolver.resolve(ResolverRequest(sourceUrl = descriptor.canonicalUrl))
         assertTrue(resolveResult is ResolverResult.Success)
-        val resolvedFormat = (resolveResult as ResolverResult.Success).media.formats.first()
+        val success = resolveResult as ResolverResult.Success
+        val resolvedRawFormat = success.media.rawFormats.first()
+        val lease = success.lease
 
-        assertEquals("Downloader must consume the fresh URL_B, not expired URL_A", freshCdnUrl, resolvedFormat.url)
-        assertNotEquals(expiredCdnUrl, resolvedFormat.url)
+        assertEquals("Downloader must consume the fresh URL_B, not expired URL_A", freshCdnUrl, resolvedRawFormat.url)
+        assertEquals(freshCdnUrl, lease?.url)
+        assertNotEquals(expiredCdnUrl, resolvedRawFormat.url)
     }
 }

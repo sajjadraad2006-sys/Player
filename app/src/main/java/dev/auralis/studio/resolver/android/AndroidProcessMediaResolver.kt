@@ -44,6 +44,10 @@ object LrrIpcParser {
     private val json = Json { ignoreUnknownKeys = true }
 
     fun parseIpcResponse(resultJson: String, sourceUrl: String): ResolverResult {
+        if (resultJson.length > 512 * 1024) {
+            return ResolverResult.Failure(ResolverError.payloadTooLarge(sourceUrl))
+        }
+
         return try {
             val root = json.parseToJsonElement(resultJson).jsonObject
             val success = root["success"]?.jsonPrimitive?.booleanOrNull ?: false
@@ -51,7 +55,37 @@ object LrrIpcParser {
             if (success) {
                 val mediaObj = root["media"]?.jsonObject
                     ?: return ResolverResult.Failure(ResolverError.unknown(sourceUrl, details = "Missing media payload"))
-                ResolverResult.Success(parseMediaJson(mediaObj, sourceUrl))
+
+                val schemaVer = mediaObj["schemaVersion"]?.jsonPrimitive?.intOrNull ?: 1
+                if (schemaVer > 1) {
+                    return ResolverResult.Failure(ResolverError.incompatibleSchemaVersion(sourceUrl, schemaVer))
+                }
+
+                val leaseObj = root["lease"]?.jsonObject
+                val lease = leaseObj?.let { l ->
+                    val headersMap = mutableMapOf<String, String>()
+                    l["headers"]?.jsonObject?.forEach { (k, v) ->
+                        v.jsonPrimitive.contentOrNull?.let { headersMap[k] = it }
+                    }
+                    val modeStr = l["resolutionMode"]?.jsonPrimitive?.contentOrNull ?: "DIRECT_RESOURCE"
+                    val mode = try { dev.auralis.studio.resolver.api.ResolutionMode.valueOf(modeStr) } catch (_: Exception) { dev.auralis.studio.resolver.api.ResolutionMode.DIRECT_RESOURCE }
+                    val kindStr = l["mediaKind"]?.jsonPrimitive?.contentOrNull ?: "AUDIO_ONLY"
+                    val kind = try { dev.auralis.studio.resolver.api.MediaKind.valueOf(kindStr) } catch (_: Exception) { dev.auralis.studio.resolver.api.MediaKind.AUDIO_ONLY }
+
+                    dev.auralis.studio.resolver.api.EphemeralResourceLease(
+                        requestId = l["requestId"]?.jsonPrimitive?.contentOrNull ?: "",
+                        formatId = l["formatId"]?.jsonPrimitive?.contentOrNull ?: "",
+                        url = l["url"]?.jsonPrimitive?.contentOrNull ?: "",
+                        headers = headersMap,
+                        resolvedAtElapsedRealtimeMs = l["resolvedAtElapsedRealtimeMs"]?.jsonPrimitive?.longOrNull ?: System.currentTimeMillis(),
+                        knownExpiryEpochMs = l["knownExpiryEpochMs"]?.jsonPrimitive?.longOrNull,
+                        resolutionMode = mode,
+                        mediaKind = kind,
+                    )
+                }
+
+                val media = parseMediaJson(mediaObj, sourceUrl)
+                ResolverResult.Success(media = media, lease = lease)
             } else {
                 val errorObj = root["error"]?.jsonObject
                     ?: return ResolverResult.Failure(ResolverError.unknown(sourceUrl, details = "Missing error payload"))
@@ -69,22 +103,32 @@ object LrrIpcParser {
     }
 
     fun parseMediaJson(obj: kotlinx.serialization.json.JsonObject, sourceUrl: String): ResolvedMedia {
+        val schemaVer = obj["schemaVersion"]?.jsonPrimitive?.intOrNull ?: 1
         val source = obj["source"]?.jsonPrimitive?.contentOrNull ?: "Generic"
         val webpageUrl = obj["webpageUrl"]?.jsonPrimitive?.contentOrNull ?: sourceUrl
         val license = obj["license"]?.jsonPrimitive?.contentOrNull
 
         val formatsArray = obj["formats"]?.jsonArray ?: emptyList()
         val formats = formatsArray.mapNotNull { it as? kotlinx.serialization.json.JsonObject }.map { f ->
-            val headersMap = mutableMapOf<String, String>()
-            f["httpHeaders"]?.jsonObject?.forEach { (k, v) ->
-                v.jsonPrimitive.contentOrNull?.let { headersMap[k] = it }
-            }
-
             val modeStr = f["resolutionMode"]?.jsonPrimitive?.contentOrNull ?: "DIRECT_RESOURCE"
             val mode = try {
                 dev.auralis.studio.resolver.api.ResolutionMode.valueOf(modeStr)
             } catch (_: Exception) {
                 dev.auralis.studio.resolver.api.ResolutionMode.DIRECT_RESOURCE
+            }
+
+            val drmStr = f["drmState"]?.jsonPrimitive?.contentOrNull ?: "NONE"
+            val drm = try {
+                dev.auralis.studio.resolver.api.DrmState.valueOf(drmStr)
+            } catch (_: Exception) {
+                dev.auralis.studio.resolver.api.DrmState.NONE
+            }
+
+            val kindStr = f["mediaKind"]?.jsonPrimitive?.contentOrNull ?: "AUDIO_ONLY"
+            val kind = try {
+                dev.auralis.studio.resolver.api.MediaKind.valueOf(kindStr)
+            } catch (_: Exception) {
+                dev.auralis.studio.resolver.api.MediaKind.AUDIO_ONLY
             }
 
             val capStr = f["downloadCapability"]?.jsonPrimitive?.contentOrNull
@@ -110,6 +154,52 @@ object LrrIpcParser {
                 )
             }
 
+            val reqsObj = f["deliveryRequirements"]?.jsonObject
+            val reqs = dev.auralis.studio.resolver.api.DeliveryRequirements(
+                requiresCustomHeaders = reqsObj?.get("requiresCustomHeaders")?.jsonPrimitive?.booleanOrNull ?: false,
+                requiresBrowserImpersonation = reqsObj?.get("requiresBrowserImpersonation")?.jsonPrimitive?.booleanOrNull ?: false,
+                requiresPostRequestData = reqsObj?.get("requiresPostRequestData")?.jsonPrimitive?.booleanOrNull ?: false,
+                isSegmented = reqsObj?.get("isSegmented")?.jsonPrimitive?.booleanOrNull ?: false,
+                hasDrm = reqsObj?.get("hasDrm")?.jsonPrimitive?.booleanOrNull ?: false,
+            )
+
+            val bitrateVal = f["bitrateKbps"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+
+            dev.auralis.studio.resolver.api.ResolvedFormatDescriptor(
+                formatId = f["formatId"]?.jsonPrimitive?.contentOrNull ?: "unknown",
+                mediaKind = kind,
+                container = f["container"]?.jsonPrimitive?.contentOrNull,
+                extension = f["extension"]?.jsonPrimitive?.contentOrNull,
+                audioCodec = f["audioCodec"]?.jsonPrimitive?.contentOrNull,
+                videoCodec = f["videoCodec"]?.jsonPrimitive?.contentOrNull,
+                bitrateKbps = bitrateVal,
+                sampleRateHz = f["sampleRateHz"]?.jsonPrimitive?.intOrNull,
+                channels = f["channels"]?.jsonPrimitive?.intOrNull,
+                fileSizeBytes = f["fileSizeBytes"]?.jsonPrimitive?.longOrNull,
+                approximateFileSizeBytes = f["approximateFileSizeBytes"]?.jsonPrimitive?.longOrNull,
+                protocol = f["protocol"]?.jsonPrimitive?.contentOrNull,
+                resolutionMode = mode,
+                drmState = drm,
+                deliveryRequirements = reqs,
+                downloadCapability = eval.capability,
+                downloadCapabilityBasis = eval.basis,
+            )
+        }
+
+        val rawFormatsArray = obj["rawFormats"]?.jsonArray ?: emptyList()
+        val rawFormats = rawFormatsArray.mapNotNull { it as? kotlinx.serialization.json.JsonObject }.map { f ->
+            val headersMap = mutableMapOf<String, String>()
+            f["httpHeaders"]?.jsonObject?.forEach { (k, v) ->
+                v.jsonPrimitive.contentOrNull?.let { headersMap[k] = it }
+            }
+
+            val modeStr = f["resolutionMode"]?.jsonPrimitive?.contentOrNull ?: "DIRECT_RESOURCE"
+            val mode = try {
+                dev.auralis.studio.resolver.api.ResolutionMode.valueOf(modeStr)
+            } catch (_: Exception) {
+                dev.auralis.studio.resolver.api.ResolutionMode.DIRECT_RESOURCE
+            }
+
             ResolvedFormat(
                 formatId = f["formatId"]?.jsonPrimitive?.contentOrNull ?: "unknown",
                 url = f["url"]?.jsonPrimitive?.contentOrNull ?: "",
@@ -125,12 +215,18 @@ object LrrIpcParser {
                 expiresAtEpochMs = f["expiresAtEpochMs"]?.jsonPrimitive?.longOrNull,
                 resolutionMode = mode,
                 isAudioOnly = f["isAudioOnly"]?.jsonPrimitive?.booleanOrNull ?: false,
-                downloadCapability = eval.capability,
-                downloadCapabilityBasis = eval.basis,
             )
         }
 
+        val availStr = obj["availability"]?.jsonPrimitive?.contentOrNull ?: "AVAILABLE"
+        val avail = try {
+            dev.auralis.studio.resolver.api.AvailabilityState.valueOf(availStr)
+        } catch (_: Exception) {
+            dev.auralis.studio.resolver.api.AvailabilityState.AVAILABLE
+        }
+
         return ResolvedMedia(
+            schemaVersion = schemaVer,
             source = source,
             sourceId = obj["sourceId"]?.jsonPrimitive?.contentOrNull,
             webpageUrl = webpageUrl,
@@ -139,7 +235,9 @@ object LrrIpcParser {
             album = obj["album"]?.jsonPrimitive?.contentOrNull,
             durationMs = obj["durationMs"]?.jsonPrimitive?.longOrNull,
             artworkUrl = obj["artworkUrl"]?.jsonPrimitive?.contentOrNull,
+            availability = avail,
             formats = formats,
+            rawFormats = rawFormats,
         )
     }
 
@@ -491,12 +589,9 @@ class AndroidProcessMediaResolver(
 
         if (resultJson.length > MAX_PAYLOAD_SIZE_BYTES) {
             return ResolverResult.Failure(
-                ResolverError(
+                ResolverError.payloadTooLarge(
                     source = sourceUrl,
-                    technicalCode = ResolverErrorCode.Unknown,
-                    isRetryable = false,
-                    safeUserMessage = "Resolver returned an oversized payload.",
-                    debugDetails = "Payload size ${resultJson.length} exceeded limit $MAX_PAYLOAD_SIZE_BYTES",
+                    details = "Payload size ${resultJson.length} exceeded limit $MAX_PAYLOAD_SIZE_BYTES",
                 ),
             )
         }

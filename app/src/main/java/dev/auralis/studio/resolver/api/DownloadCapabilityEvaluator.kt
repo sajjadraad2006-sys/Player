@@ -150,6 +150,13 @@ object DownloadCapabilityEvaluator {
             )
         }
 
-        return media.copy(formats = annotatedFormats)
+        val annotatedRaw = media.rawFormats.map { fmt ->
+            fmt.copy(
+                downloadCapability = eval.capability,
+                downloadCapabilityBasis = eval.basis,
+            )
+        }
+
+        return media.copy(formats = annotatedFormats, rawFormats = annotatedRaw)
     }
 }

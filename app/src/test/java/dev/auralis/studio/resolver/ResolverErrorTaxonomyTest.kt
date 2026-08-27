@@ -81,6 +81,9 @@ class ResolverErrorTaxonomyTest {
         assertTrue(codes.contains("ProviderChanged"))
         assertTrue(codes.contains("RuntimeCrashed"))
         assertTrue(codes.contains("Cancelled"))
+        assertTrue(codes.contains("PayloadTooLarge"))
+        assertTrue(codes.contains("IncompatibleSchemaVersion"))
+        assertTrue(codes.contains("CollectionNotSupported"))
         assertTrue(codes.contains("Unknown"))
     }
 }
