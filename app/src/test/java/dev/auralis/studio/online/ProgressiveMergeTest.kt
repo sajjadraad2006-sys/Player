@@ -8,8 +8,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -111,5 +113,94 @@ class ProgressiveMergeTest {
         assertNotNull("Snapshot 3 now has a permitted download source", rec3.bestDownloadSource)
         assertEquals("jamendo", rec3.bestDownloadSource?.provider)
         assertEquals(DownloadCapability.PERMITTED, rec3.bestDownloadSource?.downloadCapability)
+    }
+
+    @Test
+    fun testRemoteThenLocalArrival_doesNotEraseRemoteResults() = runTest {
+        // Remote provider finishes fast at 10ms
+        val remoteTrack = OnlineTrack(
+            provider = "audius",
+            id = "au_remote_1",
+            title = "Remote Track",
+            artist = "Remote Artist",
+            durationMs = 200_000L,
+            streamUrl = "https://audius.co/stream",
+            streamAllowed = true,
+        )
+        val remoteProvider = TimedProvider("audius", 10L, remoteTrack)
+
+        // Mock LocalLibraryDiscovery that returns a local source
+        val mockLocalDiscovery = object : LocalLibraryDiscovery() {
+            override fun search(query: String): List<LocalRecordingSource> = listOf(
+                LocalRecordingSource(
+                    providerTrackId = "local_1",
+                    localDatabaseId = 1L,
+                    contentUri = "content://media/local_1",
+                    title = "Local Track",
+                    artist = "Local Artist",
+                    durationMs = 180_000L,
+                )
+            )
+        }
+
+        val aggregator = UnifiedSearchAggregator(
+            providers = listOf(remoteProvider),
+            localDiscovery = mockLocalDiscovery,
+            timeoutMs = 5_000L,
+        )
+
+        val snapshots = aggregator.search("track").toList()
+        val finalSnapshot = snapshots.last()
+
+        assertEquals("Final snapshot MUST contain both remote and local recordings without erasing either", 2, finalSnapshot.recordings.size)
+        val titles = finalSnapshot.recordings.map { it.title }.toSet()
+        assertTrue("Remote track must NOT be erased by local arrival", titles.contains("Remote Track"))
+        assertTrue("Local track must be present", titles.contains("Local Track"))
+    }
+
+    @Test
+    fun testNoProvidersAndEmptyLocal_emitsCompleteEmptySnapshot() = runTest {
+        val aggregator = UnifiedSearchAggregator(
+            providers = emptyList(),
+            localDiscovery = null,
+        )
+
+        val result = aggregator.searchOnce("anything")
+
+        assertTrue("Empty search must be complete", result.isComplete)
+        assertEquals(0, result.recordings.size)
+        assertEquals(0, result.providersPending)
+    }
+
+    @Test
+    fun testTemporaryUrlsNotCached() = runTest {
+        val trackWithTemporaryUrls = OnlineTrack(
+            provider = "audius",
+            id = "au_temp",
+            title = "Ephemeral Track",
+            artist = "Artist",
+            streamUrl = "https://cdn.signed.url/stream?token=temporary_signed_123",
+            downloadUrl = "https://cdn.signed.url/download?token=temporary_signed_123",
+            previewUrl = "https://cdn.signed.url/preview?token=temporary_signed_123",
+            streamAllowed = true,
+            downloadAllowed = true,
+        )
+        val provider = TimedProvider("audius", 10L, trackWithTemporaryUrls)
+        val aggregator = UnifiedSearchAggregator(listOf(provider))
+
+        // First search to populate cache
+        val snap1 = aggregator.searchOnce("ephemeral")
+        assertFalse(snap1.fromCache)
+
+        // Second search from cache
+        val snap2 = aggregator.searchOnce("ephemeral")
+        assertTrue("Second search must be from cache", snap2.fromCache)
+
+        // Verify that cached canonical source does NOT contain ephemeral signed URLs
+        val cachedRecording = snap2.recordings.first()
+        val onlineSource = cachedRecording.sources.first() as OnlineRecordingSource
+        assertNull("Cached originalTrack must not retain temporary stream URL", onlineSource.originalTrack?.streamUrl)
+        assertNull("Cached originalTrack must not retain temporary download URL", onlineSource.originalTrack?.downloadUrl)
+        assertNull("Cached originalTrack must not retain temporary preview URL", onlineSource.originalTrack?.previewUrl)
     }
 }

@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -95,6 +96,7 @@ fun SearchScreen(
     playlists: List<PlaylistEntity>,
     onlineResults: List<UnifiedTrack>,
     isSearchingOnline: Boolean,
+    providerFailures: Int = 0,
     recentSearches: List<String> = emptyList(),
     downloads: List<DownloadEntity> = emptyList(),
     onQueryChange: (String) -> Unit,
@@ -474,7 +476,7 @@ fun SearchScreen(
             }
         } else {
             // Online General Music Search & Download
-            if (isSearchingOnline) {
+            if (isSearchingOnline && onlineResults.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(color = colors.primary)
@@ -506,20 +508,32 @@ fun SearchScreen(
                     }
                 }
             } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 28.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    items(onlineResults, key = { "online:${it.uiKey}" }) { onlineTrack ->
-                        val downloadStatus = RecordingDownloadMatcher.status(onlineTrack, downloads)
-
-                        OnlineTrackCard(
-                            track = onlineTrack,
-                            downloadStatus = downloadStatus,
-                            onPlay = { onPlayOnline(onlineTrack) },
-                            onDownload = { onDownloadOnline(onlineTrack) },
-                            onSources = { sourceSheetTrack = onlineTrack },
+                Column(Modifier.fillMaxSize()) {
+                    if (isSearchingOnline) {
+                        LinearProgressIndicator(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 2.dp)
+                                .height(2.dp),
+                            color = colors.primary,
+                            trackColor = colors.surfaceVariant,
                         )
+                    }
+                    LazyColumn(
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 28.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        items(onlineResults, key = { "online:${it.uiKey}" }) { onlineTrack ->
+                            val downloadStatus = RecordingDownloadMatcher.status(onlineTrack, downloads)
+
+                            OnlineTrackCard(
+                                track = onlineTrack,
+                                downloadStatus = downloadStatus,
+                                onPlay = { onPlayOnline(onlineTrack) },
+                                onDownload = { onDownloadOnline(onlineTrack) },
+                                onSources = { sourceSheetTrack = onlineTrack },
+                            )
+                        }
                     }
                 }
             }

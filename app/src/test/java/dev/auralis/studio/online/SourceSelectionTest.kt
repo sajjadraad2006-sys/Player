@@ -91,6 +91,19 @@ class SourceSelectionTest {
     }
 
     @Test
+    fun testPlayback_localUnreadable_fallsBackToPreview() {
+        val local = createLocal("content://missing")
+        val itunes = createOnline("itunes", "i1", playback = PlaybackCapability.PREVIEW, download = DownloadCapability.NOT_PERMITTED)
+
+        val isReadable: (String) -> Boolean = { uri -> uri != "content://missing" }
+        val selected = PlaybackSourceSelector.select(listOf(local, itunes), isReadable)
+
+        assertNotNull(selected)
+        assertEquals("Unreadable local file must failover to preview when no full stream exists", "itunes", selected?.provider)
+        assertEquals(PlaybackCapability.PREVIEW, selected?.playbackCapability)
+    }
+
+    @Test
     fun testDownload_jamendoPermittedVsItunesNotPermitted_jamendoWins() {
         val itunes = createOnline("itunes", "i1", playback = PlaybackCapability.PREVIEW, download = DownloadCapability.NOT_PERMITTED)
         val jamendo = createOnline("jamendo", "j1", playback = PlaybackCapability.FULL_STREAM, download = DownloadCapability.PERMITTED)

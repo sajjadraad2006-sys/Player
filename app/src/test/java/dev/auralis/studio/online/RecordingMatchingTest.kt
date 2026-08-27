@@ -159,4 +159,62 @@ class RecordingMatchingTest {
         assertEquals("USUM71900764", updatedGroup.isrc)
         assertEquals(2, updatedGroup.sources.size)
     }
+
+    @Test
+    fun testK_sameIsrc_originalVsLive_blocksMerge() {
+        val original = createSource(provider = "audius", id = "a1", title = "Hotel California", artist = "Eagles", isrc = "USEE17600001")
+        val live = createSource(provider = "jamendo", id = "j1", title = "Hotel California (Live)", artist = "Eagles", isrc = "USEE17600001")
+
+        val merged = UnifiedTrackMerger.mergeSources(listOf(original, live))
+
+        assertEquals("Same ISRC with conflicting ORIGINAL vs LIVE MUST produce 2 distinct recordings", 2, merged.size)
+    }
+
+    @Test
+    fun testL_sameIsrc_originalVsRemix_blocksMerge() {
+        val original = createSource(provider = "audius", id = "a1", title = "Blinding Lights", artist = "The Weeknd", isrc = "USUM71900001")
+        val remix = createSource(provider = "jamendo", id = "j1", title = "Blinding Lights (Remix)", artist = "The Weeknd", isrc = "USUM71900001")
+
+        val merged = UnifiedTrackMerger.mergeSources(listOf(original, remix))
+
+        assertEquals("Same ISRC with conflicting ORIGINAL vs REMIX MUST produce 2 distinct recordings", 2, merged.size)
+    }
+
+    @Test
+    fun testM_sameIsrc_liveVsLive_merges() {
+        val live1 = createSource(provider = "audius", id = "a1", title = "Layla (Live)", artist = "Eric Clapton", isrc = "USPR19200001")
+        val live2 = createSource(provider = "itunes", id = "i1", title = "Layla (Live at Wembley)", artist = "Eric Clapton", isrc = "USPR19200001", playbackCapability = PlaybackCapability.PREVIEW)
+
+        val merged = UnifiedTrackMerger.mergeSources(listOf(live1, live2))
+
+        assertEquals("Same ISRC with compatible LIVE qualifiers MUST merge into 1 recording", 1, merged.size)
+        assertEquals(2, merged.first().sources.size)
+    }
+
+    @Test
+    fun testN_isrcValidation_strictIso3901() {
+        // Valid ISRCs
+        assertEquals("USUM71703861", RecordingIdentity.normalizedIsrc("US-UM7-17-03861"))
+        assertEquals("GBBKS1000300", RecordingIdentity.normalizedIsrc("GBBKS1000300"))
+        assertEquals("USEE17600001", RecordingIdentity.normalizedIsrc("USEE17600001"))
+
+        // Invalid ISRCs: must return null
+        org.junit.Assert.assertNull("All numeric without country code rejected", RecordingIdentity.normalizedIsrc("123456789012"))
+        org.junit.Assert.assertNull("Arbitrary text rejected", RecordingIdentity.normalizedIsrc("AUDIUS12345"))
+        org.junit.Assert.assertNull("Too short rejected", RecordingIdentity.normalizedIsrc("USUM717"))
+        org.junit.Assert.assertNull("Too long rejected", RecordingIdentity.normalizedIsrc("USUM717038619999"))
+        org.junit.Assert.assertNull("Empty rejected", RecordingIdentity.normalizedIsrc(""))
+        org.junit.Assert.assertNull("Null rejected", RecordingIdentity.normalizedIsrc(null))
+    }
+
+    @Test
+    fun testO_releaseDisplayNoise_mergesIntoSingleRecording() {
+        val s1 = createSource(provider = "audius", id = "a1", title = "Hello", artist = "Adele", isrc = null)
+        val s2 = createSource(provider = "jamendo", id = "j1", title = "Hello (Official Video)", artist = "Adele", isrc = null)
+
+        val merged = UnifiedTrackMerger.mergeSources(listOf(s1, s2))
+
+        assertEquals("Display noise '(Official Video)' should not prevent merging into 1 recording", 1, merged.size)
+        assertEquals(2, merged.first().sources.size)
+    }
 }

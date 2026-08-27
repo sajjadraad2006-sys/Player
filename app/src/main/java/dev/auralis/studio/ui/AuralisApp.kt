@@ -89,6 +89,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     val scanning by viewModel.isScanning.collectAsStateWithLifecycle()
     val onlineResults by viewModel.onlineResults.collectAsStateWithLifecycle()
     val isSearchingOnline by viewModel.isSearchingOnline.collectAsStateWithLifecycle()
+    val onlineProviderFailures by viewModel.onlineProviderFailures.collectAsStateWithLifecycle()
     val folders by viewModel.musicFolders.collectAsStateWithLifecycle()
     val minimumDuration by viewModel.minimumTrackDuration.collectAsStateWithLifecycle()
     val sleepRemaining by viewModel.sleepTimerRemainingMs.collectAsStateWithLifecycle()
@@ -300,6 +301,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                             playlists             = playlists,
                             onlineResults         = onlineResults,
                             isSearchingOnline     = isSearchingOnline,
+                            providerFailures      = onlineProviderFailures,
                             recentSearches        = recentSearches,
                             downloads             = downloads,
                             onQueryChange         = { viewModel.searchQuery.value = it },

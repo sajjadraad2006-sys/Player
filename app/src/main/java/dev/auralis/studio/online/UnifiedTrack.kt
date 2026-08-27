@@ -102,15 +102,22 @@ private fun String.isTrustedValue(): Boolean = isNotBlank() &&
 
 object RecordingIdentity {
 
-    fun normalizedIsrc(value: String?): String? = value?.uppercase()?.filter(Char::isLetterOrDigit)
-        ?.takeIf { it.length in 10..15 }
+    private val ISRC_REGEX = Regex("^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$")
 
-    fun forTrack(track: OnlineTrack): String = structuredIdentity(
+    fun normalizedIsrc(value: String?): String? {
+        if (value.isNullOrBlank()) return null
+        val cleaned = value.uppercase().filter(Char::isLetterOrDigit)
+        return cleaned.takeIf { ISRC_REGEX.matches(it) }
+    }
+
+    fun forTrack(track: OnlineTrack): StructuredIdentity = structuredIdentity(
         title = track.title,
         artist = track.artist,
         durationMs = track.durationMs,
         isrc = track.isrc,
-    ).stableKey
+    )
+
+    fun forTrackKey(track: OnlineTrack): String = forTrack(track).stableKey
 
     fun structuredIdentity(
         title: String,
@@ -119,7 +126,7 @@ object RecordingIdentity {
         isrc: String?,
     ): StructuredIdentity {
         val normIsrc = normalizedIsrc(isrc)
-        val normTitle = IdentityNormalization.normalize(title)
+        val normTitle = IdentityNormalization.cleanTitleForIdentity(title)
         val normArtist = IdentityNormalization.normalizeArtist(artist)
         val qualifier = VersionQualifier.parse(title)
         val durationBucket = if (durationMs > 0) durationMs / 2_000L else -1L
@@ -182,24 +189,23 @@ object UnifiedTrackMerger {
     }
 
     fun canMergeSources(left: RecordingSource, right: RecordingSource): Boolean {
-        // 1. ISRC is authoritative recording identity — check first
-        val leftIsrc = RecordingIdentity.normalizedIsrc(left.isrc)
-        val rightIsrc = RecordingIdentity.normalizedIsrc(right.isrc)
-        if (leftIsrc != null && rightIsrc != null) {
-            // Same trusted ISRC = same recording (overrides version qualifier differences
-            // since Radio Edit / Original commonly share ISRC)
-            // Different trusted ISRCs = strong blocker
-            return leftIsrc == rightIsrc
-        }
-
-        // 2. Without ISRC, version qualifier conflict is a strong blocker
+        // 1. Version qualifier conflict is a hard merge blocker (ORIGINAL != LIVE != REMIX != COVER etc.)
         val leftQualifier = VersionQualifier.parse(left.title)
         val rightQualifier = VersionQualifier.parse(right.title)
         if (leftQualifier != rightQualifier) return false
 
-        // 3. Normalized title & artist check
-        val leftTitle = IdentityNormalization.normalize(left.title)
-        val rightTitle = IdentityNormalization.normalize(right.title)
+        // 2. ISRC is authoritative recording identity when present
+        val leftIsrc = RecordingIdentity.normalizedIsrc(left.isrc)
+        val rightIsrc = RecordingIdentity.normalizedIsrc(right.isrc)
+        if (leftIsrc != null && rightIsrc != null) {
+            // Same valid ISRC + compatible qualifiers = same recording
+            // Conflicting valid ISRCs = strong blocker
+            return leftIsrc == rightIsrc
+        }
+
+        // 3. Preprocessed normalized title & artist check (stripping display noise like '(Official Video)')
+        val leftTitle = IdentityNormalization.cleanTitleForIdentity(left.title)
+        val rightTitle = IdentityNormalization.cleanTitleForIdentity(right.title)
         if (leftTitle != rightTitle) return false
 
         val leftArtist = IdentityNormalization.normalizeArtist(left.artist)

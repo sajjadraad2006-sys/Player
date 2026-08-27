@@ -1,10 +1,18 @@
 package dev.auralis.studio.online
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -55,6 +63,56 @@ class UnifiedSearchAggregatorTest {
         val result = UnifiedSearchAggregator(listOf(slow), timeoutMs = 100).searchOnce("song")
         assertEquals(FailureReason.TIMEOUT, result.failures.single().reason)
         assertTrue(result.tracks.isEmpty())
+    }
+
+    @OptIn(kotlinx.coroutines.FlowPreview::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
+    fun `query A cancellation prevents stale updates after query B becomes active`() = runTest {
+        val queryAStarted = CompletableDeferred<Unit>()
+        val slowProvider = object : MusicCatalogProvider {
+            override val id = "slow"
+            override val displayName = "slow"
+            override val isConfigured = true
+            override suspend fun search(query: String, page: Int): ProviderResult<List<OnlineTrack>> {
+                return if (query == "queryA") {
+                    queryAStarted.complete(Unit)
+                    delay(5_000L)
+                    ProviderResult.Success(listOf(OnlineTrack(id, "1", "Result A", "Artist")))
+                } else {
+                    ProviderResult.Success(listOf(OnlineTrack(id, "2", "Result B", "Artist")))
+                }
+            }
+        }
+        val aggregator = UnifiedSearchAggregator(listOf(slowProvider))
+
+        val searchQuery = kotlinx.coroutines.flow.MutableStateFlow("")
+        val emittedTitles = mutableListOf<String>()
+
+        val searchJob = launch {
+            searchQuery
+                .debounce(50)
+                .map { it.trim() }
+                .distinctUntilChanged()
+                .flatMapLatest { query ->
+                    if (query.isBlank()) flowOf(SearchSnapshot.EMPTY)
+                    else aggregator.search(query)
+                }
+                .collect { snapshot ->
+                    snapshot.recordings.firstOrNull()?.let { emittedTitles.add(it.title) }
+                }
+        }
+
+        searchQuery.value = "queryA"
+        queryAStarted.await()
+
+        // Query B supersedes Query A
+        searchQuery.value = "queryB"
+        delay(300)
+
+        searchJob.cancelAndJoin()
+
+        assertTrue("Result B should be emitted", emittedTitles.contains("Result B"))
+        assertFalse("Result A must NEVER be emitted after being cancelled by Query B", emittedTitles.contains("Result A"))
     }
 
     private fun provider(providerId: String, block: suspend () -> ProviderResult<List<OnlineTrack>>) =

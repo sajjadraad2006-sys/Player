@@ -42,6 +42,7 @@ import dev.auralis.studio.audio.stems.StemUiState
 import dev.auralis.studio.audio.stems.VocFtLiteRtEngine
 import dev.auralis.studio.audio.stems.VocFtModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -54,6 +55,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -66,7 +69,7 @@ import java.net.URL
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 
-@OptIn(FlowPreview::class)
+@OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val appContext = application
     private val container = (application as AuralisApplication).container
@@ -140,16 +143,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         downloadFolderLocation.value = "Music/Lyrune/"
     }
 
+    private val _onlineSearchQuery = MutableStateFlow("")
+    val onlineSearchQuery: StateFlow<String> = _onlineSearchQuery.asStateFlow()
     private val _onlineResults = MutableStateFlow<List<UnifiedTrack>>(emptyList())
     val onlineResults: StateFlow<List<UnifiedTrack>> = _onlineResults.asStateFlow()
     private val _isSearchingOnline = MutableStateFlow(false)
     val isSearchingOnline: StateFlow<Boolean> = _isSearchingOnline.asStateFlow()
     private val _onlineProviderFailures = MutableStateFlow(0)
     val onlineProviderFailures: StateFlow<Int> = _onlineProviderFailures.asStateFlow()
+    private val _providersPending = MutableStateFlow(0)
+    val providersPending: StateFlow<Int> = _providersPending.asStateFlow()
     val downloadQuality: StateFlow<DownloadQuality> = container.settings.downloadQuality
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DownloadQuality.BEST_AVAILABLE)
-    private var onlineSearchJob: Job? = null
-    private var onlineSearchGeneration: Long = 0
     val downloads: StateFlow<List<DownloadEntity>> = downloadsDao.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val recentDownloads: StateFlow<List<DownloadEntity>> = downloadsDao.observeByStatus(DownloadStatus.COMPLETED.name)
@@ -198,6 +203,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 lyricsClock.update(state.positionMs, state.isPlaying, audioConfig.value.speed)
             }
         }
+        viewModelScope.launch {
+            _onlineSearchQuery
+                .debounce(200)
+                .map { it.trim() }
+                .distinctUntilChanged()
+                .flatMapLatest { query ->
+                    if (query.isBlank()) {
+                        _isSearchingOnline.value = false
+                        _onlineProviderFailures.value = 0
+                        _providersPending.value = 0
+                        flowOf(dev.auralis.studio.online.SearchSnapshot.EMPTY)
+                    } else {
+                        addRecentSearch(query)
+                        _isSearchingOnline.value = true
+                        container.unifiedSearch.search(query)
+                    }
+                }
+                .collectLatest { snapshot ->
+                    _onlineResults.value = snapshot.recordings
+                    _onlineProviderFailures.value = snapshot.failures.size
+                    _providersPending.value = snapshot.providersPending
+                    _isSearchingOnline.value = !snapshot.isComplete
+                }
+        }
         refreshLibrary()
         viewModelScope.launch { refreshStemModelState() }
     }
@@ -221,30 +250,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun searchOnline(query: String) {
-        val trimmed = query.trim()
-        val generation = ++onlineSearchGeneration
-        onlineSearchJob?.cancel()
-        if (trimmed.isBlank()) {
-            _onlineResults.value = emptyList()
-            _isSearchingOnline.value = false
-            _onlineProviderFailures.value = 0
-            return
-        }
-        onlineSearchJob = viewModelScope.launch {
-            addRecentSearch(trimmed)
-            _isSearchingOnline.value = true
-            try {
-                container.unifiedSearch.search(trimmed).collect { snapshot ->
-                    if (generation == onlineSearchGeneration) {
-                        _onlineResults.value = snapshot.recordings
-                        _onlineProviderFailures.value = snapshot.failures.size
-                        _isSearchingOnline.value = !snapshot.isComplete
-                    }
-                }
-            } finally {
-                if (generation == onlineSearchGeneration) _isSearchingOnline.value = false
-            }
-        }
+        _onlineSearchQuery.value = query
     }
 
     fun addRecentSearch(query: String) {
@@ -265,6 +271,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun isUriReadable(uriString: String): Boolean {
+        if (uriString.isBlank()) return false
+        val uri = Uri.parse(uriString)
+        return try {
+            when (uri.scheme?.lowercase()) {
+                "file" -> uri.path?.let { File(it).canRead() } ?: false
+                "content" -> appContext.contentResolver.openInputStream(uri)?.use { true } ?: false
+                else -> File(uriString).canRead()
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun playOnlineTrack(unifiedTrack: CanonicalRecording) {
         viewModelScope.launch {
             // Check completed download in local database first
@@ -275,20 +295,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             if (downloadedUri != null) {
-                val localTrack = container.library.track(downloadedUri) ?: Track(
-                    id = -1L,
-                    uri = downloadedUri,
-                    title = unifiedTrack.title,
-                    artist = unifiedTrack.artist,
-                    album = unifiedTrack.album,
-                    durationMs = unifiedTrack.durationMs,
-                )
-                playback.play(localTrack, listOf(localTrack))
-                return@launch
+                val isReadable = withContext(Dispatchers.IO) { isUriReadable(downloadedUri) }
+                if (isReadable) {
+                    val localTrack = container.library.track(downloadedUri) ?: Track(
+                        id = -1L,
+                        uri = downloadedUri,
+                        title = unifiedTrack.title,
+                        artist = unifiedTrack.artist,
+                        album = unifiedTrack.album,
+                        durationMs = unifiedTrack.durationMs,
+                    )
+                    playback.play(localTrack, listOf(localTrack))
+                    return@launch
+                }
             }
 
             // Deterministic playback candidate failover
-            val candidates = PlaybackSourceSelector.rank(unifiedTrack.sources)
+            val isLocalReadable: (String) -> Boolean = { uri -> isUriReadable(uri) }
+            val candidates = PlaybackSourceSelector.rank(unifiedTrack.sources, isLocalReadable)
             for (candidate in candidates) {
                 when (candidate) {
                     is LocalRecordingSource -> {

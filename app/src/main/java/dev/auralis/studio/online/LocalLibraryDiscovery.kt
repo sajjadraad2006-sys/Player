@@ -8,15 +8,15 @@ import dev.auralis.studio.library.SearchEngine
  *
  * Integrates on-device tracks into canonical search without creating fake network/OnlineTrack objects.
  */
-class LocalLibraryDiscovery(
-    private val repository: MediaStoreMusicRepository,
+open class LocalLibraryDiscovery(
+    private val repository: MediaStoreMusicRepository? = null,
 ) {
     /**
      * Searches local library tracks against [query] and returns normalized [LocalRecordingSource] instances.
      */
-    fun search(query: String): List<LocalRecordingSource> {
+    open fun search(query: String): List<LocalRecordingSource> {
         val trimmed = query.trim()
-        if (trimmed.isBlank()) return emptyList()
+        if (trimmed.isBlank() || repository == null) return emptyList()
         val allTracks = repository.tracks.value
         val matched = SearchEngine.search(allTracks, trimmed)
         return matched.map { it.toLocalRecordingSource() }

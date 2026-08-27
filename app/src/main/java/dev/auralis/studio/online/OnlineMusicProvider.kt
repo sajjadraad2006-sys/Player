@@ -95,7 +95,8 @@ data class OnlineTrack(
     val isDownloadableFullTrack: Boolean
         get() = downloadAllowed && !downloadUrl.isNullOrBlank()
 
-    val recordingIdentity: String get() = RecordingIdentity.forTrack(this)
+    val structuredIdentity: StructuredIdentity get() = RecordingIdentity.forTrack(this)
+    val recordingIdentity: String get() = structuredIdentity.stableKey
 }
 
 typealias ProviderTrack = OnlineTrack

@@ -82,13 +82,18 @@ class UnifiedTrackMergerTest {
     }
 
     @Test
-    fun `identical ISRC forces merge even when titles differ slightly`() {
-        // ISRC is the authoritative identity. Metadata transcription noise must not split.
-        val a = track("audius", title = "Song (Radio Edit)", isrc = "USABC2612345")
+    fun `identical ISRC merges when titles differ by display noise but keeps version qualifiers separate`() {
+        // Same ISRC + display noise merges
+        val a = track("audius", title = "Song (Official Video)", isrc = "USABC2612345")
         val b = track("itunes", title = "Song", isrc = "US-ABC-26-12345")
         val merged = UnifiedTrackMerger.merge(listOf(a, b))
         assertEquals(1, merged.size)
         assertEquals(2, merged.single().sources.size)
+
+        // Same ISRC + conflicting qualifier (ORIGINAL vs RADIO_EDIT) stays separate
+        val c = track("deezer", title = "Song (Radio Edit)", isrc = "USABC2612345")
+        val mergedWithQualifierConflict = UnifiedTrackMerger.merge(listOf(b, c))
+        assertEquals(2, mergedWithQualifierConflict.size)
     }
 
     @Test

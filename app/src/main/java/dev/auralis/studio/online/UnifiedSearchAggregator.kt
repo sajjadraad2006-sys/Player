@@ -40,6 +40,7 @@ class UnifiedSearchAggregator(
      * 1. Cancellation propagates immediately (CancellationException is NEVER swallowed).
      * 2. Provider failure or timeout in one provider does not cancel or corrupt sibling providers.
      * 3. Old queries are structurally cancelled at ViewModel collection level.
+     * 4. Empty or zero-provider searches always emit a valid complete snapshot.
      */
     fun search(query: String, page: Int = 0): Flow<SearchSnapshot> = channelFlow {
         val trimmed = query.trim()
@@ -48,7 +49,14 @@ class UnifiedSearchAggregator(
             return@channelFlow
         }
 
-        val cacheKey = "${trimmed.lowercase()}#$page"
+        val configuredProviders = providers.filter(MusicCatalogProvider::isConfigured)
+        val initialFailures = providers.filterNot(MusicCatalogProvider::isConfigured)
+            .map { ProviderFailure(it.id, FailureReason.NOT_CONFIGURED) }
+
+        val configHash = configuredProviders.map { it.id }.sorted().joinToString(",")
+        val normalizedQuery = SearchNormalization.normalize(trimmed)
+        val cacheKey = "$normalizedQuery#$page#$configHash"
+
         val cachedHit = synchronized(cache) {
             cache[cacheKey]?.takeIf { clockMs() - it.createdAt <= cacheTtlMs }?.result
         }
@@ -57,45 +65,70 @@ class UnifiedSearchAggregator(
             return@channelFlow
         }
 
-        val configuredProviders = providers.filter(MusicCatalogProvider::isConfigured)
-        val initialFailures = providers.filterNot(MusicCatalogProvider::isConfigured)
-            .map { ProviderFailure(it.id, FailureReason.NOT_CONFIGURED) }
+        val hasLocal = localDiscovery != null && page == 0
+        val totalWorkers = configuredProviders.size + (if (hasLocal) 1 else 0)
+
+        if (totalWorkers == 0) {
+            send(
+                SearchSnapshot(
+                    recordings = emptyList(),
+                    failures = initialFailures,
+                    isComplete = true,
+                    providersPending = 0,
+                )
+            )
+            return@channelFlow
+        }
 
         val activeGroupList = mutableListOf<CanonicalRecording>()
         val failureMap = ConcurrentHashMap<String, ProviderFailure>()
         initialFailures.forEach { failureMap[it.providerId] = it }
 
-        val pendingProviders = AtomicInteger(configuredProviders.size + (if (localDiscovery != null && page == 0) 1 else 0))
+        val pendingProviders = AtomicInteger(totalWorkers)
         val mergeMutex = Mutex()
 
         // 1. Instant local library discovery (on-device, zero-latency)
-        if (localDiscovery != null && page == 0) {
+        if (hasLocal) {
             launch {
                 try {
-                    val localSources = localDiscovery.search(trimmed)
-                    if (localSources.isNotEmpty()) {
-                        val currentList = mergeMutex.withLock {
+                    val localSources = localDiscovery!!.search(trimmed)
+                    val currentList = mergeMutex.withLock {
+                        if (localSources.isNotEmpty()) {
+                            val merged = UnifiedTrackMerger.mergeSources(localSources, activeGroupList)
                             activeGroupList.clear()
-                            activeGroupList.addAll(UnifiedTrackMerger.mergeSources(localSources, activeGroupList))
-                            activeGroupList.toList()
+                            activeGroupList.addAll(merged)
                         }
-                        val remaining = pendingProviders.decrementAndGet()
-                        send(
-                            SearchSnapshot(
-                                recordings = currentList,
-                                failures = failureMap.values.toList(),
-                                isComplete = remaining <= 0,
-                                providersPending = remaining,
-                            )
-                        )
-                    } else {
-                        pendingProviders.decrementAndGet()
+                        activeGroupList.toList()
+                    }
+                    val remaining = pendingProviders.decrementAndGet()
+                    val snapshot = SearchSnapshot(
+                        recordings = currentList,
+                        failures = failureMap.values.toList(),
+                        isComplete = remaining <= 0,
+                        providersPending = remaining,
+                    )
+                    send(snapshot)
+                    if (remaining <= 0) {
+                        val sanitized = snapshot.sanitizeForCache()
+                        synchronized(cache) { cache[cacheKey] = Cached(clockMs(), sanitized) }
                     }
                 } catch (c: CancellationException) {
                     throw c
                 } catch (e: Exception) {
                     if (debugLogging) Log.w("UnifiedSearch", "Local discovery failed: ${e.message}")
-                    pendingProviders.decrementAndGet()
+                    val remaining = pendingProviders.decrementAndGet()
+                    val currentList = mergeMutex.withLock { activeGroupList.toList() }
+                    val snapshot = SearchSnapshot(
+                        recordings = currentList,
+                        failures = failureMap.values.toList(),
+                        isComplete = remaining <= 0,
+                        providersPending = remaining,
+                    )
+                    send(snapshot)
+                    if (remaining <= 0) {
+                        val sanitized = snapshot.sanitizeForCache()
+                        synchronized(cache) { cache[cacheKey] = Cached(clockMs(), sanitized) }
+                    }
                 }
             }
         }
@@ -103,6 +136,7 @@ class UnifiedSearchAggregator(
         // 2. Parallel remote catalog discovery
         for (provider in configuredProviders) {
             launch {
+                var wasCancelled = false
                 try {
                     val outcome = withTimeout(timeoutMs) {
                         provider.search(trimmed, page)
@@ -131,6 +165,7 @@ class UnifiedSearchAggregator(
                 } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
                     failureMap[provider.id] = ProviderFailure(provider.id, FailureReason.TIMEOUT)
                 } catch (cancelled: CancellationException) {
+                    wasCancelled = true
                     throw cancelled
                 } catch (_: Exception) {
                     failureMap[provider.id] = ProviderFailure(provider.id, FailureReason.PROVIDER_ERROR)
@@ -143,14 +178,36 @@ class UnifiedSearchAggregator(
                         isComplete = remaining <= 0,
                         providersPending = remaining,
                     )
-                    send(snapshot)
-
-                    if (remaining <= 0) {
-                        synchronized(cache) { cache[cacheKey] = Cached(clockMs(), snapshot) }
+                    if (!wasCancelled) {
+                        send(snapshot)
+                        if (remaining <= 0) {
+                            val sanitized = snapshot.sanitizeForCache()
+                            synchronized(cache) { cache[cacheKey] = Cached(clockMs(), sanitized) }
+                        }
                     }
                 }
             }
         }
+    }
+
+    private fun SearchSnapshot.sanitizeForCache(): SearchSnapshot {
+        val sanitizedRecordings = recordings.map { rec ->
+            rec.copy(
+                sources = rec.sources.map { source ->
+                    if (source is OnlineRecordingSource && source.originalTrack != null) {
+                        val sanitizedTrack = source.originalTrack.copy(
+                            previewUrl = null,
+                            streamUrl = null,
+                            downloadUrl = null,
+                        )
+                        source.copy(originalTrack = sanitizedTrack)
+                    } else {
+                        source
+                    }
+                }
+            )
+        }
+        return copy(recordings = sanitizedRecordings)
     }
 
     /**

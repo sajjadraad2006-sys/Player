@@ -113,43 +113,68 @@ object SearchNormalization {
                 res = res.replace(" $noise ", " ").trim()
             }
         }
-
         return res
     }
 }
 
 object IdentityNormalization {
 
+    private val NOISE_PATTERNS = listOf(
+        Regex("""(?i)\s*[\(\[\{]\s*(?:official\s+)?(?:music\s+)?(?:video|audio|visualizer|lyric\s+video|lyrics|hd|4k|remastered|remaster|full\s+audio)\s*[\)\]\}]"""),
+        Regex("""(?i)\s*\b(?:official\s+music\s+video|official\s+lyric\s+video|official\s+visualizer|official\s+video|official\s+audio|music\s+video|lyric\s+video|full\s+audio|vevo|remastered|remaster)\b"""),
+    )
+
+    /**
+     * Preprocesses a raw display title for identity canonicalization.
+     * Strips non-semantic display noise (e.g. '(Official Video)', '[HD]', 'VEVO')
+     * while strictly preserving semantic version qualifiers (e.g. '(Live)', '(Remix)', '(Acoustic)').
+     */
+    fun cleanTitleForIdentity(rawTitle: String): String {
+        if (rawTitle.isBlank()) return ""
+        var cleaned = rawTitle
+        for (pattern in NOISE_PATTERNS) {
+            cleaned = cleaned.replace(pattern, " ")
+        }
+        return normalize(cleaned)
+    }
+
     /**
      * Conservative normalizer for canonical recording identification and merger comparison.
-     * - Unicode NFKD decomposition to strip accents (é -> e, à -> a)
-     * - Case folding
-     * - Punctuation and whitespace collapse
-     * - Arabic Alef variants -> bare Alif (ا)
+     * - Preserves distinct Arabic letters: ة, ؤ, ئ
+     * - Normalizes Arabic Alef variants (أ, إ, آ, ٱ -> ا)
      * - Strips Arabic Tashkeel / Harakat and Tatweel (ـ)
-     * - DOES NOT convert ة -> ه (Taa Marbuta is retained as distinct for canonical identity)
-     * - DOES NOT convert ؤ or ئ to generic vowels
-     * - DOES NOT strip noise blindly
+     * - Strips combining diacritical marks from Latin/accented letters (é -> e, ñ -> n)
+     * - Punctuation and whitespace collapse
+     * - Case folding
      */
     fun normalize(text: String): String {
         if (text.isEmpty()) return ""
-        // Apply NFKD decomposition to separate base chars from combining diacritical marks
-        val decomposed = Normalizer.normalize(text, Normalizer.Form.NFKD)
-        val len = decomposed.length
+        val len = text.length
         val sb = StringBuilder(len)
 
         var lastWasSpace = true
         var i = 0
         while (i < len) {
-            val ch = decomposed[i]
+            val ch = text[i]
             when {
-                // Skip combining diacritical marks (Unicode category Mn)
-                Character.getType(ch) == Character.NON_SPACING_MARK.toInt() -> {
-                    // Stripped — this handles accents like é -> e, ñ -> n, etc.
-                }
                 // Arabic Alif variants -> standard bare Alif
                 ch == 'أ' || ch == 'إ' || ch == 'آ' || ch == 'ٱ' -> {
                     sb.append('ا')
+                    lastWasSpace = false
+                }
+                // Taa Marbuta is RETAINED as distinct for canonical identity (ة != ه)
+                ch == 'ة' -> {
+                    sb.append('ة')
+                    lastWasSpace = false
+                }
+                // Waw with Hamza is RETAINED as distinct for canonical identity (ؤ != و)
+                ch == 'ؤ' -> {
+                    sb.append('ؤ')
+                    lastWasSpace = false
+                }
+                // Yeh with Hamza is RETAINED as distinct for canonical identity (ئ != ي)
+                ch == 'ئ' -> {
+                    sb.append('ئ')
                     lastWasSpace = false
                 }
                 // Skip Arabic Tashkeel / Harakat and Tatweel only
@@ -168,9 +193,20 @@ object IdentityNormalization {
                         lastWasSpace = true
                     }
                 }
-                else -> {
-                    sb.append(ch.lowercaseChar())
+                // Arabic characters in Unicode Arabic block -> append as is (preserving distinct letters)
+                ch in '\u0600'..'\u06FF' -> {
+                    sb.append(ch)
                     lastWasSpace = false
+                }
+                // Latin / Other accented characters -> decompose and strip combining marks
+                else -> {
+                    val decomposed = Normalizer.normalize(ch.toString(), Normalizer.Form.NFKD)
+                    for (d in decomposed) {
+                        if (Character.getType(d) != Character.NON_SPACING_MARK.toInt()) {
+                            sb.append(d.lowercaseChar())
+                            lastWasSpace = false
+                        }
+                    }
                 }
             }
             i++
