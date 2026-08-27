@@ -366,7 +366,7 @@ data class ResolverDownloadDescriptor(
     val qualityPreference: AudioQualityPreference = AudioQualityPreference.BEST,
     val formatHint: String? = null,
     val recordingIdentity: String = deriveRecordingIdentity(artist, title),
-    val downloadCapability: DownloadCapability = DownloadCapability.PERMITTED,
+    val downloadCapability: DownloadCapability = DownloadCapability.UNKNOWN,
     val downloadCapabilityBasis: DownloadCapabilityBasis = DownloadCapabilityBasis.NONE,
 ) {
     val downloadKey: String

@@ -33,7 +33,7 @@ data class ResolverDownloadDescriptor(
     val qualityPreference: AudioQualityPreference = AudioQualityPreference.BEST,
     val formatHint: String? = null,
     val recordingIdentity: String = deriveRecordingIdentity(artist, title),
-    val downloadCapability: DownloadCapability = DownloadCapability.PERMITTED,
+    val downloadCapability: DownloadCapability = DownloadCapability.UNKNOWN,
     val downloadCapabilityBasis: DownloadCapabilityBasis = DownloadCapabilityBasis.NONE,
 )
 ```
@@ -46,6 +46,9 @@ The persistent descriptor MUST NOT contain:
 * `Cookie`, `Authorization`, or sensitive headers
 * EJS solver tokens or solver state
 * Manifest content or fragment lists
+
+### Authorization Invariant
+The persisted descriptor defaults to `DownloadCapability.UNKNOWN` and NEVER manufactures download permission. Authorization is determined strictly at worker execution time via fresh resolution and `DownloadCapabilityEvaluator.annotateMedia(media)`.
 
 ---
 
@@ -104,26 +107,31 @@ When `DownloadWorker.doWork()` starts:
 ```
 
 1. **Re-resolution Mandatory**: A fresh delivery URL is resolved at execution time. No historical URLs from search or previous sessions are reused.
-2. **Identity Verification**: If `descriptor.sourceId != freshMedia.sourceId`, execution halts immediately with `ResolverErrorCode.ProviderChanged`.
+2. **Conservative Identity Verification**:
+   - Matching `sourceId` $\rightarrow$ pass.
+   - Differing `sourceId` $\rightarrow$ fail with `ProviderChanged`.
+   - Missing / null `sourceId` on either or both $\rightarrow$ compares normalized `artist`, core `title`, and `VersionQualifier` extracted profiles via `IdentityNormalization`. Insufficient or mismatched evidence halts with `ProviderChanged`.
 3. **Capability & Permission Gate**: `DownloadCapabilityEvaluator.annotateMedia` validates current legal permission (`DownloadCapability.PERMITTED`). Technical resolution never bypasses permission checks.
 4. **Format Invariant**: Requires `ResolutionMode.DIRECT_RESOURCE`, `DrmState.NONE`, `DeliveryBlockReason.NONE`, and `!hasDrm`. Formats requiring segmented streaming or engine handling are rejected with typed errors.
 
 ---
 
-## 5. Ephemeral Headers & Range Ownership
+## 5. Ephemeral Headers, Range Ownership & Redirect SSRF Safety
 
 1. **Whitelisted Safe Headers Only**: The direct downloader receives only non-sensitive routing headers (`User-Agent`, `Referer`, `Origin`, `Accept`, `Accept-Language`).
 2. **Sensitive Headers Excluded**: `Cookie`, `Authorization`, and tokens are never forwarded to the downloader.
 3. **Range Header Ownership**: The `Range` header is controlled entirely by OkHttp / download engine. Extractor-supplied Range headers are discarded.
+4. **Redirect SSRF Validation**: `SafeRedirectInterceptor` and `SafeDownloadUrlValidator` inspect all HTTP redirect destinations up to max 5 hops, strictly rejecting private IPv4 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, `169.254.0.0/16`), IPv6 loopback (`::1`), link-local (`fe80::/10`), ULA (`fc00::/7`), and non-HTTP schemes (`file://`, `content://`, etc.).
 
 ---
 
-## 6. One-Shot Expired Resource Recovery
+## 6. Conservative Expired Resource Recovery
 
-If a direct HTTP transfer fails due to an expired CDN token (`HTTP 403`, `HTTP 401`, or `isExpired`):
-1. The incomplete partial file is deleted immediately.
-2. `DownloadWorker` calls `resolver.resolve(intent = DOWNLOAD)` for **exactly one** fresh re-resolution retry.
-3. If the second attempt fails, the worker terminates with typed failure. No infinite re-resolution loops are permitted.
+1. **No Generic 401/403 Loop**: Generic HTTP 401/403 responses are NOT classified as expired leases. Generic 401 halts with `AuthenticationRequired`, and generic 403 halts with standard download error.
+2. **Structured Evidence Required**: `ExpiredResourceClassifier.shouldRefreshExpiredLease` permits a single fresh re-resolution retry ONLY when:
+   - `lease.isExpired` is true or `knownExpiryEpochMs` has elapsed, or
+   - Explicit CDN expiration text is returned (e.g. `request has expired`, `url expired`, `token expired`).
+3. **Loop Prevention**: Bounded at max **1** automatic re-resolution retry per Worker execution.
 
 ---
 
@@ -148,6 +156,8 @@ Official providers (`Audius`, `Jamendo`) continue to route directly through thei
 
 ---
 
-## 10. Android 16 WorkManager Platform Note
+## 10. Platform & Android 16 Review
 
-On modern Android platforms (including API 35/36 and upcoming Android 16), standard WorkManager background workers operate within bounded execution windows. Long-running transfers remain compatible with standard `OneTimeWorkRequestBuilder` execution, with future platform-hardening pathways available for user-initiated data transfer jobs if execution quota limits require dedicated foreground service elevation.
+* **Android 15 Runtime (API 35)**: VERIFIED on real emulator (`auralis_api35`, x86_64, PAGESIZE=4096).
+* **Android 16 WorkManager / JobScheduler Implications**: ARCHITECTURALLY REVIEWED. Standard WorkManager background workers operate within bounded execution windows; future user-initiated data transfer jobs may be leveraged if foreground transfer quota is needed on API 36+.
+* **Android 16 Runtime Behavior**: NOT VERIFIED (API 36 execution environment not configured).

@@ -8,7 +8,9 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import dev.auralis.studio.AuralisApplication
+import dev.auralis.studio.online.IdentityNormalization
 import dev.auralis.studio.online.OnlineTrack
+import dev.auralis.studio.online.VersionQualifier
 import dev.auralis.studio.resolver.android.AndroidProcessMediaResolver
 import dev.auralis.studio.resolver.api.DeliveryBlockReason
 import dev.auralis.studio.resolver.api.DownloadCapability
@@ -51,16 +53,13 @@ fun enqueueDownload(context: Context, track: OnlineTrack) {
 }
 
 /**
- * Enqueues a unique download for a permitted LRR [descriptor].
+ * Enqueues a unique download for an LRR [descriptor].
  * Guaranteed:
  * - Stable download key based on sourceId or SHA-256(canonicalUrl).
  * - ExistingWorkPolicy.KEEP prevents duplicate jobs on rapid taps.
  * - Does not persist temporary signed URLs; re-resolves fresh at worker start.
  */
 fun enqueueDownload(context: Context, descriptor: ResolverDownloadDescriptor) {
-    if (descriptor.downloadCapability != DownloadCapability.PERMITTED) {
-        return
-    }
     val request = OneTimeWorkRequestBuilder<DownloadWorker>()
         .setInputData(workDataOf(DownloadWorker.KEY_RESOLVER_DESCRIPTOR_JSON to jsonDescriptor(descriptor)))
         .build()
@@ -166,6 +165,92 @@ internal data class OnlineTrackJson(
     }
 }
 
+/** Evaluates whether recording identity matches across persisted descriptor and fresh resolution. */
+object RecordingIdentityRevalidator {
+    fun isSameRecording(
+        persistedSourceId: String?,
+        persistedArtist: String?,
+        persistedTitle: String,
+        freshSourceId: String?,
+        freshArtist: String?,
+        freshTitle: String?,
+    ): Boolean {
+        // 1. Strongest evidence: matching provider/source ID
+        if (!persistedSourceId.isNullOrBlank() && !freshSourceId.isNullOrBlank()) {
+            return persistedSourceId.trim() == freshSourceId.trim()
+        }
+
+        // If one is present and the other is present but different -> ProviderChanged
+        if (!persistedSourceId.isNullOrBlank() && !freshSourceId.isNullOrBlank() &&
+            persistedSourceId.trim() != freshSourceId.trim()
+        ) {
+            return false
+        }
+
+        // 2. Fallback when sourceId is missing on one or both: normalized recording identity
+        val pTitle = persistedTitle.trim()
+        val fTitle = freshTitle?.trim().orEmpty()
+        if (pTitle.isBlank() || fTitle.isBlank()) return false
+
+        val pArtistNorm = IdentityNormalization.normalizeArtist(persistedArtist.orEmpty())
+        val fArtistNorm = IdentityNormalization.normalizeArtist(freshArtist.orEmpty())
+
+        // If artist was specified on persisted descriptor, fresh artist must match
+        if (pArtistNorm.isNotBlank() && fArtistNorm.isNotBlank() && pArtistNorm != fArtistNorm) {
+            return false
+        }
+
+        // Check core title and version qualifiers
+        val pCoreTitle = IdentityNormalization.coreTitle(pTitle)
+        val fCoreTitle = IdentityNormalization.coreTitle(fTitle)
+
+        if (pCoreTitle.isBlank() || fCoreTitle.isBlank()) return false
+        if (pCoreTitle != fCoreTitle) return false
+
+        // Check version qualifiers (e.g. original vs remix/live)
+        val pProfile = dev.auralis.studio.online.VersionProfile.parse(pTitle)
+        val fProfile = dev.auralis.studio.online.VersionProfile.parse(fTitle)
+        if (!pProfile.isCompatibleWith(fProfile)) {
+            return false
+        }
+
+        return true
+    }
+}
+
+/** Conservative expired resource decision logic. */
+object ExpiredResourceClassifier {
+    fun shouldRefreshExpiredLease(
+        lease: EphemeralResourceLease?,
+        failure: Throwable?,
+        failureMessage: String,
+    ): Boolean {
+        // 1. Structured lease evidence: knownExpiryEpochMs has elapsed or isExpired is true
+        if (lease != null && lease.isExpired) {
+            return true
+        }
+        if (lease?.knownExpiryEpochMs != null && System.currentTimeMillis() >= (lease.knownExpiryEpochMs - 10_000L)) {
+            return true
+        }
+
+        // 2. Explicit expiration text in HTTP message / error details from CDN
+        val lower = failureMessage.lowercase()
+        if (lower.contains("url expired") ||
+            lower.contains("link expired") ||
+            lower.contains("signature expired") ||
+            lower.contains("token expired") ||
+            lower.contains("access token expired") ||
+            lower.contains("request has expired") ||
+            lower.contains("expired_token") ||
+            lower.contains("expired url")
+        ) {
+            return true
+        }
+
+        return false
+    }
+}
+
 /** Result classification for fresh resolution inside DownloadWorker. */
 internal sealed interface FreshResolutionResult {
     data class Success(
@@ -232,10 +317,6 @@ class DownloadWorker(
                 return Result.failure(workDataOf(KEY_ERROR to "Unsupported descriptor schema version: ${descriptor.schemaVersion}"))
             }
 
-            if (descriptor.downloadCapability != DownloadCapability.PERMITTED) {
-                return Result.failure(workDataOf(KEY_ERROR to "Download permission not granted for this resource"))
-            }
-
             val resolver = DownloadWorkerBridge.resolver ?: container?.mediaResolver ?: AndroidProcessMediaResolver(applicationContext)
 
             return processResolverDownload(descriptor, resolver, manager)
@@ -279,13 +360,8 @@ class DownloadWorker(
                 val failure1 = result1.exceptionOrNull()
                 val failureMsg1 = failure1?.message.orEmpty()
 
-                // ── One-shot stale resource recovery on HTTP 403 / 401 / expired token ─────
-                val isExpiredSignal = failureMsg1.contains("403") ||
-                    failureMsg1.contains("401") ||
-                    failureMsg1.contains("expired", ignoreCase = true) ||
-                    lease1.isExpired
-
-                if (isExpiredSignal) {
+                // ── Conservative stale resource recovery ───────────────────
+                if (ExpiredResourceClassifier.shouldRefreshExpiredLease(lease1, failure1, failureMsg1)) {
                     val res2 = resolveFreshFormat(descriptor, resolver)
                     if (res2 is FreshResolutionResult.Success) {
                         val format2 = res2.format
@@ -316,6 +392,8 @@ class DownloadWorker(
                         Result.failure(workDataOf(KEY_ERROR to PREVIEW_REJECTION))
                     failureMsg1.contains("404") ->
                         Result.failure(workDataOf(KEY_ERROR to failureMsg1))
+                    failureMsg1.contains("401") ->
+                        Result.failure(workDataOf(KEY_ERROR to "Authentication required"))
                     runAttemptCount < MAX_AUTO_RETRIES ->
                         Result.retry()
                     else ->
@@ -359,12 +437,20 @@ class DownloadWorker(
 
         val media = resolveResult.media
 
-        // 1. Identity validation
-        if (!descriptor.sourceId.isNullOrBlank() && !media.sourceId.isNullOrBlank() && descriptor.sourceId != media.sourceId) {
-            return FreshResolutionResult.TerminalFailure("Source media has changed", ResolverErrorCode.ProviderChanged)
+        // 1. Conservative Recording Identity validation
+        if (!RecordingIdentityRevalidator.isSameRecording(
+                persistedSourceId = descriptor.sourceId,
+                persistedArtist = descriptor.artist,
+                persistedTitle = descriptor.title,
+                freshSourceId = media.sourceId,
+                freshArtist = media.artist,
+                freshTitle = media.title,
+            )
+        ) {
+            return FreshResolutionResult.TerminalFailure("Source recording identity mismatch", ResolverErrorCode.ProviderChanged)
         }
 
-        // 2. Permission re-evaluation
+        // 2. Permission re-evaluation at worker execution time (authoritative)
         val annotatedMedia = DownloadCapabilityEvaluator.annotateMedia(media)
 
         // 3. Format selection

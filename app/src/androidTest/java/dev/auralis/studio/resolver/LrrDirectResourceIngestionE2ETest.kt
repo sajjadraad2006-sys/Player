@@ -63,6 +63,7 @@ class LrrDirectResourceIngestionE2ETest {
             context = context,
             downloadsDao = database.downloadsDao(),
             mediaStoreRepository = mediaStoreRepository,
+            okHttpClient = dev.auralis.studio.library.createSafeDownloadClient(allowLocalhostForTesting = true),
         )
         DownloadWorkerBridge.attach(ingestionManager)
     }

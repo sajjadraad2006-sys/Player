@@ -52,7 +52,7 @@ class DownloadIngestionManager(
     private val context: Context,
     private val downloadsDao: DownloadsDao,
     private val mediaStoreRepository: MediaStoreMusicRepository,
-    private val okHttpClient: OkHttpClient = OkHttpClient.Builder().build(),
+    private val okHttpClient: OkHttpClient = createSafeDownloadClient(),
     private val requestHeadersFor: (OnlineTrack) -> Map<String, String> = { emptyMap() },
 ) {
 
@@ -514,6 +514,100 @@ class DownloadIngestionManager(
     }
 }
 
+fun createSafeDownloadClient(allowLocalhostForTesting: Boolean = false): OkHttpClient {
+    return OkHttpClient.Builder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .addInterceptor(SafeRedirectInterceptor(maxRedirects = 5, allowLocalhostForTesting = allowLocalhostForTesting))
+        .build()
+}
+
+/**
+ * Validates redirect destination URLs against private network / loopback SSRF targets.
+ */
+object SafeDownloadUrlValidator {
+    fun isSafeUrl(url: String): Boolean {
+        val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return false
+        val scheme = uri.scheme?.lowercase() ?: return false
+        if (scheme != "http" && scheme != "https") return false
+        val host = uri.host?.lowercase() ?: return false
+        if (host.isBlank()) return false
+
+        if (host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]") return false
+
+        return try {
+            val addresses = java.net.InetAddress.getAllByName(host)
+            addresses.isNotEmpty() && addresses.all { isSafeAddress(it) }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun isSafeAddress(addr: java.net.InetAddress): Boolean {
+        if (addr.isLoopbackAddress || addr.isLinkLocalAddress || addr.isSiteLocalAddress ||
+            addr.isAnyLocalAddress || addr.isMulticastAddress
+        ) {
+            return false
+        }
+        val hostAddress = addr.hostAddress ?: return false
+        if (hostAddress.startsWith("fc") || hostAddress.startsWith("fd") || hostAddress.startsWith("fe80")) {
+            return false
+        }
+        if (hostAddress.startsWith("::ffff:127.") || hostAddress.startsWith("::ffff:10.") ||
+            hostAddress.startsWith("::ffff:192.168.") || hostAddress.startsWith("::ffff:172.") ||
+            hostAddress.startsWith("::ffff:169.254.")
+        ) {
+            return false
+        }
+        val bytes = addr.address
+        if (bytes.size == 4) {
+            val b0 = bytes[0].toInt() and 0xFF
+            val b1 = bytes[1].toInt() and 0xFF
+            if (b0 == 127 || b0 == 10 || b0 == 0) return false
+            if (b0 == 172 && b1 in 16..31) return false
+            if (b0 == 192 && b1 == 168) return false
+            if (b0 == 169 && b1 == 254) return false
+        }
+        return true
+    }
+}
+
+/**
+ * Interceptor that intercepts HTTP redirects, enforcing safe scheme, safe destination, and max hops.
+ */
+class SafeRedirectInterceptor(
+    private val maxRedirects: Int = 5,
+    private val allowLocalhostForTesting: Boolean = false,
+) : okhttp3.Interceptor {
+    override fun intercept(chain: okhttp3.Interceptor.Chain): okhttp3.Response {
+        var request = chain.request()
+        var response = chain.proceed(request)
+        var redirects = 0
+
+        while (response.isRedirect && redirects < maxRedirects) {
+            val location = response.header("Location") ?: break
+            val nextUrl = request.url.resolve(location) ?: throw SecurityException("Malformed redirect location: $location")
+
+            val scheme = nextUrl.scheme.lowercase()
+            if (scheme != "http" && scheme != "https") {
+                response.close()
+                throw SecurityException("Redirect to unsafe scheme '$scheme' blocked")
+            }
+
+            if (!allowLocalhostForTesting && !SafeDownloadUrlValidator.isSafeUrl(nextUrl.toString())) {
+                response.close()
+                throw SecurityException("Redirect to unsafe/private destination blocked: ${nextUrl.host}")
+            }
+
+            response.close()
+            redirects++
+            request = request.newBuilder().url(nextUrl).build()
+            response = chain.proceed(request)
+        }
+        return response
+    }
+}
+
 private class MutableSet<T>(private val backing: HashSet<T> = HashSet()) {
     @Synchronized
     operator fun contains(value: T): Boolean = backing.contains(value)
@@ -528,3 +622,4 @@ private class MutableSet<T>(private val backing: HashSet<T> = HashSet()) {
         backing.remove(value)
     }
 }
+
