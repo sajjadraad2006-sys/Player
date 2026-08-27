@@ -217,4 +217,88 @@ class RecordingMatchingTest {
         assertEquals("Display noise '(Official Video)' should not prevent merging into 1 recording", 1, merged.size)
         assertEquals(2, merged.first().sources.size)
     }
+
+    @Test
+    fun testP_multiQualifierVersionProfile_parsingAndOrderIndependence() {
+        val p1 = VersionProfile.parse("Song (Live Acoustic)")
+        val p2 = VersionProfile.parse("Song (Acoustic Live)")
+        val p3 = VersionProfile.parse("Song (Radio Edit Remix)")
+        val p4 = VersionProfile.parse("Song (Club Mix Radio Edit)")
+
+        assertEquals(setOf(VersionQualifier.LIVE, VersionQualifier.ACOUSTIC), p1.qualifiers)
+        assertEquals(setOf(VersionQualifier.LIVE, VersionQualifier.ACOUSTIC), p2.qualifiers)
+        assertTrue("Order-independent version qualifiers must be compatible", p1.isCompatibleWith(p2))
+
+        assertEquals(setOf(VersionQualifier.RADIO_EDIT, VersionQualifier.REMIX), p3.qualifiers)
+        assertEquals(setOf(VersionQualifier.RADIO_EDIT, VersionQualifier.REMIX), p4.qualifiers)
+        assertTrue("Radio edit remix qualifiers must be compatible regardless of token order", p3.isCompatibleWith(p4))
+
+        val s1 = createSource(provider = "audius", id = "a1", title = "Hotel California (Live Acoustic)", artist = "Eagles", isrc = null)
+        val s2 = createSource(provider = "jamendo", id = "j1", title = "Hotel California (Acoustic Live)", artist = "Eagles", isrc = null)
+
+        val merged = UnifiedTrackMerger.mergeSources(listOf(s1, s2))
+        assertEquals("Live Acoustic and Acoustic Live must merge into 1 recording", 1, merged.size)
+        assertEquals(2, merged.first().sources.size)
+    }
+
+    @Test
+    fun testQ_multiQualifierVersionProfile_conflictBlocksMerge() {
+        val s1 = createSource(provider = "audius", id = "a1", title = "Hotel California (Live Acoustic)", artist = "Eagles", isrc = null)
+        val s2 = createSource(provider = "jamendo", id = "j1", title = "Hotel California (Live Unplugged)", artist = "Eagles", isrc = null)
+        val s3 = createSource(provider = "itunes", id = "i1", title = "Hotel California (Radio Edit)", artist = "Eagles", isrc = null)
+
+        val merged = UnifiedTrackMerger.mergeSources(listOf(s1, s2, s3))
+        assertEquals("Conflicting multi-qualifier version profiles must produce distinct recordings", 3, merged.size)
+    }
+
+    @Test
+    fun testR_isrcTrustBasis_explicitVsInferred() {
+        val explicit1 = createSource(provider = "audius", id = "a1", title = "Hello", artist = "Adele", isrc = "GBBKS1500214")
+        val explicit2 = createSource(provider = "itunes", id = "i1", title = "Hello", artist = "Adele", isrc = "GBBKS1500214")
+
+        assertTrue(explicit1.trustedIsrc == "GBBKS1500214")
+        assertTrue(explicit2.trustedIsrc == "GBBKS1500214")
+
+        val merged = UnifiedTrackMerger.mergeSources(listOf(explicit1, explicit2))
+        assertEquals(1, merged.size)
+        assertEquals("GBBKS1500214", merged.first().isrc)
+    }
+
+    @Test
+    fun testS_durationConsensusClustering_medianSelectionAndOutlierRejection() {
+        val s1 = createSource(provider = "audius", id = "a1", title = "Song", artist = "Artist", durationMs = 220_100L)
+        val s2 = createSource(provider = "jamendo", id = "j1", title = "Song", artist = "Artist", durationMs = 220_900L)
+        val s3 = createSource(provider = "deezer", id = "d1", title = "Song", artist = "Artist", durationMs = 900_000L) // Malformed outlier
+        val s4 = createSource(provider = "itunes", id = "i1", title = "Song", artist = "Artist", durationMs = 30_000L, playbackCapability = PlaybackCapability.PREVIEW)
+
+        val consensusDuration = CanonicalMetadataSelector.selectDuration(listOf(s1, s2, s3, s4))
+
+        // Largest cluster is {220_100, 220_900}, median should be within 220.1s - 220.9s
+        assertTrue("Canonical duration must resolve to cluster median (~220s) and reject 900s outlier and 30s preview", consensusDuration in 220_000L..221_000L)
+    }
+
+    @Test
+    fun testT_canonicalSearchRanker_deterministicOrdering() {
+        val exact = CanonicalRecording(
+            identity = RecordingIdentity.structuredIdentity("Rolling in the Deep", "Adele", 228_000L, null),
+            title = "Rolling in the Deep",
+            artist = "Adele",
+        )
+        val prefix = CanonicalRecording(
+            identity = RecordingIdentity.structuredIdentity("Rolling in the Deep Remix", "Adele", 230_000L, null),
+            title = "Rolling in the Deep Remix",
+            artist = "Adele",
+        )
+        val other = CanonicalRecording(
+            identity = RecordingIdentity.structuredIdentity("Deep Waters", "Other Artist", 200_000L, null),
+            title = "Deep Waters",
+            artist = "Other Artist",
+        )
+
+        val ranked1 = CanonicalSearchRanker.rank(listOf(other, prefix, exact), "Rolling in the Deep")
+        val ranked2 = CanonicalSearchRanker.rank(listOf(exact, other, prefix), "Rolling in the Deep")
+
+        assertEquals("Exact title match must rank first", exact.title, ranked1.first().title)
+        assertEquals("Permuted arrival sets must produce identical deterministic ranking", ranked1.map { it.title }, ranked2.map { it.title })
+    }
 }

@@ -215,7 +215,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _providersPending.value = 0
                         flowOf(dev.auralis.studio.online.SearchSnapshot.EMPTY)
                     } else {
-                        addRecentSearch(query)
                         _isSearchingOnline.value = true
                         container.unifiedSearch.search(query)
                     }
@@ -251,6 +250,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun searchOnline(query: String) {
         _onlineSearchQuery.value = query
+    }
+
+    fun commitSearch(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isNotBlank()) {
+            addRecentSearch(trimmed)
+        }
     }
 
     fun addRecentSearch(query: String) {

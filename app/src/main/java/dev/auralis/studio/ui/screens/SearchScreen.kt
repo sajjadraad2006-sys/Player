@@ -64,6 +64,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import coil.compose.AsyncImage
 import dev.auralis.studio.R
 import dev.auralis.studio.core.database.DownloadEntity
@@ -101,6 +104,7 @@ fun SearchScreen(
     downloads: List<DownloadEntity> = emptyList(),
     onQueryChange: (String) -> Unit,
     onSearchOnline: (String) -> Unit,
+    onCommitSearch: (String) -> Unit = {},
     onClearRecentSearches: () -> Unit = {},
     onRemoveRecentSearch: (String) -> Unit = {},
     onPlay: (Track, List<Track>) -> Unit,
@@ -182,6 +186,13 @@ fun SearchScreen(
                     }
                 }
             },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(
+                onSearch = {
+                    onCommitSearch(query)
+                    if (selectedTab == 1 && query.isNotBlank()) onSearchOnline(query)
+                }
+            ),
             singleLine = true,
             shape = RoundedCornerShape(16.dp),
             colors = OutlinedTextFieldDefaults.colors(
@@ -267,6 +278,7 @@ fun SearchScreen(
                             .clickable {
                                 onQueryChange(searchKeyword)
                                 onSearchOnline(searchKeyword)
+                                onCommitSearch(searchKeyword)
                             }
                             .padding(horizontal = 12.dp, vertical = 6.dp),
                         contentAlignment = Alignment.Center,
@@ -335,7 +347,10 @@ fun SearchScreen(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(12.dp))
                                         .background(colors.surfaceVariant.copy(alpha = 0.65f))
-                                        .clickable { onQueryChange(searchItem) }
+                                        .clickable {
+                                            onQueryChange(searchItem)
+                                            onCommitSearch(searchItem)
+                                        }
                                         .padding(horizontal = 12.dp, vertical = 6.dp),
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -529,8 +544,14 @@ fun SearchScreen(
                             OnlineTrackCard(
                                 track = onlineTrack,
                                 downloadStatus = downloadStatus,
-                                onPlay = { onPlayOnline(onlineTrack) },
-                                onDownload = { onDownloadOnline(onlineTrack) },
+                                onPlay = {
+                                    if (query.isNotBlank()) onCommitSearch(query)
+                                    onPlayOnline(onlineTrack)
+                                },
+                                onDownload = {
+                                    if (query.isNotBlank()) onCommitSearch(query)
+                                    onDownloadOnline(onlineTrack)
+                                },
                                 onSources = { sourceSheetTrack = onlineTrack },
                             )
                         }

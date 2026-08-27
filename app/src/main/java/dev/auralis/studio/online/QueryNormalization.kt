@@ -138,6 +138,39 @@ object IdentityNormalization {
         return normalize(cleaned)
     }
 
+    private val VERSION_NOISE_TERMS = listOf(
+        "live at the forum", "live at", "live session", "concert", "live",
+        "club mix", "extended mix", "dub mix", "vip mix", "mashup", "remix",
+        "acoustic", "unplugged", "cover", "tribute", "karaoke",
+        "instrumental", "backing track", "demo",
+        "radio edit", "radio version", "clean edit", "clean version",
+        "slowed reverb", "slowed down", "slowed",
+        "sped up", "speed up", "speedup", "nightcore",
+        "re recorded", "rerecorded", "taylor s version"
+    )
+
+    /**
+     * Extracts the core title without version terms or display noise.
+     * Used for title matching when version profile compatibility is verified separately.
+     */
+    fun coreTitle(rawTitle: String): String {
+        var res = cleanTitleForIdentity(rawTitle)
+        for (term in VERSION_NOISE_TERMS) {
+            if (res == term) {
+                res = ""
+                break
+            }
+            if (res.endsWith(" $term")) {
+                res = res.substring(0, res.length - term.length - 1).trim()
+            } else if (res.startsWith("$term ")) {
+                res = res.substring(term.length + 1).trim()
+            } else if (res.contains(" $term ")) {
+                res = res.replace(" $term ", " ").trim()
+            }
+        }
+        return res
+    }
+
     /**
      * Conservative normalizer for canonical recording identification and merger comparison.
      * - Preserves distinct Arabic letters: ة, ؤ, ئ

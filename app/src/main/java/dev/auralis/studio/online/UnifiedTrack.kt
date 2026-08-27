@@ -13,15 +13,17 @@ data class StructuredIdentity(
     val isrc: String? = null,
     val normalizedTitle: String,
     val normalizedArtist: String,
-    val versionQualifier: VersionQualifier = VersionQualifier.ORIGINAL,
+    val versionProfile: VersionProfile = VersionProfile.ORIGINAL,
     val durationBucket: Long = -1L,
 ) {
+    val versionQualifier: VersionQualifier get() = versionProfile.primary
+
     /**
      * Stable key string representation. Does NOT replace structured evidence.
      */
     val stableKey: String
         get() = isrc?.let { "isrc:$it" }
-            ?: "meta:$normalizedTitle|$normalizedArtist|${versionQualifier.name.lowercase()}|$durationBucket"
+            ?: "meta:$normalizedTitle|$normalizedArtist|${versionProfile.qualifiers.map { it.name.lowercase() }.sorted().joinToString("+")}|$durationBucket"
 }
 
 /**
@@ -128,13 +130,13 @@ object RecordingIdentity {
         val normIsrc = normalizedIsrc(isrc)
         val normTitle = IdentityNormalization.cleanTitleForIdentity(title)
         val normArtist = IdentityNormalization.normalizeArtist(artist)
-        val qualifier = VersionQualifier.parse(title)
+        val profile = VersionProfile.parse(title)
         val durationBucket = if (durationMs > 0) durationMs / 2_000L else -1L
         return StructuredIdentity(
             isrc = normIsrc,
             normalizedTitle = normTitle,
             normalizedArtist = normArtist,
-            versionQualifier = qualifier,
+            versionProfile = profile,
             durationBucket = durationBucket,
         )
     }
@@ -144,6 +146,156 @@ object RecordingIdentity {
     fun normalizedText(value: String): String = IdentityNormalization.normalize(value)
 
     fun normalizedArtist(value: String): String = IdentityNormalization.normalizeArtist(value)
+}
+
+object CanonicalMetadataSelector {
+
+    fun selectDuration(sources: List<RecordingSource>): Long {
+        val fullSources = sources.filter { it.playbackCapability != PlaybackCapability.PREVIEW && it.durationMs > 0 }
+        val candidates = if (fullSources.isNotEmpty()) fullSources else sources.filter { it.durationMs > 0 }
+        if (candidates.isEmpty()) return 0L
+
+        val durations = candidates.map { it.durationMs }.sorted()
+        if (durations.size == 1) return durations.first()
+
+        // Cluster durations within 5000ms or 5% tolerance
+        val clusters = mutableListOf<MutableList<Long>>()
+        for (d in durations) {
+            val cluster = clusters.firstOrNull { c ->
+                val avg = c.average()
+                val tol = maxOf(4_000.0, avg * 0.05)
+                abs(d - avg) <= tol
+            }
+            if (cluster != null) {
+                cluster.add(d)
+            } else {
+                clusters.add(mutableListOf(d))
+            }
+        }
+
+        val bestCluster = clusters.maxByOrNull { it.size } ?: durations
+        return bestCluster[bestCluster.size / 2]
+    }
+
+    fun selectMetadata(sources: List<RecordingSource>, stableSessionId: String): CanonicalRecording {
+        val sortedSources = sources.sortedWith(
+            compareByDescending<RecordingSource> { sourceMetadataScore(it) }
+                .thenBy { it.provider }
+                .thenBy { it.providerTrackId }
+        )
+        val best = sortedSources.first()
+        val canonicalDuration = selectDuration(sources)
+        val trustedIsrc = sortedSources.mapNotNull { it.trustedIsrc }.firstOrNull()
+
+        val identity = RecordingIdentity.structuredIdentity(
+            title = best.title,
+            artist = sortedSources.firstOrNull { it.artist.isTrustedValue() }?.artist ?: best.artist,
+            durationMs = canonicalDuration,
+            isrc = trustedIsrc,
+        )
+
+        return CanonicalRecording(
+            identity = identity,
+            stableSessionId = stableSessionId,
+            title = best.title,
+            artist = sortedSources.firstOrNull { it.artist.isTrustedValue() }?.artist ?: best.artist,
+            album = sortedSources.firstOrNull { it.album.isNotBlank() }?.album.orEmpty(),
+            albumArtist = sortedSources.firstNotNullOfOrNull { it.albumArtist },
+            durationMs = canonicalDuration,
+            artworkUrl = sortedSources.map { it.artworkUrl }.filter(String::isNotBlank).maxByOrNull(String::length).orEmpty(),
+            isrc = trustedIsrc,
+            sources = sortedSources.sortedWith(
+                compareByDescending<RecordingSource> { if (it is LocalRecordingSource) 100 else 0 }
+                    .thenBy { it.provider }
+                    .thenBy { it.providerTrackId }
+            ),
+        )
+    }
+
+    private fun sourceMetadataScore(source: RecordingSource): Int =
+        (if (source is LocalRecordingSource) 500 else 0) +
+            (if (source.trustedIsrc != null) 1_000 else 0) +
+            (if (source.playbackCapability == PlaybackCapability.FULL_STREAM) 200 else 0) +
+            (if (source.artist.isTrustedValue()) 100 else 0) +
+            (if (source.album.isNotBlank()) 40 else 0) +
+            (if (source.durationMs > 60_000L) 80 else 0)
+}
+
+object CanonicalSearchRanker {
+
+    fun rank(recordings: List<CanonicalRecording>, rawQuery: String): List<CanonicalRecording> {
+        val normQuery = SearchNormalization.normalize(rawQuery)
+        if (normQuery.isBlank()) {
+            return recordings.sortedWith(
+                compareByDescending<CanonicalRecording> { it.sources.size }
+                    .thenBy { it.title.lowercase() }
+                    .thenBy { it.artist.lowercase() }
+            )
+        }
+
+        return recordings
+            .map { it to score(it, normQuery) }
+            .sortedWith(
+                compareByDescending<Pair<CanonicalRecording, Int>> { it.second }
+                    .thenByDescending { it.first.sources.size }
+                    .thenBy { it.first.title.lowercase() }
+                    .thenBy { it.first.artist.lowercase() }
+                    .thenBy { it.first.recordingIdentity }
+            )
+            .map { it.first }
+    }
+
+    private fun score(recording: CanonicalRecording, normQuery: String): Int {
+        val normTitle = SearchNormalization.normalize(recording.title)
+        val normArtist = SearchNormalization.normalize(recording.artist)
+        val normAlbum = SearchNormalization.normalize(recording.album)
+
+        var score = 0
+
+        // 1. Title matching
+        if (normTitle == normQuery) {
+            score += 10_000
+        } else if (normTitle.startsWith(normQuery)) {
+            score += 5_000
+        } else if (isTokenMatch(normTitle, normQuery)) {
+            score += 3_000
+        } else if (normTitle.contains(normQuery)) {
+            score += 1_500
+        }
+
+        // 2. Artist matching
+        if (normArtist.isNotEmpty()) {
+            if (normArtist == normQuery) {
+                score += 1_200
+            } else if (normArtist.startsWith(normQuery)) {
+                score += 800
+            } else if (normArtist.contains(normQuery)) {
+                score += 400
+            }
+        }
+
+        // 3. Album matching
+        if (normAlbum.isNotEmpty()) {
+            if (normAlbum == normQuery) {
+                score += 300
+            } else if (normAlbum.contains(normQuery)) {
+                score += 150
+            }
+        }
+
+        // 4. Source capability bonus
+        if (recording.isLocal) score += 50
+        if (recording.isPlayable) score += 30
+        if (recording.isDownloadable) score += 20
+
+        return score
+    }
+
+    private fun isTokenMatch(target: String, query: String): Boolean {
+        val tokens = target.split(' ')
+        val queryTokens = query.split(' ')
+        return queryTokens.all { q -> tokens.any { it == q || it.startsWith(q) } }
+    }
 }
 
 object UnifiedTrackMerger {
@@ -157,7 +309,7 @@ object UnifiedTrackMerger {
      * Merges candidate sources into canonical recordings while strictly preventing false merges.
      *
      * Invariants:
-     * 1. Version qualifier conflicts block merging (ORIGINAL != LIVE != REMIX != COVER).
+     * 1. Version profile conflicts block merging (ORIGINAL != LIVE != REMIX != COVER).
      * 2. Conflicting valid trusted ISRCs block merging.
      * 3. Preview duration (30s) does not block merging with a full-length track if strong evidence matches.
      * 4. Transitive traps are prevented: every incoming source must remain compatible with the group's strong constraints.
@@ -189,23 +341,21 @@ object UnifiedTrackMerger {
     }
 
     fun canMergeSources(left: RecordingSource, right: RecordingSource): Boolean {
-        // 1. Version qualifier conflict is a hard merge blocker (ORIGINAL != LIVE != REMIX != COVER etc.)
-        val leftQualifier = VersionQualifier.parse(left.title)
-        val rightQualifier = VersionQualifier.parse(right.title)
-        if (leftQualifier != rightQualifier) return false
+        // 1. Version profile conflict is a hard merge blocker (ORIGINAL != LIVE != REMIX != COVER etc.)
+        val leftProfile = VersionProfile.parse(left.title)
+        val rightProfile = VersionProfile.parse(right.title)
+        if (!leftProfile.isCompatibleWith(rightProfile)) return false
 
-        // 2. ISRC is authoritative recording identity when present
-        val leftIsrc = RecordingIdentity.normalizedIsrc(left.isrc)
-        val rightIsrc = RecordingIdentity.normalizedIsrc(right.isrc)
+        // 2. Trusted ISRC is authoritative recording identity when present
+        val leftIsrc = left.trustedIsrc
+        val rightIsrc = right.trustedIsrc
         if (leftIsrc != null && rightIsrc != null) {
-            // Same valid ISRC + compatible qualifiers = same recording
-            // Conflicting valid ISRCs = strong blocker
             return leftIsrc == rightIsrc
         }
 
-        // 3. Preprocessed normalized title & artist check (stripping display noise like '(Official Video)')
-        val leftTitle = IdentityNormalization.cleanTitleForIdentity(left.title)
-        val rightTitle = IdentityNormalization.cleanTitleForIdentity(right.title)
+        // 3. Preprocessed normalized core title & artist check
+        val leftTitle = IdentityNormalization.coreTitle(left.title)
+        val rightTitle = IdentityNormalization.coreTitle(right.title)
         if (leftTitle != rightTitle) return false
 
         val leftArtist = IdentityNormalization.normalizeArtist(left.artist)
@@ -223,7 +373,7 @@ object UnifiedTrackMerger {
         return true
     }
 
-    private class GroupBuilder(
+    class GroupBuilder(
         var stableSessionId: String = UUID.randomUUID().toString(),
         val sources: MutableList<RecordingSource> = mutableListOf(),
     ) {
@@ -241,55 +391,12 @@ object UnifiedTrackMerger {
         }
 
         fun addSource(source: RecordingSource) {
-            // Avoid duplicate source entries from the same provider + id
             val exists = sources.any { it.provider == source.provider && it.providerTrackId == source.providerTrackId }
             if (!exists) {
                 sources.add(source)
             }
         }
 
-        fun build(): CanonicalRecording {
-            val ranked = sources.sortedByDescending(::sourceMetadataScore)
-            val best = ranked.first()
-
-            // Canonical duration prefers full-length trusted tracks over 30s previews
-            val canonicalDuration = sources
-                .filter { it.playbackCapability != PlaybackCapability.PREVIEW && it.durationMs > 0 }
-                .maxOfOrNull { it.durationMs }
-                ?: sources.firstOrNull { it.durationMs > 0 }?.durationMs ?: 0L
-
-            val isrc = sources.mapNotNull { RecordingIdentity.normalizedIsrc(it.isrc) }.firstOrNull()
-
-            val identity = RecordingIdentity.structuredIdentity(
-                title = best.title,
-                artist = ranked.firstOrNull { it.artist.isTrustedValue() }?.artist ?: best.artist,
-                durationMs = canonicalDuration,
-                isrc = isrc,
-            )
-
-            return CanonicalRecording(
-                identity = identity,
-                stableSessionId = stableSessionId,
-                title = best.title,
-                artist = ranked.firstOrNull { it.artist.isTrustedValue() }?.artist ?: best.artist,
-                album = ranked.firstOrNull { it.album.isNotBlank() }?.album.orEmpty(),
-                albumArtist = ranked.firstNotNullOfOrNull { it.albumArtist },
-                durationMs = canonicalDuration,
-                artworkUrl = ranked.map { it.artworkUrl }.filter(String::isNotBlank).maxByOrNull(String::length).orEmpty(),
-                isrc = isrc,
-                sources = sources.sortedWith(
-                    compareByDescending<RecordingSource> { if (it is LocalRecordingSource) 100 else 0 }
-                        .thenBy { it.provider }
-                ),
-            )
-        }
-
-        private fun sourceMetadataScore(source: RecordingSource): Int =
-            (if (source is LocalRecordingSource) 500 else 0) +
-                (if (RecordingIdentity.normalizedIsrc(source.isrc) != null) 1_000 else 0) +
-                (if (source.playbackCapability == PlaybackCapability.FULL_STREAM) 200 else 0) +
-                (if (source.artist.isTrustedValue()) 100 else 0) +
-                (if (source.album.isNotBlank()) 40 else 0) +
-                (if (source.durationMs > 60_000L) 80 else 0)
+        fun build(): CanonicalRecording = CanonicalMetadataSelector.selectMetadata(sources, stableSessionId)
     }
 }

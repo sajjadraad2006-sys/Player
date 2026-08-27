@@ -34,90 +34,34 @@ object SearchEngine {
     )
 
     /**
-     * Ultra-fast single-pass string normalizer:
-     * - Lowercases and trims whitespace without regex allocations
-     * - Strips audio extensions (.mp3, .flac, etc.)
+     * Normalizes text for search indexing and query scoring:
      * - Strips common track number prefixes ("01. ", "02 - ", "1_")
-     * - Normalizes Arabic diacritics and character variants (Alif, Taa Marbuta, Yaa)
-     * - Replaces punctuation and symbols with single spaces
+     * - Strips audio extensions (.mp3, .flac, etc.)
+     * - Delegates to [dev.auralis.studio.online.SearchNormalization] as the authoritative production normalizer.
      */
     fun normalize(text: String): String {
         if (text.isEmpty()) return ""
         val len = text.length
-        val sb = StringBuilder(len)
         var i = 0
 
         // Skip leading track number like "01. ", "02 - "
         while (i < len && text[i].isDigit()) i++
-        if (i in 1..3 && i < len && (text[i] == '.' || text[i] == '-' || text[i] == '_' || text[i] == ' ')) {
+        val stripped = if (i in 1..3 && i < len && (text[i] == '.' || text[i] == '-' || text[i] == '_' || text[i] == ' ')) {
             while (i < len && (text[i] == '.' || text[i] == '-' || text[i] == '_' || text[i] == ' ')) i++
+            text.substring(i)
         } else {
-            i = 0
+            text
         }
 
-        var lastWasSpace = true
-        while (i < len) {
-            val ch = text[i]
-            when {
-                // Arabic Alif variants -> standard bare Alif
-                ch == 'أ' || ch == 'إ' || ch == 'آ' || ch == 'ٱ' -> {
-                    sb.append('ا')
-                    lastWasSpace = false
-                }
-                // Taa Marbuta -> Haa
-                ch == 'ة' -> {
-                    sb.append('ه')
-                    lastWasSpace = false
-                }
-                // Yaa / Alef Maksura -> Yaa
-                ch == 'ى' || ch == 'ئ' || ch == 'ی' -> {
-                    sb.append('ي')
-                    lastWasSpace = false
-                }
-                ch == 'ك' || ch == 'ک' -> {
-                    sb.append('ك')
-                    lastWasSpace = false
-                }
-                // Skip Arabic Tashkeel / Harakat and Tatweel
-                ch == 'ـ' || (ch in '\u064B'..'\u065F') -> {
-                    // Ignored
-                }
-                // Punctuation and whitespace -> single space
-                ch == '_' || ch == '-' || ch == '.' || ch == ',' || ch == '!' || ch == '?' ||
-                    ch == ':' || ch == ';' || ch == '\'' || ch == '"' || ch == '(' || ch == ')' ||
-                    ch == '[' || ch == ']' || ch == '{' || ch == '}' || ch == '/' || ch == '\\' ||
-                    ch.isWhitespace() -> {
-                    if (!lastWasSpace) {
-                        sb.append(' ')
-                        lastWasSpace = true
-                    }
-                }
-                else -> {
-                    sb.append(ch.lowercaseChar())
-                    lastWasSpace = false
-                }
-            }
-            i++
-        }
-
-        var res = sb.toString().trimEnd()
-
-        // Strip common audio extensions
+        var withoutExt = stripped
         for (ext in AUDIO_EXTENSIONS_NO_DOT) {
-            if (res.endsWith(ext) && res.length > ext.length && res[res.length - ext.length - 1] == ' ') {
-                res = res.substring(0, res.length - ext.length - 1).trimEnd()
+            if (withoutExt.endsWith(".$ext", ignoreCase = true)) {
+                withoutExt = withoutExt.substring(0, withoutExt.length - ext.length - 1)
                 break
             }
         }
 
-        // Strip common uploader noise suffixes
-        for (suffix in NOISE_SUFFIXES) {
-            if (res.endsWith(suffix) && res.length > suffix.length && res[res.length - suffix.length - 1] == ' ') {
-                res = res.substring(0, res.length - suffix.length - 1).trimEnd()
-            }
-        }
-
-        return res
+        return dev.auralis.studio.online.SearchNormalization.normalize(withoutExt)
     }
 
     fun normalizeArabic(text: String): String = normalize(text)

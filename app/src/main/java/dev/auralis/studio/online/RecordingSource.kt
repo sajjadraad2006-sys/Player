@@ -5,12 +5,25 @@ import dev.auralis.studio.resolver.api.DownloadCapability
 import dev.auralis.studio.resolver.api.DownloadCapabilityBasis
 import dev.auralis.studio.resolver.api.ResolutionMode
 
+enum class IsrcEvidenceBasis {
+    PROVIDER_EXPLICIT,
+    EMBEDDED_METADATA,
+    INFERRED,
+}
+
+data class IsrcEvidence(
+    val value: String,
+    val basis: IsrcEvidenceBasis,
+) {
+    val isTrusted: Boolean get() = basis != IsrcEvidenceBasis.INFERRED
+}
+
 /**
  * Universal model for an individual recording source candidate discovered from any catalog or local library.
  *
  * Invariant: Preserves explicit URL semantics:
- * - [canonicalUrl] is the stable provider webpage / permalink (e.g. https://audius.co/artist/song).
- * - Temporary signed CDN URLs or ephemeral streaming tokens must NEVER be stored as canonical source state.
+ * - [canonicalUrl] is the stable provider webpage / permalink (e.g. https://audius.co/artist/song), or null if none.
+ * - Local content URIs and temporary signed CDN URLs must NEVER be stored as canonical URLs.
  */
 sealed interface RecordingSource {
     val provider: String
@@ -22,6 +35,7 @@ sealed interface RecordingSource {
     val durationMs: Long
     val artworkUrl: String
     val isrc: String?
+    val isrcEvidence: IsrcEvidence?
     val playbackCapability: PlaybackCapability
     val downloadCapability: DownloadCapability
     val downloadCapabilityBasis: DownloadCapabilityBasis
@@ -29,15 +43,20 @@ sealed interface RecordingSource {
     val audioFormat: String?
     val availableDownloadFormats: List<String>
     val qualityLabel: String?
-    val canonicalUrl: String
+    val canonicalUrl: String?
     val license: String
     val licenseUrl: String
 
     val isLocal: Boolean get() = this is LocalRecordingSource
 
     val isDownloadableFullTrack: Boolean
-        get() = downloadCapability == DownloadCapability.PERMITTED &&
+        get() = !isLocal &&
+            downloadCapability == DownloadCapability.PERMITTED &&
             resolutionMode == ResolutionMode.DIRECT_RESOURCE
+
+    val trustedIsrc: String?
+        get() = isrcEvidence?.takeIf { it.isTrusted }?.value
+            ?: RecordingIdentity.normalizedIsrc(isrc)
 }
 
 /**
@@ -53,6 +72,9 @@ data class OnlineRecordingSource(
     override val durationMs: Long = 0L,
     override val artworkUrl: String = "",
     override val isrc: String? = null,
+    override val isrcEvidence: IsrcEvidence? = isrc?.let { norm ->
+        RecordingIdentity.normalizedIsrc(norm)?.let { IsrcEvidence(it, IsrcEvidenceBasis.PROVIDER_EXPLICIT) }
+    },
     override val playbackCapability: PlaybackCapability = PlaybackCapability.UNAVAILABLE,
     override val downloadCapability: DownloadCapability = DownloadCapability.UNKNOWN,
     override val downloadCapabilityBasis: DownloadCapabilityBasis = DownloadCapabilityBasis.NONE,
@@ -60,7 +82,7 @@ data class OnlineRecordingSource(
     override val audioFormat: String? = null,
     override val availableDownloadFormats: List<String> = emptyList(),
     override val qualityLabel: String? = null,
-    override val canonicalUrl: String = "",
+    override val canonicalUrl: String? = null,
     override val license: String = "",
     override val licenseUrl: String = "",
     // Original legacy OnlineTrack reference for backward-compatible provider resolution
@@ -82,18 +104,23 @@ data class LocalRecordingSource(
     override val durationMs: Long = 0L,
     override val artworkUrl: String = "",
     override val isrc: String? = null,
+    override val isrcEvidence: IsrcEvidence? = isrc?.let { norm ->
+        RecordingIdentity.normalizedIsrc(norm)?.let { IsrcEvidence(it, IsrcEvidenceBasis.EMBEDDED_METADATA) }
+    },
     override val playbackCapability: PlaybackCapability = PlaybackCapability.LOCAL,
-    override val downloadCapability: DownloadCapability = DownloadCapability.PERMITTED,
-    override val downloadCapabilityBasis: DownloadCapabilityBasis = DownloadCapabilityBasis.PROVIDER_EXPLICIT,
+    override val downloadCapability: DownloadCapability = DownloadCapability.NOT_PERMITTED,
+    override val downloadCapabilityBasis: DownloadCapabilityBasis = DownloadCapabilityBasis.NONE,
     override val resolutionMode: ResolutionMode = ResolutionMode.DIRECT_RESOURCE,
     override val audioFormat: String? = "audio/mpeg",
     override val availableDownloadFormats: List<String> = emptyList(),
     override val qualityLabel: String? = "Local",
-    override val canonicalUrl: String = contentUri,
+    override val canonicalUrl: String? = null,
     override val license: String = "Local file",
     override val licenseUrl: String = "",
     val originalLocalTrack: Track? = null,
-) : RecordingSource
+) : RecordingSource {
+    override val isDownloadableFullTrack: Boolean get() = false
+}
 
 /**
  * Maps an existing [OnlineTrack] to a neutral [RecordingSource] with explicit capabilities.
@@ -120,6 +147,9 @@ fun OnlineTrack.toRecordingSource(): RecordingSource {
         else -> DownloadCapability.UNKNOWN to DownloadCapabilityBasis.NONE
     }
 
+    val normIsrc = RecordingIdentity.normalizedIsrc(isrc)
+    val isrcEv = normIsrc?.let { IsrcEvidence(it, IsrcEvidenceBasis.PROVIDER_EXPLICIT) }
+
     return OnlineRecordingSource(
         provider = provider,
         providerTrackId = id,
@@ -129,7 +159,8 @@ fun OnlineTrack.toRecordingSource(): RecordingSource {
         albumArtist = albumArtist,
         durationMs = durationMs,
         artworkUrl = artworkUrl,
-        isrc = isrc,
+        isrc = normIsrc ?: isrc,
+        isrcEvidence = isrcEv,
         playbackCapability = playbackCap,
         downloadCapability = downloadCap,
         downloadCapabilityBasis = downloadBasis,
@@ -137,7 +168,7 @@ fun OnlineTrack.toRecordingSource(): RecordingSource {
         audioFormat = audioFormat,
         availableDownloadFormats = availableDownloadFormats,
         qualityLabel = qualityLabel,
-        canonicalUrl = sourceUrl,
+        canonicalUrl = sourceUrl.takeIf { it.isNotBlank() },
         license = license,
         licenseUrl = licenseUrl,
         originalTrack = this,
@@ -158,12 +189,13 @@ fun Track.toLocalRecordingSource(): LocalRecordingSource = LocalRecordingSource(
     durationMs = durationMs,
     artworkUrl = artworkUri.orEmpty(),
     isrc = null,
+    isrcEvidence = null,
     playbackCapability = PlaybackCapability.LOCAL,
-    downloadCapability = DownloadCapability.PERMITTED,
-    downloadCapabilityBasis = DownloadCapabilityBasis.PROVIDER_EXPLICIT,
+    downloadCapability = DownloadCapability.NOT_PERMITTED,
+    downloadCapabilityBasis = DownloadCapabilityBasis.NONE,
     resolutionMode = ResolutionMode.DIRECT_RESOURCE,
     audioFormat = mimeType,
     qualityLabel = "On-Device",
-    canonicalUrl = uri,
+    canonicalUrl = null,
     originalLocalTrack = this,
 )

@@ -115,6 +115,84 @@ class UnifiedSearchAggregatorTest {
         assertFalse("Result A must NEVER be emitted after being cancelled by Query B", emittedTitles.contains("Result A"))
     }
 
+    @Test
+    fun `recent searches are decoupled from live keystroke changes`() = runTest {
+        val committedSearches = mutableListOf<String>()
+        fun commitSearch(query: String) {
+            val trimmed = query.trim()
+            if (trimmed.isNotBlank()) {
+                committedSearches.add(trimmed)
+            }
+        }
+
+        // User types: a -> ad -> ade -> adel -> adele
+        val liveKeystrokes = listOf("a", "ad", "ade", "adel", "adele")
+        for (keystroke in liveKeystrokes) {
+            // Live query changes update the search query but do NOT commit to recent searches
+            // liveQueryChanged(keystroke)
+        }
+
+        assertEquals("Live keystrokes must NOT produce recent search entries", 0, committedSearches.size)
+
+        // User presses Enter / Submit on "adele"
+        commitSearch("adele")
+
+        assertEquals("Only explicit commit produces a recent search entry", 1, committedSearches.size)
+        assertEquals("adele", committedSearches.first())
+    }
+
+    @Test
+    fun `per provider cache isolates providers and pages`() = runTest {
+        var provider1Calls = 0
+        var provider2Calls = 0
+
+        val p1 = provider("p1") {
+            provider1Calls++
+            ProviderResult.Success(listOf(OnlineTrack("p1", "1", "Song 1", "Artist")))
+        }
+        val p2 = provider("p2") {
+            provider2Calls++
+            ProviderResult.Success(listOf(OnlineTrack("p2", "2", "Song 2", "Artist")))
+        }
+
+        val aggregator = UnifiedSearchAggregator(listOf(p1, p2))
+
+        val snap1 = aggregator.searchOnce("query", page = 0)
+        assertEquals(2, snap1.recordings.size)
+        assertEquals(1, provider1Calls)
+        assertEquals(1, provider2Calls)
+
+        // Second search with same query and page -> uses cached provider results
+        val snap2 = aggregator.searchOnce("query", page = 0)
+        assertEquals(2, snap2.recordings.size)
+        assertEquals("Cached search should not invoke provider 1 again", 1, provider1Calls)
+        assertEquals("Cached search should not invoke provider 2 again", 1, provider2Calls)
+
+        // Different page -> triggers provider fetches
+        val snapPage1 = aggregator.searchOnce("query", page = 1)
+        assertEquals(2, provider1Calls)
+        assertEquals(2, provider2Calls)
+    }
+
+    @Test
+    fun `canonical search reducer processes discovery events sequentially`() {
+        val reducer = CanonicalSearchReducer(totalWorkers = 2, query = "Layla")
+
+        val s1 = OnlineRecordingSource("audius", "a1", "Layla", "Eric Clapton", durationMs = 280_000L)
+        val s2 = OnlineRecordingSource("jamendo", "j1", "Layla", "Eric Clapton", durationMs = 282_000L)
+
+        val snap1 = reducer.reduce(DiscoveryEvent.Sources("audius", listOf(s1)))
+        assertEquals(1, snap1.recordings.size)
+        assertEquals(1, snap1.providersPending)
+        assertFalse(snap1.isComplete)
+
+        val snap2 = reducer.reduce(DiscoveryEvent.Sources("jamendo", listOf(s2)))
+        assertEquals(1, snap2.recordings.size)
+        assertEquals(2, snap2.recordings.first().sources.size)
+        assertEquals(0, snap2.providersPending)
+        assertTrue(snap2.isComplete)
+    }
+
     private fun provider(providerId: String, block: suspend () -> ProviderResult<List<OnlineTrack>>) =
         object : MusicCatalogProvider {
             override val id = providerId

@@ -306,6 +306,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                             downloads             = downloads,
                             onQueryChange         = { viewModel.searchQuery.value = it },
                             onSearchOnline        = viewModel::searchOnline,
+                            onCommitSearch        = viewModel::commitSearch,
                             onClearRecentSearches = viewModel::clearRecentSearches,
                             onRemoveRecentSearch  = viewModel::removeRecentSearch,
                             onPlay                = viewModel.playback::play,
