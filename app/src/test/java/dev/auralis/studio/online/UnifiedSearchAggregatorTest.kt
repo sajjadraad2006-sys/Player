@@ -5,6 +5,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -16,7 +17,7 @@ class UnifiedSearchAggregatorTest {
     fun `one provider failure still returns another provider results`() = runTest {
         val working = provider("working") { ProviderResult.Success(listOf(track("audius"))) }
         val failing = provider("failing") { ProviderResult.Error("hidden transport detail") }
-        val result = UnifiedSearchAggregator(listOf(working, failing)).search("song")
+        val result = UnifiedSearchAggregator(listOf(working, failing)).searchOnce("song")
         assertEquals(1, result.tracks.size)
         assertEquals(FailureReason.PROVIDER_ERROR, result.failures.single().reason)
     }
@@ -29,7 +30,7 @@ class UnifiedSearchAggregatorTest {
             started.complete(Unit)
             try { awaitCancellation() } finally { cancelled.complete(Unit) }
         }
-        val job = async { UnifiedSearchAggregator(listOf(slow), timeoutMs = 60_000).search("old") }
+        val job = launch { UnifiedSearchAggregator(listOf(slow), timeoutMs = 60_000).search("old").collect {} }
         started.await()
         job.cancelAndJoin()
         assertTrue(cancelled.isCompleted)
@@ -40,8 +41,8 @@ class UnifiedSearchAggregatorTest {
         var calls = 0
         val source = provider("source") { calls++; ProviderResult.Success(listOf(track("audius"))) }
         val aggregator = UnifiedSearchAggregator(listOf(source))
-        assertFalse(aggregator.search("song").fromCache)
-        assertTrue(aggregator.search("song").fromCache)
+        assertFalse(aggregator.searchOnce("song").fromCache)
+        assertTrue(aggregator.searchOnce("song").fromCache)
         assertEquals(1, calls)
     }
 
@@ -51,7 +52,7 @@ class UnifiedSearchAggregatorTest {
             delay(5_000)
             ProviderResult.Success(emptyList())
         }
-        val result = UnifiedSearchAggregator(listOf(slow), timeoutMs = 100).search("song")
+        val result = UnifiedSearchAggregator(listOf(slow), timeoutMs = 100).searchOnce("song")
         assertEquals(FailureReason.TIMEOUT, result.failures.single().reason)
         assertTrue(result.tracks.isEmpty())
     }

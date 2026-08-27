@@ -40,8 +40,10 @@ class AppContainer(context: Context) {
         streamProviders = listOf(audiusProvider, jamendoProvider),
         downloadProviders = listOf(audiusProvider, jamendoProvider),
     )
+    val localDiscovery = dev.auralis.studio.online.LocalLibraryDiscovery(library)
     val unifiedSearch = UnifiedSearchAggregator(
         providers = musicProviders.catalogProviders,
+        localDiscovery = localDiscovery,
         debugLogging = BuildConfig.DEBUG,
     )
     val downloadManager = dev.auralis.studio.library.DownloadIngestionManager(

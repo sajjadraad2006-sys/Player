@@ -135,11 +135,11 @@ class UnifiedTrackMergerTest {
             previewUrl = "https://preview.example/itunes",
         )
         val unified = UnifiedTrackMerger.merge(listOf(audiusTrack, itunesTrack)).single()
-        val audiusSource = unified.sources.first { it.provider == "audius" }
-        val itunesSource = unified.sources.first { it.provider == "itunes" }
-        assertEquals("https://stream.example/audius", audiusSource.streamUrl)
-        assertEquals("https://download.example/audius", audiusSource.downloadUrl)
-        assertEquals("https://preview.example/itunes", itunesSource.previewUrl)
+        val audiusSource = unified.sources.first { it.provider == "audius" } as OnlineRecordingSource
+        val itunesSource = unified.sources.first { it.provider == "itunes" } as OnlineRecordingSource
+        assertEquals("https://stream.example/audius", audiusSource.originalTrack?.streamUrl)
+        assertEquals("https://download.example/audius", audiusSource.originalTrack?.downloadUrl)
+        assertEquals("https://preview.example/itunes", itunesSource.originalTrack?.previewUrl)
         assertFalse(itunesSource.isDownloadableFullTrack)
     }
 

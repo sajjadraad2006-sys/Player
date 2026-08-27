@@ -2,88 +2,162 @@ package dev.auralis.studio.online
 
 import android.util.Log
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.async
-import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.last
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import java.util.LinkedHashMap
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 data class ProviderFailure(val providerId: String, val reason: FailureReason)
 
 enum class FailureReason { NOT_CONFIGURED, NETWORK, TIMEOUT, RATE_LIMIT, UNAUTHORIZED, UNAVAILABLE, PROVIDER_ERROR }
 
-data class UnifiedSearchResult(
-    val tracks: List<UnifiedTrack>,
-    val failures: List<ProviderFailure> = emptyList(),
-    val fromCache: Boolean = false,
-)
+typealias UnifiedSearchResult = SearchSnapshot
 
 class UnifiedSearchAggregator(
     private val providers: List<MusicCatalogProvider>,
+    private val localDiscovery: LocalLibraryDiscovery? = null,
     private val timeoutMs: Long = 12_000L,
     private val cacheTtlMs: Long = 90_000L,
     private val clockMs: () -> Long = System::currentTimeMillis,
     private val debugLogging: Boolean = false,
 ) {
-    private data class Cached(val createdAt: Long, val result: UnifiedSearchResult)
+    private data class Cached(val createdAt: Long, val result: SearchSnapshot)
     private val cache = object : LinkedHashMap<String, Cached>(12, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Cached>?): Boolean = size > 10
     }
 
-    suspend fun search(query: String, page: Int = 0): UnifiedSearchResult {
+    /**
+     * Progressive search Flow.
+     * Emits incremental snapshots as individual providers complete, preserving stable group identity.
+     *
+     * Invariants:
+     * 1. Cancellation propagates immediately (CancellationException is NEVER swallowed).
+     * 2. Provider failure or timeout in one provider does not cancel or corrupt sibling providers.
+     * 3. Old queries are structurally cancelled at ViewModel collection level.
+     */
+    fun search(query: String, page: Int = 0): Flow<SearchSnapshot> = channelFlow {
         val trimmed = query.trim()
-        if (trimmed.isBlank()) return UnifiedSearchResult(emptyList())
-        val key = "${trimmed.lowercase()}#$page"
-        synchronized(cache) {
-            cache[key]?.takeIf { clockMs() - it.createdAt <= cacheTtlMs }?.let {
-                return it.result.copy(fromCache = true)
+        if (trimmed.isBlank()) {
+            send(SearchSnapshot.EMPTY)
+            return@channelFlow
+        }
+
+        val cacheKey = "${trimmed.lowercase()}#$page"
+        val cachedHit = synchronized(cache) {
+            cache[cacheKey]?.takeIf { clockMs() - it.createdAt <= cacheTtlMs }?.result
+        }
+        if (cachedHit != null) {
+            send(cachedHit.copy(fromCache = true))
+            return@channelFlow
+        }
+
+        val configuredProviders = providers.filter(MusicCatalogProvider::isConfigured)
+        val initialFailures = providers.filterNot(MusicCatalogProvider::isConfigured)
+            .map { ProviderFailure(it.id, FailureReason.NOT_CONFIGURED) }
+
+        val activeGroupList = mutableListOf<CanonicalRecording>()
+        val failureMap = ConcurrentHashMap<String, ProviderFailure>()
+        initialFailures.forEach { failureMap[it.providerId] = it }
+
+        val pendingProviders = AtomicInteger(configuredProviders.size + (if (localDiscovery != null && page == 0) 1 else 0))
+        val mergeMutex = Mutex()
+
+        // 1. Instant local library discovery (on-device, zero-latency)
+        if (localDiscovery != null && page == 0) {
+            launch {
+                try {
+                    val localSources = localDiscovery.search(trimmed)
+                    if (localSources.isNotEmpty()) {
+                        val currentList = mergeMutex.withLock {
+                            activeGroupList.clear()
+                            activeGroupList.addAll(UnifiedTrackMerger.mergeSources(localSources, activeGroupList))
+                            activeGroupList.toList()
+                        }
+                        val remaining = pendingProviders.decrementAndGet()
+                        send(
+                            SearchSnapshot(
+                                recordings = currentList,
+                                failures = failureMap.values.toList(),
+                                isComplete = remaining <= 0,
+                                providersPending = remaining,
+                            )
+                        )
+                    } else {
+                        pendingProviders.decrementAndGet()
+                    }
+                } catch (c: CancellationException) {
+                    throw c
+                } catch (e: Exception) {
+                    if (debugLogging) Log.w("UnifiedSearch", "Local discovery failed: ${e.message}")
+                    pendingProviders.decrementAndGet()
+                }
             }
         }
 
-        val outcomes = supervisorScope {
-            providers.filter(MusicCatalogProvider::isConfigured).map { provider ->
-                async {
-                    try {
-                        provider.id to withTimeout(timeoutMs) { provider.search(trimmed, page) }
-                    } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
-                        provider.id to ProviderResult.Error("timeout", -408)
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (_: Exception) {
-                        provider.id to ProviderResult.Error("provider_error")
+        // 2. Parallel remote catalog discovery
+        for (provider in configuredProviders) {
+            launch {
+                try {
+                    val outcome = withTimeout(timeoutMs) {
+                        provider.search(trimmed, page)
+                    }
+                    when (outcome) {
+                        is ProviderResult.Success -> {
+                            val remoteSources = outcome.data.map(OnlineTrack::toRecordingSource)
+                            if (remoteSources.isNotEmpty()) {
+                                mergeMutex.withLock {
+                                    val merged = UnifiedTrackMerger.mergeSources(remoteSources, activeGroupList)
+                                    activeGroupList.clear()
+                                    activeGroupList.addAll(merged)
+                                }
+                            }
+                        }
+                        ProviderResult.NetworkUnavailable -> failureMap[provider.id] = ProviderFailure(provider.id, FailureReason.NETWORK)
+                        ProviderResult.RateLimited -> failureMap[provider.id] = ProviderFailure(provider.id, FailureReason.RATE_LIMIT)
+                        ProviderResult.NotConfigured -> failureMap[provider.id] = ProviderFailure(provider.id, FailureReason.NOT_CONFIGURED)
+                        ProviderResult.Unauthorized -> failureMap[provider.id] = ProviderFailure(provider.id, FailureReason.UNAUTHORIZED)
+                        ProviderResult.Unavailable -> failureMap[provider.id] = ProviderFailure(provider.id, FailureReason.UNAVAILABLE)
+                        is ProviderResult.Error -> failureMap[provider.id] = ProviderFailure(
+                            provider.id,
+                            if (outcome.code == -408) FailureReason.TIMEOUT else FailureReason.PROVIDER_ERROR,
+                        )
+                    }
+                } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                    failureMap[provider.id] = ProviderFailure(provider.id, FailureReason.TIMEOUT)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    failureMap[provider.id] = ProviderFailure(provider.id, FailureReason.PROVIDER_ERROR)
+                } finally {
+                    val remaining = pendingProviders.decrementAndGet()
+                    val currentList = mergeMutex.withLock { activeGroupList.toList() }
+                    val snapshot = SearchSnapshot(
+                        recordings = currentList,
+                        failures = failureMap.values.toList(),
+                        isComplete = remaining <= 0,
+                        providersPending = remaining,
+                    )
+                    send(snapshot)
+
+                    if (remaining <= 0) {
+                        synchronized(cache) { cache[cacheKey] = Cached(clockMs(), snapshot) }
                     }
                 }
-            }.map { it.await() }
-        }
-
-        val tracks = mutableListOf<OnlineTrack>()
-        val failures = providers.filterNot(MusicCatalogProvider::isConfigured)
-            .map { ProviderFailure(it.id, FailureReason.NOT_CONFIGURED) }.toMutableList()
-        outcomes.forEach { (providerId, result) ->
-            when (result) {
-                is ProviderResult.Success -> {
-                    tracks += result.data
-                    if (debugLogging) Log.d("UnifiedSearch", "query=$trimmed provider=$providerId results=${result.data.size}")
-                }
-                ProviderResult.NetworkUnavailable -> failures += ProviderFailure(providerId, FailureReason.NETWORK)
-                ProviderResult.RateLimited -> failures += ProviderFailure(providerId, FailureReason.RATE_LIMIT)
-                ProviderResult.NotConfigured -> failures += ProviderFailure(providerId, FailureReason.NOT_CONFIGURED)
-                ProviderResult.Unauthorized -> failures += ProviderFailure(providerId, FailureReason.UNAUTHORIZED)
-                ProviderResult.Unavailable -> failures += ProviderFailure(providerId, FailureReason.UNAVAILABLE)
-                is ProviderResult.Error -> failures += ProviderFailure(
-                    providerId,
-                    if (result.code == -408) FailureReason.TIMEOUT else FailureReason.PROVIDER_ERROR,
-                )
             }
         }
-
-        val merged = UnifiedTrackMerger.merge(tracks)
-        if (debugLogging) merged.forEach {
-            Log.d("UnifiedSearch", "identity=${it.recordingIdentity} sources=${it.sources.joinToString { source -> source.provider }}")
-        }
-        val result = UnifiedSearchResult(merged, failures)
-        synchronized(cache) { cache[key] = Cached(clockMs(), result) }
-        return result
     }
+
+    /**
+     * Backward-compatible one-shot search derived from the progressive Flow.
+     */
+    suspend fun searchOnce(query: String, page: Int = 0): SearchSnapshot =
+        search(query, page).last()
 
     fun invalidate() = synchronized(cache) { cache.clear() }
 }

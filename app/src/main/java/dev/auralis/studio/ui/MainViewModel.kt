@@ -21,8 +21,12 @@ import dev.auralis.studio.core.model.Track
 import dev.auralis.studio.core.model.LyricsUiState
 import dev.auralis.studio.lyrics.LrclibTrack
 import dev.auralis.studio.lyrics.LyricsClock
+import dev.auralis.studio.online.CanonicalRecording
 import dev.auralis.studio.online.DownloadQuality
+import dev.auralis.studio.online.LocalRecordingSource
+import dev.auralis.studio.online.OnlineRecordingSource
 import dev.auralis.studio.online.OnlineTrack
+import dev.auralis.studio.online.PlaybackSourceSelector
 import dev.auralis.studio.online.ProviderResult
 import dev.auralis.studio.online.UnifiedTrack
 import dev.auralis.studio.online.toStreamableTrack
@@ -223,15 +227,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (trimmed.isBlank()) {
             _onlineResults.value = emptyList()
             _isSearchingOnline.value = false
+            _onlineProviderFailures.value = 0
             return
         }
         onlineSearchJob = viewModelScope.launch {
             addRecentSearch(trimmed)
             _isSearchingOnline.value = true
             try {
-                val aggregated = container.unifiedSearch.search(trimmed)
-                _onlineResults.value = aggregated.tracks
-                _onlineProviderFailures.value = aggregated.failures.size
+                container.unifiedSearch.search(trimmed).collect { snapshot ->
+                    if (generation == onlineSearchGeneration) {
+                        _onlineResults.value = snapshot.recordings
+                        _onlineProviderFailures.value = snapshot.failures.size
+                        _isSearchingOnline.value = !snapshot.isComplete
+                    }
+                }
             } finally {
                 if (generation == onlineSearchGeneration) _isSearchingOnline.value = false
             }
@@ -256,47 +265,74 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun playOnlineTrack(unifiedTrack: UnifiedTrack) {
+    fun playOnlineTrack(unifiedTrack: CanonicalRecording) {
         viewModelScope.launch {
-            val onlineTrack = unifiedTrack.playableSource ?: return@launch
-            // Recording identity wins across providers; DownloadKey remains provider-specific.
+            // Check completed download in local database first
             val downloadedUri: String? = withContext(Dispatchers.IO) {
-                (downloadsDao.findCompletedByRecordingIdentity(unifiedTrack.recordingIdentity)
-                    ?: downloadsDao.findByKey(onlineTrack.provider, onlineTrack.id))
+                downloadsDao.findCompletedByRecordingIdentity(unifiedTrack.recordingIdentity)
                     ?.takeIf { it.status == DownloadStatus.COMPLETED.name && it.trackUri.isNotBlank() }
                     ?.trackUri
             }
 
             if (downloadedUri != null) {
-                val localTrack = container.library.track(downloadedUri) ?: onlineTrack.toStreamableTrack()?.copy(
+                val localTrack = container.library.track(downloadedUri) ?: Track(
+                    id = -1L,
                     uri = downloadedUri,
                     title = unifiedTrack.title,
                     artist = unifiedTrack.artist,
                     album = unifiedTrack.album,
                     durationMs = unifiedTrack.durationMs,
                 )
-                localTrack?.let { playback.play(it, listOf(it)) }
+                playback.play(localTrack, listOf(localTrack))
                 return@launch
             }
 
-            val trackToPlay = when (val resolved = providerRegistry.resolveStream(onlineTrack)) {
-                is ProviderResult.Success -> onlineTrack.copy(
-                    streamUrl = resolved.data.url.takeIf { resolved.data.kind == dev.auralis.studio.online.MediaUrlKind.STREAM },
-                    previewUrl = resolved.data.url.takeIf { resolved.data.kind == dev.auralis.studio.online.MediaUrlKind.PREVIEW },
-                    streamAllowed = resolved.data.kind == dev.auralis.studio.online.MediaUrlKind.STREAM,
-                ).toStreamableTrack()
-                else -> onlineTrack.toStreamableTrack()
+            // Deterministic playback candidate failover
+            val candidates = PlaybackSourceSelector.rank(unifiedTrack.sources)
+            for (candidate in candidates) {
+                when (candidate) {
+                    is LocalRecordingSource -> {
+                        val localTrack = candidate.originalLocalTrack ?: container.library.track(candidate.contentUri)
+                        if (localTrack != null) {
+                            playback.play(localTrack, listOf(localTrack))
+                            return@launch
+                        }
+                    }
+                    is OnlineRecordingSource -> {
+                        val onlineTrack = candidate.originalTrack
+                        if (onlineTrack != null) {
+                            val resolved = providerRegistry.resolveStream(onlineTrack)
+                            if (resolved is ProviderResult.Success) {
+                                val trackToPlay = onlineTrack.copy(
+                                    streamUrl = resolved.data.url.takeIf { resolved.data.kind == dev.auralis.studio.online.MediaUrlKind.STREAM },
+                                    previewUrl = resolved.data.url.takeIf { resolved.data.kind == dev.auralis.studio.online.MediaUrlKind.PREVIEW },
+                                    streamAllowed = resolved.data.kind == dev.auralis.studio.online.MediaUrlKind.STREAM,
+                                ).toStreamableTrack()
+                                if (trackToPlay != null) {
+                                    playback.play(trackToPlay, listOf(trackToPlay))
+                                    return@launch
+                                }
+                            } else if (!onlineTrack.bestStreamUrl.isNullOrBlank()) {
+                                val trackToPlay = onlineTrack.toStreamableTrack()
+                                if (trackToPlay != null) {
+                                    playback.play(trackToPlay, listOf(trackToPlay))
+                                    return@launch
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            trackToPlay?.let { playback.play(it, listOf(it)) }
         }
     }
 
     /** One tap → at most one download. Re-entry for an active DownloadKey is ignored. */
     private val inFlightDownloads = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    fun downloadOnlineTrack(unifiedTrack: UnifiedTrack) {
+    fun downloadOnlineTrack(unifiedTrack: CanonicalRecording) {
         val app = getApplication<Application>()
-        val source = unifiedTrack.preferredDownloadSource(downloadQuality.value)
+        val selectedSource = unifiedTrack.bestDownloadSource(downloadQuality.value) as? OnlineRecordingSource
+        val source = selectedSource?.originalTrack
         if (source == null) {
             Toast.makeText(app, app.getString(R.string.preview_only_no_download), Toast.LENGTH_SHORT).show()
             return

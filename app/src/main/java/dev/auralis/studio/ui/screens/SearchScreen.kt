@@ -510,7 +510,7 @@ fun SearchScreen(
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 28.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(onlineResults, key = { "online:${it.recordingIdentity}" }) { onlineTrack ->
+                    items(onlineResults, key = { "online:${it.uiKey}" }) { onlineTrack ->
                         val downloadStatus = RecordingDownloadMatcher.status(onlineTrack, downloads)
 
                         OnlineTrackCard(
@@ -540,9 +540,10 @@ fun SearchScreen(
                             Text(source.provider.replaceFirstChar(Char::uppercase), fontWeight = FontWeight.SemiBold)
                             Text(
                                 when {
+                                    source.isLocal -> stringResource(R.string.on_device_count, 1)
                                     source.isDownloadableFullTrack -> stringResource(R.string.full_download)
-                                    source.streamAllowed && !source.streamUrl.isNullOrBlank() -> stringResource(R.string.full_stream)
-                                    !source.previewUrl.isNullOrBlank() -> stringResource(R.string.preview_available)
+                                    source.playbackCapability == dev.auralis.studio.online.PlaybackCapability.FULL_STREAM -> stringResource(R.string.full_stream)
+                                    source.playbackCapability == dev.auralis.studio.online.PlaybackCapability.PREVIEW -> stringResource(R.string.preview_available)
                                     else -> stringResource(R.string.not_available)
                                 },
                                 style = MaterialTheme.typography.bodySmall,
@@ -622,9 +623,10 @@ private fun OnlineTrackCard(
                     when {
                         downloadStatus == DownloadStatus.COMPLETED.name -> stringResource(R.string.downloaded)
                         downloadStatus == DownloadStatus.DOWNLOADING.name -> stringResource(R.string.downloading)
+                        track.isLocal -> stringResource(R.string.on_device_count, 1)
                         // Honest capability: previews are labelled Preview, never Download.
-                        track.sources.none { it.isDownloadableFullTrack } && track.streamSource == null -> stringResource(R.string.preview_available)
-                        track.sources.none { it.isDownloadableFullTrack } -> stringResource(R.string.full_stream)
+                        !track.isDownloadable && track.bestPlaybackSource?.playbackCapability == dev.auralis.studio.online.PlaybackCapability.PREVIEW -> stringResource(R.string.preview_available)
+                        !track.isDownloadable -> stringResource(R.string.full_stream)
                         else -> stringResource(R.string.free_stream_download)
                     },
                     style = MaterialTheme.typography.labelSmall,
