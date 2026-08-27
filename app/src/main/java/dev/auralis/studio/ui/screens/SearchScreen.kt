@@ -120,6 +120,7 @@ fun SearchScreen(
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var sourceSheetTrack by remember { mutableStateOf<UnifiedTrack?>(null) }
+    var inspectingSource by remember { mutableStateOf<dev.auralis.studio.online.RecordingSource?>(null) }
     var showImportDialog by remember { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
 
@@ -127,6 +128,15 @@ fun SearchScreen(
         dev.auralis.studio.ui.components.ImportFromLinkDialog(
             resolver = mediaResolver,
             onDismiss = { showImportDialog = false },
+            onEnqueueDownload = onEnqueueResolverDownload,
+        )
+    }
+
+    if (inspectingSource != null && mediaResolver != null) {
+        dev.auralis.studio.ui.components.SourceInspectionBottomSheet(
+            source = inspectingSource!!,
+            resolver = mediaResolver,
+            onDismiss = { inspectingSource = null },
             onEnqueueDownload = onEnqueueResolverDownload,
         )
     }
@@ -540,17 +550,26 @@ fun SearchScreen(
                     ) {
                         items(onlineResults, key = { "online:${it.uiKey}" }) { onlineTrack ->
                             val downloadStatus = RecordingDownloadMatcher.status(onlineTrack, downloads)
+                            val isYouTubeOnly = onlineTrack.bestPlaybackSource == null && onlineTrack.sources.any { it.provider.equals("youtube", true) }
 
                             OnlineTrackCard(
                                 track = onlineTrack,
                                 downloadStatus = downloadStatus,
                                 onPlay = {
                                     if (query.isNotBlank()) onCommitSearch(query)
-                                    onPlayOnline(onlineTrack)
+                                    if (isYouTubeOnly) {
+                                        inspectingSource = onlineTrack.sources.firstOrNull { it.provider.equals("youtube", true) } ?: onlineTrack.sources.first()
+                                    } else {
+                                        onPlayOnline(onlineTrack)
+                                    }
                                 },
                                 onDownload = {
                                     if (query.isNotBlank()) onCommitSearch(query)
-                                    onDownloadOnline(onlineTrack)
+                                    if (isYouTubeOnly) {
+                                        inspectingSource = onlineTrack.sources.firstOrNull { it.provider.equals("youtube", true) } ?: onlineTrack.sources.first()
+                                    } else {
+                                        onDownloadOnline(onlineTrack)
+                                    }
                                 },
                                 onSources = { sourceSheetTrack = onlineTrack },
                             )
@@ -568,8 +587,16 @@ fun SearchScreen(
                 Spacer(Modifier.height(12.dp))
                 unified.sources.forEach { source ->
                     Row(
-                        Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                inspectingSource = source
+                                sourceSheetTrack = null
+                            }
+                            .padding(vertical = 8.dp, horizontal = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(source.provider.replaceFirstChar(Char::uppercase), fontWeight = FontWeight.SemiBold)
@@ -579,7 +606,7 @@ fun SearchScreen(
                                     source.isDownloadableFullTrack -> stringResource(R.string.full_download)
                                     source.playbackCapability == dev.auralis.studio.online.PlaybackCapability.FULL_STREAM -> stringResource(R.string.full_stream)
                                     source.playbackCapability == dev.auralis.studio.online.PlaybackCapability.PREVIEW -> stringResource(R.string.preview_available)
-                                    else -> stringResource(R.string.not_available)
+                                    else -> "Inspect source with LRR"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -35,8 +35,9 @@ class AppContainer(context: Context) {
     val jamendoProvider = JamendoClient(BuildConfig.JAMENDO_CLIENT_ID)
     val itunesProvider = ITunesCatalogProvider()
     val deezerProvider = DeezerCatalogProvider()
+    val youtubeProvider = dev.auralis.studio.online.YouTubeCatalogProvider(BuildConfig.YOUTUBE_API_KEY)
     val musicProviders = MusicProviderRegistry(
-        catalogProviders = listOf(audiusProvider, jamendoProvider, itunesProvider, deezerProvider),
+        catalogProviders = listOf(audiusProvider, jamendoProvider, itunesProvider, deezerProvider, youtubeProvider),
         streamProviders = listOf(audiusProvider, jamendoProvider),
         downloadProviders = listOf(audiusProvider, jamendoProvider),
     )
