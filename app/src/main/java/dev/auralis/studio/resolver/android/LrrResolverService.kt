@@ -55,12 +55,22 @@ class LrrResolverService : Service() {
 
             val job = serviceScope.launch {
                 try {
-                    val resultJson = engine.inspect(jsonStr)
-                    val isSuccess = isJsonSuccess(resultJson)
-                    if (isSuccess) {
-                        callback.onSuccess(requestId, resultJson)
+                    val rawResult = engine.inspect(jsonStr)
+                    val finalJson = if (rawResult.length > MAX_PAYLOAD_SIZE_BYTES) {
+                        buildErrorJson(
+                            source = extractSourceUrl(jsonStr),
+                            code = "PayloadTooLarge",
+                            message = "The media resolution response exceeded safe communication limits.",
+                            details = "Payload size ${rawResult.length} bytes exceeded $MAX_PAYLOAD_SIZE_BYTES limit",
+                        )
                     } else {
-                        callback.onFailure(requestId, resultJson)
+                        rawResult
+                    }
+                    val isSuccess = isJsonSuccess(finalJson)
+                    if (isSuccess) {
+                        callback.onSuccess(requestId, finalJson)
+                    } else {
+                        callback.onFailure(requestId, finalJson)
                     }
                 } catch (e: RemoteException) {
                     Log.w(TAG, "Remote client disconnected during inspect for $requestId")
@@ -89,12 +99,22 @@ class LrrResolverService : Service() {
 
             val job = serviceScope.launch {
                 try {
-                    val resultJson = engine.resolve(jsonStr)
-                    val isSuccess = isJsonSuccess(resultJson)
-                    if (isSuccess) {
-                        callback.onSuccess(requestId, resultJson)
+                    val rawResult = engine.resolve(jsonStr)
+                    val finalJson = if (rawResult.length > MAX_PAYLOAD_SIZE_BYTES) {
+                        buildErrorJson(
+                            source = extractSourceUrl(jsonStr),
+                            code = "PayloadTooLarge",
+                            message = "The media resolution response exceeded safe communication limits.",
+                            details = "Payload size ${rawResult.length} bytes exceeded $MAX_PAYLOAD_SIZE_BYTES limit",
+                        )
                     } else {
-                        callback.onFailure(requestId, resultJson)
+                        rawResult
+                    }
+                    val isSuccess = isJsonSuccess(finalJson)
+                    if (isSuccess) {
+                        callback.onSuccess(requestId, finalJson)
+                    } else {
+                        callback.onFailure(requestId, finalJson)
                     }
                 } catch (e: RemoteException) {
                     Log.w(TAG, "Remote client disconnected during resolve for $requestId")
@@ -198,5 +218,6 @@ class LrrResolverService : Service() {
 
     companion object {
         private const val TAG = "LRR:Service"
+        private const val MAX_PAYLOAD_SIZE_BYTES = 512 * 1024
     }
 }

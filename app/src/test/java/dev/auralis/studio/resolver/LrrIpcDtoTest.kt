@@ -58,7 +58,7 @@ class LrrIpcDtoTest {
                     "formatId": "http_mp3",
                     "url": "https://cf-media.sndcdn.com/stream.mp3?token=signed",
                     "headers": {"User-Agent": "Lyrune"},
-                    "resolvedAtElapsedRealtimeMs": 1000,
+                    "resolvedAtEpochMs": 1000,
                     "resolutionMode": "DIRECT_RESOURCE",
                     "mediaKind": "AUDIO_ONLY"
                 }

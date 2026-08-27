@@ -24,6 +24,8 @@ object ResolverFormatSelector {
         val eligible = formats.filter {
             it.resolutionMode == ResolutionMode.DIRECT_RESOURCE &&
                 it.drmState == DrmState.NONE &&
+                it.blockReason == DeliveryBlockReason.NONE &&
+                !it.deliveryRequirements.hasDrm &&
                 (!requirePermittedDownload || it.downloadCapability == DownloadCapability.PERMITTED)
         }
 

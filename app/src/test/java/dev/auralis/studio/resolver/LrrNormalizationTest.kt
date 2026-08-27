@@ -94,7 +94,7 @@ class LrrNormalizationTest {
                         "User-Agent": "Lyrune",
                         "Accept": "*/*"
                     },
-                    "resolvedAtElapsedRealtimeMs": 1000,
+                    "resolvedAtEpochMs": 1780000000000,
                     "knownExpiryEpochMs": 1780000000000,
                     "resolutionMode": "DIRECT_RESOURCE",
                     "mediaKind": "AUDIO_ONLY"

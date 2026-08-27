@@ -4,9 +4,11 @@ Strictly metadata and format inspection (download=False).
 Supports QuickJS-NG JavaScript runtime and yt-dlp-ejs.
 """
 
+import ipaddress
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import tempfile
@@ -46,22 +48,15 @@ _real_extraction_succeeded: bool = False
 MAX_BINDER_PAYLOAD_BYTES = 512 * 1024
 
 # Disallowed / dangerous URL schemes for SSRF hardening
-FORBIDDEN_SCHEMES = {"file", "content", "javascript", "data", "ftp", "about", "intent"}
+FORBIDDEN_SCHEMES = {"file", "content", "javascript", "data", "ftp", "about", "intent", "blob"}
 
-# Private / loopback host patterns for SSRF hardening
-PRIVATE_HOST_REGEX = re.compile(
-    r"^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|::1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|169\.254\.\d+\.\d+)$",
-    re.IGNORECASE,
-)
-
-# Safe header names whitelist
+# Safe header names whitelist (Range is excluded; downstream downloader owns Range/resume)
 SAFE_HEADER_KEYS = {
     "user-agent",
     "referer",
     "origin",
     "accept",
     "accept-language",
-    "range",
 }
 
 # Sensitive header names
@@ -82,6 +77,14 @@ SEGMENTED_PROTOCOLS = {
     "mss",
     "ism",
     "f4m",
+}
+
+ALLOWED_EXTRA_OPTIONS = {
+    "preferred_quality",
+    "user_agent",
+    "geo_bypass_country",
+    "subtitles_lang",
+    "audio_format",
 }
 
 
@@ -279,17 +282,40 @@ def _extract_expiry_ms(url: str) -> Optional[int]:
 
 
 def _sanitize_url(url: str) -> str:
-    """Strips sensitive query parameters from logged or descriptor URLs."""
+    """Strips sensitive query parameters and userinfo from logged or descriptor URLs."""
     if not url:
         return ""
-    q_idx = url.find("?")
-    if q_idx == -1:
-        return url
-    return url[:q_idx] + "?<redacted>"
+    try:
+        parsed = urllib.parse.urlparse(url.strip())
+        clean_netloc = parsed.hostname or ""
+        if parsed.port:
+            clean_netloc += f":{parsed.port}"
+        query_redacted = "?<redacted>" if parsed.query else ""
+        return f"{parsed.scheme}://{clean_netloc}{parsed.path}{query_redacted}"
+    except Exception:
+        q_idx = url.find("?")
+        base = url[:q_idx] if q_idx != -1 else url
+        base = re.sub(r"https?://[^/@]+@", "https://", base)
+        return f"{base}?<redacted>" if q_idx != -1 else base
+
+
+def _is_private_ip(ip_str: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        return (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        )
+    except ValueError:
+        return False
 
 
 def _is_safe_url_for_extraction(url: str) -> Tuple[bool, Optional[str]]:
-    """SSRF & scheme validation."""
+    """SSRF & scheme validation with literal and DNS address inspection."""
     if not url or not url.strip():
         return False, "Empty URL"
     try:
@@ -297,11 +323,34 @@ def _is_safe_url_for_extraction(url: str) -> Tuple[bool, Optional[str]]:
         scheme = parsed.scheme.lower()
         if scheme in FORBIDDEN_SCHEMES or scheme not in ("http", "https"):
             return False, f"Forbidden URL scheme: '{scheme}'"
+
+        if parsed.username or parsed.password:
+            return False, "URLs with embedded credentials are not permitted"
+
         host = (parsed.hostname or "").strip()
         if not host:
             return False, "Missing URL host"
-        if PRIVATE_HOST_REGEX.match(host):
-            return False, f"Forbidden private/loopback host: '{host}'"
+
+        # Check localhost string names
+        if host.lower() in ("localhost", "ip6-localhost", "ip6-loopback") or host.lower().endswith(".localhost") or host.lower().endswith(".local"):
+            return False, f"Forbidden localhost hostname: '{host}'"
+
+        # Check literal IP address
+        if _is_private_ip(host):
+            return False, f"Forbidden private/loopback IP address: '{host}'"
+
+        # DNS resolution check for private/loopback addresses
+        try:
+            addr_info = socket.getaddrinfo(host, None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
+            for res in addr_info:
+                sockaddr = res[4]
+                ip_resolved = sockaddr[0]
+                if _is_private_ip(ip_resolved):
+                    return False, f"Hostname '{host}' resolves to private address '{ip_resolved}'"
+        except socket.gaierror:
+            # If DNS fails here, yt-dlp will handle with typed DnsFailure later
+            pass
+
         return True, None
     except Exception as e:
         return False, f"Malformed URL: {e}"
@@ -328,16 +377,22 @@ def _classify_drm_state(fmt: Dict[str, Any], info: Dict[str, Any]) -> str:
     return "NONE"
 
 
-def _classify_format_delivery(fmt: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+def _classify_format_delivery(fmt: Dict[str, Any], info: Dict[str, Any]) -> Tuple[str, str, Dict[str, Any]]:
     """
-    Evaluates Format Delivery Classification Matrix.
-    url != null does NOT imply DIRECT_RESOURCE.
+    Evaluates Format Delivery Classification Matrix with strict precedence.
+    Order:
+    1. DRM / security restriction -> ENGINE_REQUIRED (DRM_PROTECTED)
+    2. Sensitive / unsupported auth -> ENGINE_REQUIRED (SENSITIVE_AUTH_REQUIRED)
+    3. request_data / POST -> ENGINE_REQUIRED (UNSUPPORTED_POST_DATA)
+    4. Browser impersonation -> ENGINE_REQUIRED (UNSUPPORTED_BROWSER_TARGET)
+    5. Segmented (HLS, DASH, fragments, manifests) -> SEGMENTED_RESOURCE (SEGMENTED_STREAM)
+    6. Plain HTTP/HTTPS GET -> DIRECT_RESOURCE (NONE)
     """
     protocol = (fmt.get("protocol") or "").lower()
     manifest_url = fmt.get("manifest_url")
     fragments = fmt.get("fragments")
     request_data = fmt.get("request_data") or fmt.get("post_data")
-    has_drm = fmt.get("has_drm") is True
+    has_drm = (fmt.get("has_drm") is True) or (info.get("has_drm") is True) or bool(fmt.get("drm"))
     impersonate = fmt.get("impersonate")
     headers = fmt.get("http_headers") or {}
 
@@ -359,18 +414,31 @@ def _classify_format_delivery(fmt: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]
         "hasDrm": has_drm,
     }
 
-    if has_drm or request_data or impersonate or has_sensitive_header:
+    if has_drm:
         mode = "ENGINE_REQUIRED"
+        block_reason = "DRM_PROTECTED"
+    elif has_sensitive_header:
+        mode = "ENGINE_REQUIRED"
+        block_reason = "SENSITIVE_AUTH_REQUIRED"
+    elif request_data:
+        mode = "ENGINE_REQUIRED"
+        block_reason = "UNSUPPORTED_POST_DATA"
+    elif impersonate:
+        mode = "ENGINE_REQUIRED"
+        block_reason = "UNSUPPORTED_BROWSER_TARGET"
     elif is_segmented:
         mode = "SEGMENTED_RESOURCE"
+        block_reason = "SEGMENTED_STREAM"
     else:
         url = fmt.get("url") or ""
         if url.startswith("http://") or url.startswith("https://"):
             mode = "DIRECT_RESOURCE"
+            block_reason = "NONE"
         else:
             mode = "ENGINE_REQUIRED"
+            block_reason = "NONE"
 
-    return mode, reqs
+    return mode, block_reason, reqs
 
 
 def _normalize_format_descriptors(
@@ -387,7 +455,7 @@ def _normalize_format_descriptors(
             continue
 
         media_kind = _classify_media_kind(f)
-        mode, reqs = _classify_format_delivery(f)
+        mode, block_reason, reqs = _classify_format_delivery(f, info)
         drm_state = _classify_drm_state(f, info)
 
         tbr = f.get("tbr") or f.get("abr")
@@ -425,6 +493,7 @@ def _normalize_format_descriptors(
             "protocol": f.get("protocol"),
             "resolutionMode": mode,
             "drmState": drm_state,
+            "blockReason": block_reason,
             "deliveryRequirements": reqs,
             "downloadCapability": "UNKNOWN",
             "downloadCapabilityBasis": "NONE",
@@ -448,6 +517,7 @@ def _normalize_format_descriptors(
 def _extract_best_lease(
     raw_formats: List[Dict[str, Any]],
     request_id: str,
+    info: Dict[str, Any],
     format_hint: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     if not raw_formats:
@@ -479,7 +549,7 @@ def _extract_best_lease(
         if str(k).lower() in SAFE_HEADER_KEYS
     }
 
-    mode, _ = _classify_format_delivery(candidate)
+    mode, _, _ = _classify_format_delivery(candidate, info)
     media_kind = _classify_media_kind(candidate)
 
     return {
@@ -487,7 +557,7 @@ def _extract_best_lease(
         "formatId": str(candidate.get("format_id") or "unknown"),
         "url": url,
         "headers": safe_headers,
-        "resolvedAtElapsedRealtimeMs": int(time.time() * 1000),
+        "resolvedAtEpochMs": int(time.time() * 1000),
         "knownExpiryEpochMs": _extract_expiry_ms(url),
         "resolutionMode": mode,
         "mediaKind": media_kind,
@@ -535,7 +605,7 @@ def _normalize_media(
                 "protocol": f.get("protocol"),
                 "httpHeaders": {str(k): str(v) for k, v in (f.get("http_headers") or {}).items() if str(k).lower() in SAFE_HEADER_KEYS},
                 "expiresAtEpochMs": _extract_expiry_ms(u),
-                "resolutionMode": _classify_format_delivery(f)[0],
+                "resolutionMode": _classify_format_delivery(f, info)[0],
                 "isAudioOnly": _classify_media_kind(f) == "AUDIO_ONLY",
                 "downloadCapability": "UNKNOWN",
                 "downloadCapabilityBasis": "NONE",
@@ -630,23 +700,39 @@ def _execute_extraction(request_json: str, is_resolve: bool) -> str:
     try:
         req = json.loads(request_json)
         source_url = req.get("sourceUrl") or ""
+        source_id = req.get("sourceId") or ""
         request_id = req.get("requestId") or "req-default"
         intent = req.get("intent") or ("DOWNLOAD" if is_resolve else "INSPECT")
         format_hint = req.get("formatHint")
+        extra_options = req.get("extraOptions") or {}
 
-        # 1. URL scheme and SSRF validation
-        is_safe, error_reason = _is_safe_url_for_extraction(source_url)
-        if not is_safe:
+        # 1. Identifier validation: at least sourceUrl or sourceId must be non-empty
+        if not source_url.strip() and not source_id.strip():
             return json.dumps({
                 "success": False,
                 "error": {
-                    "source": source_url,
+                    "source": "",
                     "technicalCode": "UnsupportedUrl",
                     "isRetryable": False,
-                    "safeUserMessage": f"Invalid link: {error_reason}",
-                    "debugDetails": f"SSRF / scheme check failed: {error_reason}",
+                    "safeUserMessage": "No source URL or identifier provided.",
+                    "debugDetails": "Both sourceUrl and sourceId were empty",
                 },
             })
+
+        # 2. URL scheme and SSRF validation
+        if source_url:
+            is_safe, error_reason = _is_safe_url_for_extraction(source_url)
+            if not is_safe:
+                return json.dumps({
+                    "success": False,
+                    "error": {
+                        "source": _sanitize_url(source_url),
+                        "technicalCode": "UnsupportedUrl",
+                        "isRetryable": False,
+                        "safeUserMessage": f"Invalid link: {error_reason}",
+                        "debugDetails": f"SSRF / scheme check failed: {error_reason}",
+                    },
+                })
 
         if not YT_DLP_AVAILABLE:
             return json.dumps({
@@ -669,6 +755,13 @@ def _execute_extraction(request_json: str, is_resolve: bool) -> str:
             "no_color": True,
             "socket_timeout": 15,
         }
+
+        # Apply strictly whitelisted extraOptions
+        for k, v in extra_options.items():
+            if str(k).lower() in ALLOWED_EXTRA_OPTIONS and isinstance(v, str) and len(v) <= 256:
+                if k == "user_agent":
+                    ydl_opts["http_headers"] = ydl_opts.get("http_headers", {})
+                    ydl_opts["http_headers"]["User-Agent"] = v
 
         qjs = req.get("quickJsPath") or get_quickjs_path()
         if qjs and os.path.exists(qjs):
@@ -736,7 +829,7 @@ def _execute_extraction(request_json: str, is_resolve: bool) -> str:
             }
 
             if is_resolve or intent in ("PLAYBACK", "DOWNLOAD"):
-                lease_dto = _extract_best_lease(raw_formats, request_id, format_hint)
+                lease_dto = _extract_best_lease(raw_formats, request_id, info_sanitized, format_hint)
                 if lease_dto:
                     response_payload["lease"] = lease_dto
 
@@ -748,7 +841,7 @@ def _execute_extraction(request_json: str, is_resolve: bool) -> str:
                 return json.dumps({
                     "success": False,
                     "error": {
-                        "source": source_url,
+                        "source": _sanitize_url(source_url),
                         "technicalCode": "PayloadTooLarge",
                         "isRetryable": False,
                         "safeUserMessage": "The media resolution response exceeded safe communication limits.",
@@ -760,7 +853,7 @@ def _execute_extraction(request_json: str, is_resolve: bool) -> str:
             return serialized
 
     except Exception as e:
-        error_dto = _map_exception_to_error(e, source_url)
+        error_dto = _map_exception_to_error(e, _sanitize_url(source_url))
         return json.dumps({"success": False, "error": error_dto})
 
 

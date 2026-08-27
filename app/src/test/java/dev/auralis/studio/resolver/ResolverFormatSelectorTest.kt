@@ -60,6 +60,46 @@ class ResolverFormatSelectorTest {
     }
 
     @Test
+    fun selectBestDescriptor_drmFormatsNeverSelectedEvenWithHighestBitrate() {
+        val descriptors = listOf(
+            ResolvedFormatDescriptor(
+                formatId = "fmt_drm_high_bitrate_1000",
+                mediaKind = MediaKind.AUDIO_ONLY,
+                extension = "flac",
+                bitrateKbps = 1000.0,
+                resolutionMode = ResolutionMode.DIRECT_RESOURCE,
+                drmState = DrmState.PRESENT,
+                blockReason = dev.auralis.studio.resolver.api.DeliveryBlockReason.DRM_PROTECTED,
+                downloadCapability = DownloadCapability.PERMITTED,
+            ),
+            ResolvedFormatDescriptor(
+                formatId = "fmt_drm_possible_900",
+                mediaKind = MediaKind.AUDIO_ONLY,
+                extension = "flac",
+                bitrateKbps = 900.0,
+                resolutionMode = ResolutionMode.DIRECT_RESOURCE,
+                drmState = DrmState.POSSIBLE,
+                blockReason = dev.auralis.studio.resolver.api.DeliveryBlockReason.DRM_POSSIBLE,
+                downloadCapability = DownloadCapability.PERMITTED,
+            ),
+            ResolvedFormatDescriptor(
+                formatId = "fmt_clean_audio_128",
+                mediaKind = MediaKind.AUDIO_ONLY,
+                extension = "m4a",
+                bitrateKbps = 128.0,
+                resolutionMode = ResolutionMode.DIRECT_RESOURCE,
+                drmState = DrmState.NONE,
+                blockReason = dev.auralis.studio.resolver.api.DeliveryBlockReason.NONE,
+                downloadCapability = DownloadCapability.PERMITTED,
+            ),
+        )
+
+        val selected = ResolverFormatSelector.selectBestDescriptor(descriptors, AudioQualityPreference.BEST)
+        assertNotNull("Clean direct format must be selected", selected)
+        assertEquals("fmt_clean_audio_128", selected?.formatId)
+    }
+
+    @Test
     fun selectBestDescriptor_ranksByAudioOnlyAndQuality() {
         val descriptors = listOf(
             ResolvedFormatDescriptor(

@@ -77,7 +77,9 @@ object LrrIpcParser {
                         formatId = l["formatId"]?.jsonPrimitive?.contentOrNull ?: "",
                         url = l["url"]?.jsonPrimitive?.contentOrNull ?: "",
                         headers = headersMap,
-                        resolvedAtElapsedRealtimeMs = l["resolvedAtElapsedRealtimeMs"]?.jsonPrimitive?.longOrNull ?: System.currentTimeMillis(),
+                        resolvedAtEpochMs = l["resolvedAtEpochMs"]?.jsonPrimitive?.longOrNull
+                            ?: l["resolvedAtElapsedRealtimeMs"]?.jsonPrimitive?.longOrNull
+                            ?: System.currentTimeMillis(),
                         knownExpiryEpochMs = l["knownExpiryEpochMs"]?.jsonPrimitive?.longOrNull,
                         resolutionMode = mode,
                         mediaKind = kind,
@@ -124,6 +126,13 @@ object LrrIpcParser {
                 dev.auralis.studio.resolver.api.DrmState.NONE
             }
 
+            val blockReasonStr = f["blockReason"]?.jsonPrimitive?.contentOrNull ?: "NONE"
+            val blockReason = try {
+                dev.auralis.studio.resolver.api.DeliveryBlockReason.valueOf(blockReasonStr)
+            } catch (_: Exception) {
+                dev.auralis.studio.resolver.api.DeliveryBlockReason.NONE
+            }
+
             val kindStr = f["mediaKind"]?.jsonPrimitive?.contentOrNull ?: "AUDIO_ONLY"
             val kind = try {
                 dev.auralis.studio.resolver.api.MediaKind.valueOf(kindStr)
@@ -131,21 +140,14 @@ object LrrIpcParser {
                 dev.auralis.studio.resolver.api.MediaKind.AUDIO_ONLY
             }
 
-            val capStr = f["downloadCapability"]?.jsonPrimitive?.contentOrNull
-            val basisStr = f["downloadCapabilityBasis"]?.jsonPrimitive?.contentOrNull
-
-            val eval = if (!capStr.isNullOrBlank()) {
-                val cap = try {
-                    dev.auralis.studio.resolver.api.DownloadCapability.valueOf(capStr)
-                } catch (_: Exception) {
-                    dev.auralis.studio.resolver.api.DownloadCapability.UNKNOWN
-                }
-                val basis = try {
-                    dev.auralis.studio.resolver.api.DownloadCapabilityBasis.valueOf(basisStr ?: "NONE")
-                } catch (_: Exception) {
-                    dev.auralis.studio.resolver.api.DownloadCapabilityBasis.NONE
-                }
-                dev.auralis.studio.resolver.api.DownloadCapabilityEvaluator.EvaluationResult(cap, basis)
+            val explicitCapStr = f["downloadCapability"]?.jsonPrimitive?.contentOrNull
+            val explicitBasisStr = f["downloadCapabilityBasis"]?.jsonPrimitive?.contentOrNull
+            val eval = if (explicitCapStr != null && explicitCapStr != "UNKNOWN") {
+                dev.auralis.studio.resolver.api.DownloadCapabilityEvaluator.EvaluationResult(
+                    capability = dev.auralis.studio.resolver.api.DownloadCapability.valueOf(explicitCapStr),
+                    basis = explicitBasisStr?.let { dev.auralis.studio.resolver.api.DownloadCapabilityBasis.valueOf(it) }
+                        ?: dev.auralis.studio.resolver.api.DownloadCapabilityBasis.NONE,
+                )
             } else {
                 dev.auralis.studio.resolver.api.DownloadCapabilityEvaluator.evaluate(
                     source = source,
@@ -180,6 +182,7 @@ object LrrIpcParser {
                 protocol = f["protocol"]?.jsonPrimitive?.contentOrNull,
                 resolutionMode = mode,
                 drmState = drm,
+                blockReason = blockReason,
                 deliveryRequirements = reqs,
                 downloadCapability = eval.capability,
                 downloadCapabilityBasis = eval.basis,
@@ -442,6 +445,10 @@ class AndroidProcessMediaResolver(
     }
 
     override suspend fun inspect(request: ResolverRequest): ResolverResult = withContext(Dispatchers.IO) {
+        val validationErr = request.validate()
+        if (validationErr != null) {
+            return@withContext ResolverResult.Failure(validationErr)
+        }
         val requestJson = json.encodeToString(ResolverRequest.serializer(), request)
         try {
             executeIpc(request.requestId, request.sourceUrl.orEmpty()) { svc, cb ->
@@ -453,6 +460,10 @@ class AndroidProcessMediaResolver(
     }
 
     override suspend fun resolve(request: ResolverRequest): ResolverResult = withContext(Dispatchers.IO) {
+        val validationErr = request.validate()
+        if (validationErr != null) {
+            return@withContext ResolverResult.Failure(validationErr)
+        }
         val requestJson = json.encodeToString(ResolverRequest.serializer(), request)
         try {
             executeIpc(request.requestId, request.sourceUrl.orEmpty()) { svc, cb ->

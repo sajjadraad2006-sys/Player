@@ -33,7 +33,70 @@ data class ResolverRequest(
     val preferredAudioQuality: AudioQualityPreference = AudioQualityPreference.BEST,
     val formatHint: String? = null,
     val extraOptions: Map<String, String> = emptyMap(),
-)
+) {
+    /**
+     * Validates that the request has sufficient, unambiguous identity parameters
+     * and bounded configuration options.
+     */
+    fun validate(): ResolverError? {
+        val cleanUrl = sourceUrl?.trim().orEmpty()
+        val cleanId = sourceId?.trim().orEmpty()
+
+        if (cleanUrl.isBlank() && cleanId.isBlank()) {
+            return ResolverError.unsupported(
+                source = cleanUrl,
+                details = "Both sourceUrl and sourceId cannot be blank.",
+            )
+        }
+
+        when (sourceType) {
+            ResolverSourceType.GENERIC_URL, ResolverSourceType.AUDIO_STREAM -> {
+                if (cleanUrl.isBlank()) {
+                    return ResolverError.unsupported(
+                        source = cleanUrl,
+                        details = "sourceUrl is required for sourceType $sourceType.",
+                    )
+                }
+            }
+            ResolverSourceType.MUSIC_TRACK -> {
+                if (cleanUrl.isBlank() && cleanId.isBlank()) {
+                    return ResolverError.unsupported(
+                        source = cleanUrl,
+                        details = "sourceId or sourceUrl is required for MUSIC_TRACK.",
+                    )
+                }
+            }
+        }
+
+        // Validate extraOptions limits and forbidden options
+        if (extraOptions.size > 10) {
+            return ResolverError.unknown(
+                source = cleanUrl,
+                message = "Too many extra options provided (max 10).",
+                details = "extraOptions count=${extraOptions.size}",
+            )
+        }
+
+        for ((k, v) in extraOptions) {
+            if (k.length > 64 || v.length > 256) {
+                return ResolverError.unknown(
+                    source = cleanUrl,
+                    message = "Extra option key/value exceeds length limit.",
+                    details = "Key length=${k.length}, Value length=${v.length}",
+                )
+            }
+            if (SecretSanitizer.isForbiddenOption(k)) {
+                return ResolverError.unknown(
+                    source = cleanUrl,
+                    message = "Forbidden configuration option: $k",
+                    details = "Option '$k' is not permitted.",
+                )
+            }
+        }
+
+        return null
+    }
+}
 
 @Serializable
 enum class ResolverSourceType {
@@ -64,7 +127,8 @@ enum class AvailabilityState {
 /**
  * Digital Rights Management (DRM) state.
  *
- * Conservative rule: [PRESENT] and [POSSIBLE] cannot be direct download candidates.
+ * Hard invariant: [PRESENT] and [POSSIBLE] can NEVER be direct download candidates,
+ * regardless of format bitrate or engine availability.
  */
 @Serializable
 enum class DrmState {
@@ -72,6 +136,21 @@ enum class DrmState {
     PRESENT,
     POSSIBLE,
     UNKNOWN,
+}
+
+/**
+ * Explicit reason why a format cannot be downloaded directly.
+ */
+@Serializable
+enum class DeliveryBlockReason {
+    NONE,
+    DRM_PROTECTED,
+    DRM_POSSIBLE,
+    SENSITIVE_AUTH_REQUIRED,
+    UNSUPPORTED_POST_DATA,
+    UNSUPPORTED_BROWSER_TARGET,
+    SEGMENTED_STREAM,
+    PERMISSION_DENIED,
 }
 
 /**
@@ -170,6 +249,7 @@ data class ResolvedFormatDescriptor(
     val protocol: String? = null,
     val resolutionMode: ResolutionMode = ResolutionMode.DIRECT_RESOURCE,
     val drmState: DrmState = DrmState.NONE,
+    val blockReason: DeliveryBlockReason = DeliveryBlockReason.NONE,
     val deliveryRequirements: DeliveryRequirements = DeliveryRequirements(),
     val downloadCapability: DownloadCapability = DownloadCapability.UNKNOWN,
     val downloadCapabilityBasis: DownloadCapabilityBasis = DownloadCapabilityBasis.NONE,
@@ -182,6 +262,7 @@ data class ResolvedFormatDescriptor(
  * - Strictly in-memory; NEVER persisted to Room, DataStore, or persistent storage.
  * - NEVER persisted across process death.
  * - Fresh re-resolution is required whenever a lease expires.
+ * - Uses wall-clock epoch timestamps ([resolvedAtEpochMs], [knownExpiryEpochMs]) for clean comparison.
  */
 @Serializable
 data class EphemeralResourceLease(
@@ -189,7 +270,7 @@ data class EphemeralResourceLease(
     val formatId: String,
     val url: String,
     val headers: Map<String, String> = emptyMap(),
-    val resolvedAtElapsedRealtimeMs: Long = System.currentTimeMillis(),
+    val resolvedAtEpochMs: Long = System.currentTimeMillis(),
     val knownExpiryEpochMs: Long? = null,
     val resolutionMode: ResolutionMode = ResolutionMode.DIRECT_RESOURCE,
     val mediaKind: MediaKind = MediaKind.AUDIO_ONLY,
@@ -247,7 +328,8 @@ data class ResolvedMedia(
         get() = formats.any {
             it.resolutionMode == ResolutionMode.DIRECT_RESOURCE &&
                 it.downloadCapability == DownloadCapability.PERMITTED &&
-                it.drmState == DrmState.NONE
+                it.drmState == DrmState.NONE &&
+                it.blockReason == DeliveryBlockReason.NONE
         }
 
     /** All direct formats that are authorized for download. */
@@ -255,7 +337,8 @@ data class ResolvedMedia(
         get() = formats.filter {
             it.resolutionMode == ResolutionMode.DIRECT_RESOURCE &&
                 it.downloadCapability == DownloadCapability.PERMITTED &&
-                it.drmState == DrmState.NONE
+                it.drmState == DrmState.NONE &&
+                it.blockReason == DeliveryBlockReason.NONE
         }
 }
 
@@ -311,7 +394,7 @@ data class ResolverDownloadDescriptor(
 }
 
 /**
- * Central secret and URL sanitizer for LRR logs, DTOs, and error messages.
+ * Central secret, URL, and configuration option sanitizer for LRR.
  */
 object SecretSanitizer {
     private val SENSITIVE_HEADER_KEYS = setOf(
@@ -323,13 +406,19 @@ object SecretSanitizer {
         "set-cookie",
     )
 
+    // Note: 'Range' is excluded because the downloader engine owns resume/range semantics.
     private val SAFE_HEADER_KEYS = setOf(
         "user-agent",
         "referer",
         "origin",
         "accept",
         "accept-language",
-        "range",
+    )
+
+    private val FORBIDDEN_EXTRA_OPTION_PATTERNS = listOf(
+        "exec", "command", "path", "file", "proxy", "tls", "ssl", "cert",
+        "cookie", "auth", "token", "password", "template", "outtmpl",
+        "postprocessor", "downloader", "external", "runtime", "script",
     )
 
     fun isSensitiveHeader(name: String): Boolean {
@@ -343,6 +432,11 @@ object SecretSanitizer {
     fun isSafeHeader(name: String): Boolean =
         name.trim().lowercase() in SAFE_HEADER_KEYS
 
+    fun isForbiddenOption(key: String): Boolean {
+        val lower = key.trim().lowercase()
+        return FORBIDDEN_EXTRA_OPTION_PATTERNS.any { lower.contains(it) }
+    }
+
     fun sanitizeHeaders(headers: Map<String, String>): Map<String, String> {
         return headers.mapValues { (k, v) ->
             if (isSensitiveHeader(k)) "<redacted>" else v
@@ -355,10 +449,20 @@ object SecretSanitizer {
 
     fun sanitizeUrl(url: String): String {
         if (url.isBlank()) return url
-        val queryIndex = url.indexOf('?')
-        if (queryIndex == -1) return url
-        val base = url.substring(0, queryIndex)
-        return "$base?<redacted>"
+        try {
+            val uri = java.net.URI(url.trim())
+            val cleanHost = uri.host ?: ""
+            val cleanPath = uri.path ?: ""
+            val scheme = uri.scheme ?: "https"
+            val queryRedacted = if (!uri.query.isNullOrBlank()) "?<redacted>" else ""
+            return "$scheme://$cleanHost$cleanPath$queryRedacted"
+        } catch (_: Exception) {
+            val queryIndex = url.indexOf('?')
+            val base = if (queryIndex != -1) url.substring(0, queryIndex) else url
+            // Strip userinfo if present
+            val cleanBase = base.replace(Regex("""https?://[^/@]+@"""), "https://")
+            return if (queryIndex != -1) "$cleanBase?<redacted>" else cleanBase
+        }
     }
 
     fun sanitizeLog(message: String): String {
@@ -366,7 +470,7 @@ object SecretSanitizer {
         clean = clean.replace(Regex("""https?://[^\s"'<>]+(?:\?[^\s"'<>]+)""")) { match ->
             sanitizeUrl(match.value)
         }
-        clean = clean.replace(Regex("""(?i)(bearer|token|key|cookie)[:=\s]+[a-zA-Z0-9_\-\.]+""")) { match ->
+        clean = clean.replace(Regex("""(?i)(bearer|token|key|cookie|password)[:=\s]+[a-zA-Z0-9_\-\.]+""")) { match ->
             "${match.groupValues[1]}: <redacted>"
         }
         return clean
@@ -377,6 +481,7 @@ object SecretSanitizer {
  * Dedicated classifier enforcing the Delivery Classification Matrix.
  *
  * Invariant: url != null does NOT imply DIRECT_RESOURCE.
+ * Hard blockers (DRM, sensitive headers, POST data) strictly take precedence over protocol evidence.
  */
 object FormatDeliveryClassifier {
     private val SEGMENTED_PROTOCOLS = setOf(
@@ -389,6 +494,11 @@ object FormatDeliveryClassifier {
         "f4m",
     )
 
+    data class ClassificationResult(
+        val resolutionMode: ResolutionMode,
+        val blockReason: DeliveryBlockReason,
+    )
+
     fun classify(
         protocol: String?,
         manifestUrl: String?,
@@ -397,7 +507,19 @@ object FormatDeliveryClassifier {
         hasDrm: Boolean,
         impersonate: String?,
         headers: Map<String, String> = emptyMap(),
-    ): ResolutionMode {
+    ): ResolutionMode = classifyWithReason(
+        protocol, manifestUrl, hasFragments, hasRequestData, hasDrm, impersonate, headers,
+    ).resolutionMode
+
+    fun classifyWithReason(
+        protocol: String?,
+        manifestUrl: String?,
+        hasFragments: Boolean,
+        hasRequestData: Boolean,
+        hasDrm: Boolean,
+        impersonate: String?,
+        headers: Map<String, String> = emptyMap(),
+    ): ClassificationResult {
         val proto = protocol?.lowercase()?.trim().orEmpty()
         val isSegmented = proto in SEGMENTED_PROTOCOLS ||
             !manifestUrl.isNullOrBlank() ||
@@ -406,13 +528,14 @@ object FormatDeliveryClassifier {
             proto.contains("dash")
 
         return when {
-            hasDrm -> ResolutionMode.ENGINE_REQUIRED
-            hasRequestData -> ResolutionMode.ENGINE_REQUIRED
-            !impersonate.isNullOrBlank() -> ResolutionMode.ENGINE_REQUIRED
-            headers.keys.any { SecretSanitizer.isSensitiveHeader(it) } -> ResolutionMode.ENGINE_REQUIRED
-            isSegmented -> ResolutionMode.SEGMENTED_RESOURCE
-            proto.startsWith("http") || proto.isBlank() -> ResolutionMode.DIRECT_RESOURCE
-            else -> ResolutionMode.ENGINE_REQUIRED
+            hasDrm -> ClassificationResult(ResolutionMode.ENGINE_REQUIRED, DeliveryBlockReason.DRM_PROTECTED)
+            headers.keys.any { SecretSanitizer.isSensitiveHeader(it) } ->
+                ClassificationResult(ResolutionMode.ENGINE_REQUIRED, DeliveryBlockReason.SENSITIVE_AUTH_REQUIRED)
+            hasRequestData -> ClassificationResult(ResolutionMode.ENGINE_REQUIRED, DeliveryBlockReason.UNSUPPORTED_POST_DATA)
+            !impersonate.isNullOrBlank() -> ClassificationResult(ResolutionMode.ENGINE_REQUIRED, DeliveryBlockReason.UNSUPPORTED_BROWSER_TARGET)
+            isSegmented -> ClassificationResult(ResolutionMode.SEGMENTED_RESOURCE, DeliveryBlockReason.SEGMENTED_STREAM)
+            proto.startsWith("http") || proto.isBlank() -> ClassificationResult(ResolutionMode.DIRECT_RESOURCE, DeliveryBlockReason.NONE)
+            else -> ClassificationResult(ResolutionMode.ENGINE_REQUIRED, DeliveryBlockReason.NONE)
         }
     }
 }

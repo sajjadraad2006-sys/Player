@@ -3,6 +3,7 @@ package dev.auralis.studio.resolver
 import dev.auralis.studio.resolver.api.DownloadCapability
 import dev.auralis.studio.resolver.api.DownloadCapabilityBasis
 import dev.auralis.studio.resolver.api.DownloadCapabilityEvaluator
+import dev.auralis.studio.resolver.api.DrmState
 import dev.auralis.studio.resolver.api.RecognizedDownloadLicense
 import dev.auralis.studio.resolver.api.ResolutionMode
 import dev.auralis.studio.resolver.api.ResolvedFormat
@@ -272,5 +273,58 @@ class DownloadCapabilityTest {
         )
         assertFalse("Media with only STREAM_ONLY formats must report hasPermittedDirectDownload == false", mediaStreamOnly.hasPermittedDirectDownload)
         assertTrue(mediaStreamOnly.permittedDirectFormats.isEmpty())
+    }
+
+    @Test
+    fun permissionSeparationTruthTable_enforcesAllCombinations() {
+        // 1. DIRECT_RESOURCE + UNKNOWN permission -> NOT downloadable
+        val directUnknown = dev.auralis.studio.resolver.api.ResolvedFormatDescriptor(
+            formatId = "f1",
+            resolutionMode = ResolutionMode.DIRECT_RESOURCE,
+            downloadCapability = DownloadCapability.UNKNOWN,
+            drmState = DrmState.NONE,
+        )
+        val mediaUnknown = ResolvedMedia(source = "Test", formats = listOf(directUnknown))
+        assertFalse("DIRECT_RESOURCE + UNKNOWN must NOT be downloadable", mediaUnknown.hasPermittedDirectDownload)
+
+        // 2. DIRECT_RESOURCE + NOT_PERMITTED -> NOT downloadable
+        val directNotPermitted = dev.auralis.studio.resolver.api.ResolvedFormatDescriptor(
+            formatId = "f2",
+            resolutionMode = ResolutionMode.DIRECT_RESOURCE,
+            downloadCapability = DownloadCapability.NOT_PERMITTED,
+            drmState = DrmState.NONE,
+        )
+        val mediaNotPermitted = ResolvedMedia(source = "Test", formats = listOf(directNotPermitted))
+        assertFalse("DIRECT_RESOURCE + NOT_PERMITTED must NOT be downloadable", mediaNotPermitted.hasPermittedDirectDownload)
+
+        // 3. DIRECT_RESOURCE + PERMITTED -> downloadable
+        val directPermitted = dev.auralis.studio.resolver.api.ResolvedFormatDescriptor(
+            formatId = "f3",
+            resolutionMode = ResolutionMode.DIRECT_RESOURCE,
+            downloadCapability = DownloadCapability.PERMITTED,
+            drmState = DrmState.NONE,
+        )
+        val mediaPermitted = ResolvedMedia(source = "Test", formats = listOf(directPermitted))
+        assertTrue("DIRECT_RESOURCE + PERMITTED must be downloadable", mediaPermitted.hasPermittedDirectDownload)
+
+        // 4. SEGMENTED_RESOURCE + PERMITTED -> NOT direct downloadable
+        val segmentedPermitted = dev.auralis.studio.resolver.api.ResolvedFormatDescriptor(
+            formatId = "f4",
+            resolutionMode = ResolutionMode.SEGMENTED_RESOURCE,
+            downloadCapability = DownloadCapability.PERMITTED,
+            drmState = DrmState.NONE,
+        )
+        val mediaSegmented = ResolvedMedia(source = "Test", formats = listOf(segmentedPermitted))
+        assertFalse("SEGMENTED_RESOURCE + PERMITTED must NOT be direct downloadable", mediaSegmented.hasPermittedDirectDownload)
+
+        // 5. DRM PRESENT + PERMITTED -> NOT downloadable
+        val drmPermitted = dev.auralis.studio.resolver.api.ResolvedFormatDescriptor(
+            formatId = "f5",
+            resolutionMode = ResolutionMode.DIRECT_RESOURCE,
+            downloadCapability = DownloadCapability.PERMITTED,
+            drmState = DrmState.PRESENT,
+        )
+        val mediaDrm = ResolvedMedia(source = "Test", formats = listOf(drmPermitted))
+        assertFalse("DRM + PERMITTED must NOT be downloadable", mediaDrm.hasPermittedDirectDownload)
     }
 }
