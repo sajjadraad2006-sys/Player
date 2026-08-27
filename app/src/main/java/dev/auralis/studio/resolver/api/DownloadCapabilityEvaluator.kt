@@ -19,7 +19,10 @@ enum class RecognizedDownloadLicense {
     UNRECOGNIZED;
 
     val isPermittedDownload: Boolean
-        get() = this != UNRECOGNIZED
+        get() = when (this) {
+            CC0, PUBLIC_DOMAIN, CC_BY, CC_BY_SA -> true
+            CC_BY_NC, CC_BY_NC_SA, CC_BY_ND, CC_BY_NC_ND, UNRECOGNIZED -> false
+        }
 
     companion object {
         fun parse(licenseString: String?, licenseUrl: String? = null): RecognizedDownloadLicense {
@@ -123,7 +126,11 @@ object DownloadCapabilityEvaluator {
 
         // ── 4. Generic / Unknown Web Resources Default to UNKNOWN ────────────
         // Never assume HTTP 200 + .mp3 = PERMITTED.
-        return EvaluationResult(DownloadCapability.UNKNOWN, DownloadCapabilityBasis.NONE)
+        return EvaluationResult(
+            capability = DownloadCapability.UNKNOWN,
+            basis = DownloadCapabilityBasis.NONE,
+            recognizedLicense = parsedLicense,
+        )
     }
 
     /**

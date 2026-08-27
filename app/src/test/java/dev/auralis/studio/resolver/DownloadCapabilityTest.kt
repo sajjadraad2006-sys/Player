@@ -120,6 +120,45 @@ class DownloadCapabilityTest {
     }
 
     @Test
+    fun ccVariantsWithRestrictions_evaluateToUnknown() {
+        val ncEval = DownloadCapabilityEvaluator.evaluate(
+            source = "OpenAudio",
+            webpageUrl = "https://example.org/audio",
+            license = "CC BY-NC 4.0",
+        )
+        assertEquals("CC BY-NC must evaluate to UNKNOWN until restrictions are modeled", DownloadCapability.UNKNOWN, ncEval.capability)
+        assertEquals(DownloadCapabilityBasis.NONE, ncEval.basis)
+        assertEquals(RecognizedDownloadLicense.CC_BY_NC, ncEval.recognizedLicense)
+
+        val ncSaEval = DownloadCapabilityEvaluator.evaluate(
+            source = "OpenAudio",
+            webpageUrl = "https://example.org/audio",
+            license = "CC BY-NC-SA 4.0",
+        )
+        assertEquals("CC BY-NC-SA must evaluate to UNKNOWN until restrictions are modeled", DownloadCapability.UNKNOWN, ncSaEval.capability)
+        assertEquals(DownloadCapabilityBasis.NONE, ncSaEval.basis)
+        assertEquals(RecognizedDownloadLicense.CC_BY_NC_SA, ncSaEval.recognizedLicense)
+
+        val ndEval = DownloadCapabilityEvaluator.evaluate(
+            source = "OpenAudio",
+            webpageUrl = "https://example.org/audio",
+            license = "CC BY-ND 4.0",
+        )
+        assertEquals("CC BY-ND must evaluate to UNKNOWN until restrictions are modeled", DownloadCapability.UNKNOWN, ndEval.capability)
+        assertEquals(DownloadCapabilityBasis.NONE, ndEval.basis)
+        assertEquals(RecognizedDownloadLicense.CC_BY_ND, ndEval.recognizedLicense)
+
+        val ncNdEval = DownloadCapabilityEvaluator.evaluate(
+            source = "OpenAudio",
+            webpageUrl = "https://example.org/audio",
+            license = "CC BY-NC-ND 4.0",
+        )
+        assertEquals("CC BY-NC-ND must evaluate to UNKNOWN until restrictions are modeled", DownloadCapability.UNKNOWN, ncNdEval.capability)
+        assertEquals(DownloadCapabilityBasis.NONE, ncNdEval.basis)
+        assertEquals(RecognizedDownloadLicense.CC_BY_NC_ND, ncNdEval.recognizedLicense)
+    }
+
+    @Test
     fun softwareLicenses_attachedToGenericMedia_evaluateToUnknown() {
         val mitEval = DownloadCapabilityEvaluator.evaluate(
             source = "Generic",

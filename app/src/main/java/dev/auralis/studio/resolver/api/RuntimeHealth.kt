@@ -27,6 +27,12 @@ data class RuntimeHealth(
     val ejsReady: Boolean get() = ejsInstalled && ejsCompatible
     val jsRuntimeReady: Boolean get() = jsRuntimeDetectedByYtDlp
 
+    /** Process diagnostics computed on the service side */
+    val resolverProcessName: String? get() = details["process_name"]
+    val resolverPid: Int? get() = details["pid"]?.toIntOrNull()
+    val resolverProcessRole: String? get() = details["process_role"]
+    val isMainContainerInitializedInResolver: Boolean? get() = details["main_container_initialized"]?.toBooleanStrictOrNull()
+
     companion object {
         val UNINITIALIZED = RuntimeHealth(
             resolverServiceReady = false,

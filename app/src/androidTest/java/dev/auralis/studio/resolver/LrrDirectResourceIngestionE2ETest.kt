@@ -384,21 +384,48 @@ class LrrDirectResourceIngestionE2ETest {
             dev.auralis.studio.core.ProcessUtils.classifyProcessName(packageName, "$packageName:auxiliary"),
         )
 
-        // 2. Self-binding guard verification: AndroidProcessMediaResolver constructor throws if in :resolver
-        val isSelfBindingRejected = try {
+        // 2. MAIN-only guard verification
+        val isMainAllowed = try {
+            val mainRole = dev.auralis.studio.core.ProcessUtils.classifyProcessName(packageName, packageName)
+            check(mainRole == dev.auralis.studio.core.ProcessRole.MAIN) { "MAIN only" }
+            true
+        } catch (_: IllegalStateException) {
+            false
+        }
+        assertTrue("MAIN process must be allowed", isMainAllowed)
+
+        val isResolverRejected = try {
             val resolverRole = dev.auralis.studio.core.ProcessUtils.classifyProcessName(packageName, "$packageName:resolver")
-            if (resolverRole == dev.auralis.studio.core.ProcessRole.RESOLVER) {
-                // Emulate the guard check in AndroidProcessMediaResolver init
-                check(resolverRole != dev.auralis.studio.core.ProcessRole.RESOLVER) {
-                    "AndroidProcessMediaResolver client cannot be instantiated inside the :resolver process"
-                }
-            }
+            check(resolverRole == dev.auralis.studio.core.ProcessRole.MAIN) { "MAIN only" }
             false
         } catch (e: IllegalStateException) {
-            e.message?.contains(":resolver") == true
+            true
         }
+        assertTrue("RESOLVER process must be rejected", isResolverRejected)
 
-        assertTrue("Instantiation in :resolver must throw IllegalStateException", isSelfBindingRejected)
+        val isOtherRejected = try {
+            val otherRole = dev.auralis.studio.core.ProcessUtils.classifyProcessName(packageName, "$packageName:auxiliary")
+            check(otherRole == dev.auralis.studio.core.ProcessRole.MAIN) { "MAIN only" }
+            false
+        } catch (e: IllegalStateException) {
+            true
+        }
+        assertTrue("OTHER process must be rejected", isOtherRejected)
+    }
+
+    @Test
+    fun test8_ResolverProcessDiagnostics_LiveHealthQuery(): Unit = runBlocking {
+        val resolver = dev.auralis.studio.resolver.android.AndroidProcessMediaResolver(context)
+        val health = resolver.health()
+
+        assertTrue("Resolver service must report ready", health.resolverServiceReady)
+        val packageName = context.packageName
+
+        // Diagnostics computed INSIDE :resolver process over Binder
+        assertEquals("$packageName:resolver", health.resolverProcessName)
+        assertEquals("RESOLVER", health.resolverProcessRole)
+        assertEquals(false, health.isMainContainerInitializedInResolver)
+        assertNotNull("Resolver PID must be reported", health.resolverPid)
     }
 
     // ── Deterministic WAV Fixture Generator ─────────────────────────────────

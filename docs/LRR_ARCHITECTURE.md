@@ -198,11 +198,19 @@ Every native `.so` library packaged in the final APK was extracted and audited u
   - `ProcessRole.RESOLVER` (`dev.auralis.studio:resolver`): Lightweight bootstrap ONLY. Zero `AppContainer`, zero Room DB, zero `DownloadWorkerBridge`, zero `AndroidProcessMediaResolver` client.
   - `ProcessRole.OTHER`: Minimal auxiliary bootstrap.
 
-### Guard Against Self-Binding:
-- `AndroidProcessMediaResolver` validates that it is never instantiated inside the `:resolver` process (`ProcessUtils.detectProcessRole(context) != ProcessRole.RESOLVER`), preventing recursive or redundant Binder self-connections.
+### Guard Against Non-Main Resolver Client (MAIN-Only):
+- `AndroidProcessMediaResolver` strictly asserts that it is instantiated ONLY inside the main application process (`ProcessUtils.detectProcessRole(context) == ProcessRole.MAIN`). Instantiations in `:resolver` or auxiliary processes throw an `IllegalStateException`.
 
-### Conservative Media-Only License Model:
-- `RecognizedDownloadLicense` exclusively recognizes vetted open audio/content licenses (`CC0`, `PUBLIC_DOMAIN`, `CC_BY`, `CC_BY_SA`, `CC_BY_NC`, `CC_BY_NC_SA`, `CC_BY_ND`, `CC_BY_NC_ND`).
-- General software licenses (`MIT`, `Apache-2.0`) attached to arbitrary online media are rejected (`UNRECOGNIZED` -> `DownloadCapability.UNKNOWN`).
+### Conservative Media License Model:
+- Automatic `LICENSE_METADATA -> PERMITTED` is strictly limited to four vetted open media licenses: `CC0`, `PUBLIC_DOMAIN`, `CC_BY`, `CC_BY_SA`.
+- Restricted Creative Commons variants (`CC_BY_NC`, `CC_BY_NC_SA`, `CC_BY_ND`, `CC_BY_NC_ND`), general software licenses (`MIT`, `Apache-2.0`), and vague human claims (`"Creative Commons"`, `"Free"`, `"No Copyright"`, `"Download allowed"`) evaluate strictly to `DownloadCapability.UNKNOWN` (`DownloadCapabilityBasis.NONE`).
+
+### Real Resolver-Process Diagnostic:
+- Exposes live process diagnostics computed INSIDE the `:resolver` process through the existing Binder health query:
+  - `resolverProcessName` (`dev.auralis.studio:resolver`)
+  - `resolverPid` (PID of `:resolver` process)
+  - `resolverProcessRole` (`RESOLVER`)
+  - `isMainContainerInitializedInResolver` (`false`)
+
 
 

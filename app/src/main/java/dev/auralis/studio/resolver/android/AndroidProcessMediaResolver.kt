@@ -226,8 +226,8 @@ class AndroidProcessMediaResolver(
 
     init {
         val role = dev.auralis.studio.core.ProcessUtils.detectProcessRole(context)
-        check(role != dev.auralis.studio.core.ProcessRole.RESOLVER) {
-            "AndroidProcessMediaResolver client cannot be instantiated inside the :resolver process"
+        check(role == dev.auralis.studio.core.ProcessRole.MAIN) {
+            "AndroidProcessMediaResolver client can only be instantiated inside the main application process (current: $role)"
         }
     }
 

@@ -126,7 +126,29 @@ class LrrResolverService : Service() {
         }
 
         override fun getHealthJson(): String {
-            return engine.getHealthJson()
+            val rawJson = engine.getHealthJson()
+            return try {
+                val element = Json.parseToJsonElement(rawJson)
+                val obj = element as? kotlinx.serialization.json.JsonObject ?: return rawJson
+                val existingDetails = obj["details"]?.let { (it as? kotlinx.serialization.json.JsonObject)?.toMutableMap() } ?: mutableMapOf()
+
+                // Compute live process diagnostics INSIDE :resolver process
+                val processName = dev.auralis.studio.core.ProcessUtils.currentProcessName(this@LrrResolverService)
+                val pid = Process.myPid().toString()
+                val processRole = dev.auralis.studio.core.ProcessUtils.detectProcessRole(this@LrrResolverService).name
+                val mainContainerInit = ((application as? dev.auralis.studio.AuralisApplication)?.isMainContainerInitialized == true).toString()
+
+                existingDetails["process_name"] = kotlinx.serialization.json.JsonPrimitive(processName)
+                existingDetails["pid"] = kotlinx.serialization.json.JsonPrimitive(pid)
+                existingDetails["process_role"] = kotlinx.serialization.json.JsonPrimitive(processRole)
+                existingDetails["main_container_initialized"] = kotlinx.serialization.json.JsonPrimitive(mainContainerInit)
+
+                val updatedRoot = obj.toMutableMap()
+                updatedRoot["details"] = kotlinx.serialization.json.JsonObject(existingDetails)
+                kotlinx.serialization.json.JsonObject(updatedRoot).toString()
+            } catch (_: Throwable) {
+                rawJson
+            }
         }
     }
 

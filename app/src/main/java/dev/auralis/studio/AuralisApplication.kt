@@ -10,6 +10,12 @@ class AuralisApplication : Application() {
     private var _container: AppContainer? = null
 
     /**
+     * Whether the main [AppContainer] has been instantiated in this process.
+     */
+    val isMainContainerInitialized: Boolean
+        get() = _container != null
+
+    /**
      * Strongly-typed access to the main application container.
      * Guaranteed to be available in the main process (`dev.auralis.studio`).
      * Throws an [IllegalStateException] if invoked inside the `:resolver` process.
