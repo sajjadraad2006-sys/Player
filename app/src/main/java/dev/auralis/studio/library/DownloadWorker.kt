@@ -10,14 +10,21 @@ import androidx.work.workDataOf
 import dev.auralis.studio.AuralisApplication
 import dev.auralis.studio.online.OnlineTrack
 import dev.auralis.studio.resolver.android.AndroidProcessMediaResolver
+import dev.auralis.studio.resolver.api.DeliveryBlockReason
 import dev.auralis.studio.resolver.api.DownloadCapability
+import dev.auralis.studio.resolver.api.DownloadCapabilityEvaluator
+import dev.auralis.studio.resolver.api.DrmState
+import dev.auralis.studio.resolver.api.EphemeralResourceLease
 import dev.auralis.studio.resolver.api.MediaResolver
 import dev.auralis.studio.resolver.api.ResolutionMode
+import dev.auralis.studio.resolver.api.ResolveIntent
+import dev.auralis.studio.resolver.api.ResolvedFormatDescriptor
 import dev.auralis.studio.resolver.api.ResolverDownloadDescriptor
 import dev.auralis.studio.resolver.api.ResolverErrorCode
 import dev.auralis.studio.resolver.api.ResolverFormatSelector
 import dev.auralis.studio.resolver.api.ResolverRequest
 import dev.auralis.studio.resolver.api.ResolverResult
+import dev.auralis.studio.resolver.api.SecretSanitizer
 import kotlinx.serialization.json.Json
 
 /**
@@ -162,12 +169,12 @@ internal data class OnlineTrackJson(
 /** Result classification for fresh resolution inside DownloadWorker. */
 internal sealed interface FreshResolutionResult {
     data class Success(
-        val format: dev.auralis.studio.resolver.api.ResolvedFormat,
-        val safeHeaders: Map<String, String>,
+        val format: ResolvedFormatDescriptor,
+        val lease: EphemeralResourceLease,
     ) : FreshResolutionResult
 
-    data class TerminalFailure(val message: String) : FreshResolutionResult
-    data class TransientFailure(val message: String) : FreshResolutionResult
+    data class TerminalFailure(val message: String, val code: ResolverErrorCode = ResolverErrorCode.Unknown) : FreshResolutionResult
+    data class TransientFailure(val message: String, val code: ResolverErrorCode = ResolverErrorCode.Unknown) : FreshResolutionResult
 }
 
 /**
@@ -221,6 +228,10 @@ class DownloadWorker(
             val descriptor = decodeDescriptor(descriptorJson)
                 ?: return Result.failure(workDataOf(KEY_ERROR to "Corrupt resolver descriptor payload"))
 
+            if (descriptor.schemaVersion > 1) {
+                return Result.failure(workDataOf(KEY_ERROR to "Unsupported descriptor schema version: ${descriptor.schemaVersion}"))
+            }
+
             if (descriptor.downloadCapability != DownloadCapability.PERMITTED) {
                 return Result.failure(workDataOf(KEY_ERROR to "Download permission not granted for this resource"))
             }
@@ -250,14 +261,14 @@ class DownloadWorker(
             }
             is FreshResolutionResult.Success -> {
                 val format1 = res1.format
-                val safeHeaders1 = res1.safeHeaders
+                val lease1 = res1.lease
 
                 val req1 = DownloadIngestionRequest.fromResolverResource(
                     descriptor = descriptor,
-                    freshDirectUrl = format1.url,
+                    freshDirectUrl = lease1.url,
                     durationMs = descriptor.expectedDurationMs,
-                    safeHeaders = safeHeaders1,
-                    formatExtension = format1.extension,
+                    safeHeaders = SecretSanitizer.extractSafeHeaders(lease1.headers),
+                    formatExtension = format1.extension ?: format1.container,
                 )
 
                 val result1 = manager.download(req1)
@@ -268,18 +279,23 @@ class DownloadWorker(
                 val failure1 = result1.exceptionOrNull()
                 val failureMsg1 = failure1?.message.orEmpty()
 
-                // ── One-shot stale resource recovery on HTTP 403 / expired token ─────
-                if (failureMsg1.contains("403") || failureMsg1.contains("expired", ignoreCase = true)) {
+                // ── One-shot stale resource recovery on HTTP 403 / 401 / expired token ─────
+                val isExpiredSignal = failureMsg1.contains("403") ||
+                    failureMsg1.contains("401") ||
+                    failureMsg1.contains("expired", ignoreCase = true) ||
+                    lease1.isExpired
+
+                if (isExpiredSignal) {
                     val res2 = resolveFreshFormat(descriptor, resolver)
                     if (res2 is FreshResolutionResult.Success) {
                         val format2 = res2.format
-                        val safeHeaders2 = res2.safeHeaders
+                        val lease2 = res2.lease
                         val req2 = DownloadIngestionRequest.fromResolverResource(
                             descriptor = descriptor,
-                            freshDirectUrl = format2.url,
+                            freshDirectUrl = lease2.url,
                             durationMs = descriptor.expectedDurationMs,
-                            safeHeaders = safeHeaders2,
-                            formatExtension = format2.extension,
+                            safeHeaders = SecretSanitizer.extractSafeHeaders(lease2.headers),
+                            formatExtension = format2.extension ?: format2.container,
                         )
                         val result2 = manager.download(req2)
                         if (result2.isSuccess) {
@@ -316,48 +332,83 @@ class DownloadWorker(
         val resolverReq = ResolverRequest(
             sourceUrl = descriptor.canonicalUrl,
             sourceId = descriptor.sourceId,
+            intent = ResolveIntent.DOWNLOAD,
             preferredAudioQuality = descriptor.qualityPreference,
+            formatHint = descriptor.formatHint,
         )
 
         val resolveResult = resolver.resolve(resolverReq)
         if (resolveResult !is ResolverResult.Success) {
             val error = (resolveResult as? ResolverResult.Failure)?.error
             val msg = error?.safeUserMessage ?: "Resolution failed"
-            val isTerminal = when (error?.technicalCode) {
+            val code = error?.technicalCode ?: ResolverErrorCode.Unknown
+            val isTerminal = when (code) {
                 ResolverErrorCode.NotFound,
                 ResolverErrorCode.UnsupportedUrl,
                 ResolverErrorCode.DownloadNotPermitted,
                 ResolverErrorCode.AccessRestricted,
                 ResolverErrorCode.AuthenticationRequired,
+                ResolverErrorCode.IncompatibleSchemaVersion,
+                ResolverErrorCode.CollectionNotSupported,
                 -> true
                 else -> error?.isRetryable == false
             }
-            return if (isTerminal) FreshResolutionResult.TerminalFailure(msg)
-            else FreshResolutionResult.TransientFailure(msg)
+            return if (isTerminal) FreshResolutionResult.TerminalFailure(msg, code)
+            else FreshResolutionResult.TransientFailure(msg, code)
         }
 
         val media = resolveResult.media
-        val selectedFormat = ResolverFormatSelector.selectBestAudioFormat(
-            formats = media.rawFormats,
+
+        // 1. Identity validation
+        if (!descriptor.sourceId.isNullOrBlank() && !media.sourceId.isNullOrBlank() && descriptor.sourceId != media.sourceId) {
+            return FreshResolutionResult.TerminalFailure("Source media has changed", ResolverErrorCode.ProviderChanged)
+        }
+
+        // 2. Permission re-evaluation
+        val annotatedMedia = DownloadCapabilityEvaluator.annotateMedia(media)
+
+        // 3. Format selection
+        val selectedFormat = ResolverFormatSelector.selectBestDescriptor(
+            formats = annotatedMedia.formats,
             preference = descriptor.qualityPreference,
             formatHint = descriptor.formatHint,
-        ) ?: return FreshResolutionResult.TerminalFailure("No permitted direct formats available")
+            requirePermittedDownload = true,
+        ) ?: return FreshResolutionResult.TerminalFailure("No permitted direct formats available", ResolverErrorCode.FormatUnavailable)
 
+        // 4. Hard invariants
         if (selectedFormat.resolutionMode != ResolutionMode.DIRECT_RESOURCE ||
-            selectedFormat.downloadCapability != DownloadCapability.PERMITTED
+            selectedFormat.downloadCapability != DownloadCapability.PERMITTED ||
+            selectedFormat.drmState != DrmState.NONE ||
+            selectedFormat.blockReason != DeliveryBlockReason.NONE ||
+            selectedFormat.deliveryRequirements.hasDrm
         ) {
-            return FreshResolutionResult.TerminalFailure("Resource format is not permitted for direct download")
+            return FreshResolutionResult.TerminalFailure("Format is not permitted for direct download", ResolverErrorCode.DownloadNotPermitted)
         }
 
-        // Strict allowlist for safe ephemeral HTTP headers (never Cookie / Authorization / Range)
-        val safeHeaders = selectedFormat.httpHeaders.filterKeys { key ->
-            key.equals("User-Agent", ignoreCase = true) ||
-                key.equals("Referer", ignoreCase = true) ||
-                key.equals("Origin", ignoreCase = true) ||
-                key.equals("Accept", ignoreCase = true)
+        // 5. Ephemeral lease validation
+        val lease = resolveResult.lease ?: run {
+            val rawMatch = media.rawFormats.firstOrNull { it.formatId == selectedFormat.formatId }
+            if (rawMatch != null && rawMatch.url.isNotBlank()) {
+                EphemeralResourceLease(
+                    requestId = descriptor.requestId,
+                    formatId = selectedFormat.formatId,
+                    url = rawMatch.url,
+                    headers = SecretSanitizer.extractSafeHeaders(rawMatch.httpHeaders),
+                    resolvedAtEpochMs = System.currentTimeMillis(),
+                    knownExpiryEpochMs = rawMatch.expiresAtEpochMs,
+                    resolutionMode = selectedFormat.resolutionMode,
+                    mediaKind = selectedFormat.mediaKind,
+                )
+            } else {
+                return FreshResolutionResult.TerminalFailure("No delivery lease available for selected format", ResolverErrorCode.FormatUnavailable)
+            }
         }
 
-        return FreshResolutionResult.Success(selectedFormat, safeHeaders)
+        if (lease.resolutionMode != ResolutionMode.DIRECT_RESOURCE || lease.url.isBlank()) {
+            return FreshResolutionResult.TerminalFailure("Delivery lease is not a valid direct resource", ResolverErrorCode.UnsupportedUrl)
+        }
+
+        return FreshResolutionResult.Success(selectedFormat, lease)
     }
 
     companion object {

@@ -353,6 +353,7 @@ data class ResolvedMedia(
  */
 @Serializable
 data class ResolverDownloadDescriptor(
+    val schemaVersion: Int = 1,
     val requestId: String = UUID.randomUUID().toString(),
     val source: String,
     val sourceId: String? = null,
