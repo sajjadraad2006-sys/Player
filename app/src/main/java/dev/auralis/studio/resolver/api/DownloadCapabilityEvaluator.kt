@@ -94,6 +94,14 @@ object DownloadCapabilityEvaluator {
 
         // ── 1. Known Restricted / Discovery-Only Providers ────────────────────
         if (normSource.contains("youtube") || normUrl.contains("youtube.com") || normUrl.contains("youtu.be")) {
+            val parsedLicense = RecognizedDownloadLicense.parse(license, licenseUrl)
+            if (parsedLicense.isPermittedDownload) {
+                return EvaluationResult(
+                    capability = DownloadCapability.PERMITTED,
+                    basis = DownloadCapabilityBasis.LICENSE_METADATA,
+                    recognizedLicense = parsedLicense,
+                )
+            }
             return EvaluationResult(DownloadCapability.STREAM_ONLY, DownloadCapabilityBasis.PROVIDER_EXPLICIT)
         }
 
