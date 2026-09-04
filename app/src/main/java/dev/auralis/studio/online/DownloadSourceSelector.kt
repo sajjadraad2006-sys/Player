@@ -71,6 +71,7 @@ object DownloadSourceSelector {
 
     private fun providerPriority(provider: String): Int = when (provider.lowercase()) {
         "audius" -> 30
+        "youtube" -> 25
         "jamendo" -> 20
         "itunes" -> 10
         "deezer" -> 5

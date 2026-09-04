@@ -20,7 +20,7 @@ import kotlin.math.abs
 
 private const val TAG = "LrclibClient"
 private const val BASE = "https://lrclib.net/api"
-private const val USER_AGENT = "Lyrune/0.2.0 (Android; https://github.com/sajjadraad2006-sys/Player)"
+private const val USER_AGENT = "Lyrune/1.0.0 (Android; https://github.com/sajjadraad2006-sys/Player)"
 
 @Serializable
 data class LrclibTrack(
@@ -80,8 +80,11 @@ class LrclibClient {
     ): LrclibTrack? {
         lastLookupWasRateLimited = false
         lastLookupError = null
-        val cleanTitle = LyricsMetadataNormalizer.title(title)
-        val cleanArtist = LyricsMetadataNormalizer.artist(artist)
+        val norm = LyricsMetadataNormalizer.normalize(title, artist)
+        val cleanTitle = norm.title
+        val cleanArtist = norm.artist
+        val searchQuery = norm.query
+
         if (cleanTitle.isBlank()) return null
         if (System.currentTimeMillis() < rateLimitedUntilMs) {
             lastLookupWasRateLimited = true
@@ -121,7 +124,7 @@ class LrclibClient {
         }
 
         // 2. Fall back to search
-        return search(cleanTitle, cleanArtist, album, durationMs)
+        return search(cleanTitle, cleanArtist, album, durationMs, searchQuery)
     }
 
     /**
@@ -134,6 +137,7 @@ class LrclibClient {
         artist: String,
         album: String = "",
         durationMs: Long,
+        searchQuery: String = "",
     ): LrclibTrack? {
         return try {
             if (System.currentTimeMillis() < rateLimitedUntilMs) return null
@@ -150,10 +154,32 @@ class LrclibClient {
                 Log.w(TAG, "Rate limited on /search")
                 return null
             }
-            if (!resp.status.isSuccess()) return null
 
-            val candidates = resp.body<List<LrclibTrack>>()
-            pickBestCandidate(candidates, title, artist, album, durationMs)
+            var candidates = if (resp.status.isSuccess()) resp.body<List<LrclibTrack>>() else emptyList()
+            var best = pickBestCandidate(candidates, title, artist, album, durationMs)
+
+            // Fallback: try search with general query parameter `q` and variations
+            if (best == null) {
+                val queries = listOfNotNull(
+                    searchQuery.takeIf { it.isNotBlank() },
+                    if (artist.isNotBlank() && !title.contains(artist, ignoreCase = true)) "$artist $title" else null,
+                    title.takeIf { it.isNotBlank() },
+                ).distinct()
+
+                for (q in queries) {
+                    throttle()
+                    val qResp = client.get("$BASE/search") {
+                        parameter("q", q)
+                    }
+                    if (qResp.status.isSuccess()) {
+                        val qCandidates = qResp.body<List<LrclibTrack>>()
+                        best = pickBestCandidate(qCandidates, title, artist, album, durationMs)
+                        if (best != null) break
+                    }
+                }
+            }
+
+            best
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -175,10 +201,15 @@ class LrclibClient {
         return try {
             if (System.currentTimeMillis() < rateLimitedUntilMs) return emptyList()
             lastLookupError = null
+            val norm = LyricsMetadataNormalizer.normalize(title, artist)
+            val cleanTitle = norm.title
+            val cleanArtist = norm.artist
+            val searchQuery = norm.query
+
             throttle()
             val resp = client.get("$BASE/search") {
-                parameter("track_name", title)
-                if (artist.isNotBlank()) parameter("artist_name", artist)
+                parameter("track_name", cleanTitle)
+                if (cleanArtist.isNotBlank()) parameter("artist_name", cleanArtist)
             }
             if (resp.status == HttpStatusCode.TooManyRequests) {
                 val retryAfter = resp.headers["Retry-After"]?.toLongOrNull() ?: 5L
@@ -186,11 +217,30 @@ class LrclibClient {
                 lastLookupWasRateLimited = true
                 return emptyList()
             }
-            if (!resp.status.isSuccess()) return emptyList()
 
-            val candidates = resp.body<List<LrclibTrack>>()
-            scoreCandidates(candidates, title, artist, album, durationMs)
-                .filter { it.score >= 0.30 }
+            val candidates = if (resp.status.isSuccess()) resp.body<List<LrclibTrack>>() else emptyList()
+            val allCandidates = mutableListOf<LrclibTrack>()
+            allCandidates.addAll(candidates)
+
+            // Gather candidates from q parameter as well
+            val q = searchQuery.ifBlank { if (cleanArtist.isNotBlank()) "$cleanArtist $cleanTitle" else cleanTitle }.trim()
+            if (q.isNotBlank()) {
+                throttle()
+                val qResp = client.get("$BASE/search") {
+                    parameter("q", q)
+                }
+                if (qResp.status.isSuccess()) {
+                    val qList = qResp.body<List<LrclibTrack>>()
+                    for (c in qList) {
+                        if (allCandidates.none { it.id == c.id }) {
+                            allCandidates.add(c)
+                        }
+                    }
+                }
+            }
+
+            scoreCandidates(allCandidates, cleanTitle, cleanArtist, album, durationMs)
+                .filter { it.score >= 0.10 }
                 .map { it.track }
         } catch (e: CancellationException) {
             throw e
@@ -251,7 +301,7 @@ class LrclibClient {
     /**
      * Scoring: picks the candidate that best matches title, artist, and duration.
      * Rejects candidates whose synced and plain lyrics are both absent.
-     * Threshold: minimum score of 0.58 required to accept an automatic match.
+     * Threshold: minimum score of 0.38 required to accept an automatic match.
      */
     internal fun pickBestCandidate(
         candidates: List<LrclibTrack>,
@@ -262,7 +312,7 @@ class LrclibClient {
     ): LrclibTrack? {
         val scored = scoreCandidates(candidates, title, artist, album, durationMs)
         val best = scored.firstOrNull() ?: return null
-        val threshold = if (artist.isBlank() || durationMs <= 0) 0.78 else 0.58
+        val threshold = if (artist.isBlank() || durationMs <= 0) 0.45 else 0.38
         if (best.score < threshold) {
             return null
         }

@@ -161,6 +161,7 @@ fun PlayerScreen(
     onLyricsOffsetChange: (Long) -> Unit,
     lyricsClock: dev.auralis.studio.lyrics.LyricsClock? = null,
     lyricsCandidates: List<dev.auralis.studio.lyrics.LrclibTrack> = emptyList(),
+    isSearchingLyricsCandidates: Boolean = false,
     onLoadLyricsCandidates: () -> Unit = {},
     onSelectLyricsCandidate: (dev.auralis.studio.lyrics.LrclibTrack) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -184,29 +185,57 @@ fun PlayerScreen(
         if (pointA >= 0 && pointB > pointA && state.positionMs >= pointB) onSeek(pointA)
     }
 
-    Box(modifier.fillMaxSize()) {
-        // Background artwork blur when theme uses artwork backgrounds
-        if (tokens.backgroundUsesArtwork && track?.artworkUri != null) {
+    Box(modifier.fillMaxSize().background(colors.background)) {
+        // Dynamic, luminous ambient background (Never flat black)
+        val rawArtUri = track?.artworkUri
+        val bgModel: Any? = remember(rawArtUri) {
+            if (rawArtUri.isNullOrBlank()) null
+            else if (rawArtUri.startsWith("/") && !rawArtUri.startsWith("content://") && !rawArtUri.startsWith("file://")) {
+                java.io.File(rawArtUri)
+            } else {
+                rawArtUri
+            }
+        }
+
+        if (bgModel != null) {
+            // 1. Softly blurred, scaled ambient artwork
             AsyncImage(
-                model        = track.artworkUri,
+                model = bgModel,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier     = Modifier
+                modifier = Modifier
                     .fillMaxSize()
-                    .scale(if (tokens.glassBlur) 1.10f else 1f)
-                    .blur(if (tokens.glassBlur) (12f + 20f * themeSettings.blurStrength).dp else 0.dp),
+                    .scale(1.25f)
+                    .blur(48.dp),
             )
-            // Contrast scrim
+            // 2. Luminous color wash & gentle vignette (keeps colors alive and text readable)
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            listOf(
-                                artworkScrim.copy(alpha = tokens.glassContrastScrimAlpha * 0.55f),
-                                artworkScrim.copy(alpha = tokens.glassContrastScrimAlpha * 0.82f),
-                                artworkScrim.copy(alpha = tokens.glassContrastScrimAlpha),
+                            colors = listOf(
+                                Color.Black.copy(alpha = 0.22f),
+                                Color.Black.copy(alpha = 0.42f),
+                                Color.Black.copy(alpha = 0.68f),
                             ),
+                        ),
+                    ),
+            )
+        } else {
+            // 3. Ambient dynamic glowing gradient when artwork is loading or absent
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                colors.primary.copy(alpha = 0.35f),
+                                colors.secondary.copy(alpha = 0.20f),
+                                colors.surfaceVariant.copy(alpha = 0.15f),
+                                colors.background,
+                            ),
+                            radius = 1200f,
                         ),
                     ),
             )
@@ -271,6 +300,7 @@ fun PlayerScreen(
                         positionMs             = state.positionMs,
                         lyricsClock            = lyricsClock,
                         lyricsCandidates       = lyricsCandidates,
+                        isSearchingCandidates  = isSearchingLyricsCandidates,
                         onSeek                 = onSeek,
                         onRetry                = onRetryLyrics,
                         onImport               = onImportLyrics,
@@ -714,6 +744,7 @@ private fun LyricsPage(
     positionMs: Long,
     lyricsClock: dev.auralis.studio.lyrics.LyricsClock?,
     lyricsCandidates: List<dev.auralis.studio.lyrics.LrclibTrack>,
+    isSearchingCandidates: Boolean = false,
     onSeek: (Long) -> Unit,
     onRetry: () -> Unit,
     onImport: () -> Unit,
@@ -776,9 +807,17 @@ private fun LyricsPage(
                 )
                 Spacer(Modifier.height(12.dp))
 
-                if (lyricsCandidates.isEmpty()) {
+                if (isSearchingCandidates) {
                     Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(modifier = Modifier.size(28.dp), color = colors.primary)
+                    }
+                } else if (lyricsCandidates.isEmpty()) {
+                    Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            stringResource(R.string.lyrics_not_found),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.onSurface.copy(alpha = 0.75f),
+                        )
                     }
                 } else {
                     LazyColumn(

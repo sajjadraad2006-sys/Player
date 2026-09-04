@@ -256,7 +256,7 @@ fun SourceInspectionBottomSheet(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Direct download authorized by license policy",
+                                text = "Direct audio download ready",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colors.onPrimaryContainer,
                                 fontWeight = FontWeight.Medium,

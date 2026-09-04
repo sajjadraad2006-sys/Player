@@ -10,11 +10,26 @@ class YouTubeCatalogProviderTest {
 
     @Test
     fun unconfiguredProvider_returnsNotConfiguredWithoutCrashing() = runBlocking {
-        val provider = YouTubeCatalogProvider(apiKey = "")
-        assertFalse("Provider without API key must not be configured", provider.isConfigured)
+        val provider = YouTubeCatalogProvider(apiKey = "", enableWebFallback = false)
+        assertFalse("Provider without API key and web fallback disabled must not be configured", provider.isConfigured)
 
         val result = provider.search("Bohemian Rhapsody")
         assertTrue("Unconfigured search must return ProviderResult.NotConfigured", result is ProviderResult.NotConfigured)
+    }
+
+    @Test
+    fun providerWithWebFallback_isAlwaysConfigured() {
+        val provider = YouTubeCatalogProvider(apiKey = "", enableWebFallback = true)
+        assertTrue("Provider with web fallback must be configured", provider.isConfigured)
+    }
+
+    @Test
+    fun parseClockDurationMs_handlesVariousFormats() {
+        assertEquals(225_000L, YouTubeCatalogProvider.parseClockDurationMs("3:45"))
+        assertEquals(3_730_000L, YouTubeCatalogProvider.parseClockDurationMs("1:02:10"))
+        assertEquals(45_000L, YouTubeCatalogProvider.parseClockDurationMs("45"))
+        assertEquals(0L, YouTubeCatalogProvider.parseClockDurationMs(""))
+        assertEquals(0L, YouTubeCatalogProvider.parseClockDurationMs("invalid"))
     }
 
     @Test

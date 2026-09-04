@@ -117,6 +117,9 @@
     <string name="material">ماتيريال</string>
     <string name="neon">نيون</string>
     <string name="dynamic_art">ألوان الغلاف</string>
+    <string name="aurora">أورورا</string>
+    <string name="retro_vinyl">فينيل ريترو</string>
+    <string name="midnight_purple">بنفسجي منتصف الليل</string>
     <string name="classic">كلاسيكي</string>
     <string name="appearance_mode">وضع المظهر</string>
     <string name="system">النظام</string>
@@ -220,6 +223,7 @@
     <string name="privacy_summary">الأذونات والبيانات</string>
     <string name="about_summary">الإصدار والتشخيصات والتراخيص</string>
     <string name="search_online_hint">ابحث عن أغنية أو فنان أو ألبوم أو نمط موسيقي…</string>
+    <string name="search_online_for">البحث على الإنترنت عن \"%1$s\"</string>
     <string name="on_device_count">على الجهاز (%1$d)</string>
     <string name="search_download_online">بحث وتنزيل عبر الإنترنت</string>
     <string name="searching">جارٍ البحث…</string>
@@ -397,4 +401,16 @@
     <string name="import_link_auth_required">يتطلب تفويضاً</string>
     <string name="import_link_unknown_permission">حالة التنزيل غير مؤكدة</string>
     <string name="import_link_inspecting">جارٍ فحص الرابط…</string>
+    <string name="yt_api_guide_title">دليل مفتاح YouTube والتحميل</string>
+    <string name="yt_api_guide_no_key_needed">يعمل البحث والتحميل تلقائياً وبشكل كامل بدون الحاجة لأي مفتاح API!</string>
+    <string name="yt_api_guide_steps_header">خطوات الحصول على مفتاح YouTube API خاص بك (اختياري):</string>
+    <string name="yt_api_guide_steps_content">1. افتح موقع Google Cloud Console بالزر أدناه.\n2. أنشئ مشروعاً جديداً (مثل: LyruneMusic).\n3. اذهب إلى APIs &amp; Services ثم Library وابحث عن YouTube Data API v3 واضغط Enable.\n4. اذهب إلى Credentials واضغط Create Credentials ثم اختر API Key.\n5. انسخ المفتاح والصقه في الحقل أدناه.</string>
+    <string name="yt_api_guide_open_console">Google Cloud Console</string>
+    <string name="yt_api_guide_input_label">مفتاح YouTube API (اختياري)</string>
+    <string name="yt_api_guide_chip">دليل المفتاح</string>
+    <string name="action_save">حفظ</string>
+    <string name="youtube_download_available">يوتيوب · التحميل متاح</string>
+    <string name="loading_stream">جارٍ تحميل البث…</string>
+    <string name="downloads">التنزيلات</string>
+    <string name="download_notifications_desc">إظهار تقدم وحالة التنزيلات النشطة.</string>
 </resources>

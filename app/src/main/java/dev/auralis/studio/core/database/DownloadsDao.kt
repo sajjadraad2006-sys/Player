@@ -67,6 +67,9 @@ interface DownloadsDao {
     )
     suspend fun repairMetadata(id: Long, title: String, artist: String, album: String, durationMs: Long)
 
+    @Query("UPDATE downloads SET artworkUrl = :artworkUrl WHERE id = :id")
+    suspend fun updateArtworkUrl(id: Long, artworkUrl: String)
+
     @Query("DELETE FROM downloads WHERE id = :id")
     suspend fun deleteById(id: Long)
 

@@ -52,6 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import dev.auralis.studio.R
 import dev.auralis.studio.core.database.PlaylistEntity
 import dev.auralis.studio.core.model.Track
@@ -81,9 +82,9 @@ fun GlassCard(
     val containerColor = when (tokens.surfaceTreatment) {
         SurfaceTreatment.BORDERLESS -> Color.Transparent
         SurfaceTreatment.MATERIAL_TONAL -> colors.surfaceVariant
-        SurfaceTreatment.CLASSIC_OUTLINE -> colors.surface
+        SurfaceTreatment.CLASSIC_OUTLINE, SurfaceTreatment.RETRO_ANALOG -> colors.surface
         SurfaceTreatment.NEON_EDGE -> colors.surface.copy(alpha = requestedAlpha)
-        SurfaceTreatment.ARTWORK, SurfaceTreatment.GLASS -> colors.surface.copy(alpha = requestedAlpha)
+        SurfaceTreatment.ARTWORK, SurfaceTreatment.GLASS, SurfaceTreatment.AURORA_FROST, SurfaceTreatment.NEBULA_GLOW -> colors.surface.copy(alpha = requestedAlpha)
     }
 
     // Border color — use accent tint for glass/neon, neutral for others
@@ -171,34 +172,50 @@ fun ArtworkContrastScrim(modifier: Modifier = Modifier) {
 fun TrackArtwork(track: Track?, modifier: Modifier = Modifier) {
     val tokens = LocalAuralisTokens.current
     val shape  = RoundedCornerShape(tokens.artworkCorner.dp)
-    if (track?.artworkUri != null) {
-        AsyncImage(
-            model           = track.artworkUri,
-            contentDescription = track.album,
+    val rawUri = track?.artworkUri
+    val model: Any? = remember(rawUri) {
+        if (rawUri.isNullOrBlank()) null
+        else if (rawUri.startsWith("/") && !rawUri.startsWith("content://") && !rawUri.startsWith("file://")) {
+            java.io.File(rawUri)
+        } else {
+            rawUri
+        }
+    }
+    if (model != null) {
+        SubcomposeAsyncImage(
+            model           = model,
+            contentDescription = track?.album,
             contentScale    = ContentScale.Crop,
             modifier        = modifier.clip(shape),
+            loading         = { DefaultArtworkPlaceholder(shape, modifier) },
+            error           = { DefaultArtworkPlaceholder(shape, modifier) },
         )
     } else {
-        Box(
-            modifier         = modifier
-                .clip(shape)
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.primaryContainer,
-                            MaterialTheme.colorScheme.surfaceVariant,
-                        ),
+        DefaultArtworkPlaceholder(shape, modifier)
+    }
+}
+
+@Composable
+fun DefaultArtworkPlaceholder(shape: RoundedCornerShape, modifier: Modifier = Modifier) {
+    Box(
+        modifier         = modifier
+            .clip(shape)
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.primaryContainer,
+                        MaterialTheme.colorScheme.surfaceVariant,
                     ),
                 ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Default.MusicNote,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                modifier = Modifier.size(28.dp),
-            )
-        }
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Default.MusicNote,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            modifier = Modifier.size(36.dp),
+        )
     }
 }
 

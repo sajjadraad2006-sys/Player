@@ -150,6 +150,14 @@ class UnifiedTrackMergerTest {
         assertFalse(itunesSource.isDownloadableFullTrack)
     }
 
+    @Test
+    fun `distinct tracks from same provider never merge`() {
+        val yt1 = track("youtube", title = "Song A").copy(id = "video-1")
+        val yt2 = track("youtube", title = "Song A").copy(id = "video-2")
+        val merged = UnifiedTrackMerger.merge(listOf(yt1, yt2))
+        assertEquals(2, merged.size)
+    }
+
     private fun track(
         provider: String,
         title: String = "Song",

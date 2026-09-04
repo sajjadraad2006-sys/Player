@@ -16,5 +16,17 @@ class LyricsMetadataNormalizerTest {
     @Test fun unknownArtistBecomesAbsent() {
         assertEquals("", LyricsMetadataNormalizer.artist("Unknown Artist"))
         assertEquals("The Artist", LyricsMetadataNormalizer.artist("The Artist"))
+        assertEquals("Selena Gomez", LyricsMetadataNormalizer.artist("SelenaGomezVEVO"))
+        assertEquals("Adele", LyricsMetadataNormalizer.artist("Adele - Topic"))
+    }
+
+    @Test fun normalizesYouTubeTitleAndChannel() {
+        val norm = LyricsMetadataNormalizer.normalize(
+            "Selena Gomez - Love You Like A Love Song (Official Music Video)",
+            "SelenaGomezVEVO",
+        )
+        assertEquals("Love You Like A Love Song", norm.title)
+        assertEquals("Selena Gomez", norm.artist)
+        assertEquals("Selena Gomez Love You Like A Love Song", norm.query)
     }
 }

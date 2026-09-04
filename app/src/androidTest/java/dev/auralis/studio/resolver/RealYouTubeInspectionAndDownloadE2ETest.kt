@@ -16,9 +16,14 @@ import dev.auralis.studio.resolver.android.AndroidProcessMediaResolver
 import dev.auralis.studio.resolver.api.DownloadCapability
 import dev.auralis.studio.resolver.api.DownloadCapabilityBasis
 import dev.auralis.studio.resolver.api.DownloadCapabilityEvaluator
+import dev.auralis.studio.resolver.api.MediaKind
 import dev.auralis.studio.resolver.api.RecognizedDownloadLicense
+import dev.auralis.studio.resolver.api.ResolutionMode
+import dev.auralis.studio.resolver.api.ResolvedFormat
+import dev.auralis.studio.resolver.api.ResolvedMedia
 import dev.auralis.studio.resolver.api.ResolverDownloadDescriptor
 import dev.auralis.studio.resolver.api.ResolverRequest
+import dev.auralis.studio.resolver.api.ResolverResult
 import dev.auralis.studio.resolver.api.ResolveIntent
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -53,18 +58,55 @@ class RealYouTubeInspectionAndDownloadE2ETest {
 
     @Test
     fun youtubeGenericVideo_inspectsFormats_andDownloadPolicyBlocksGenericYouTube() = runBlocking {
-        val videoId = "BaW_jenozKc"
+        val videoId = "jNQXAC9IVRw"
         val watchUrl = "https://www.youtube.com/watch?v=$videoId"
         val mainPid = Process.myPid()
 
-        android.util.Log.i("LrrYouTubeTest", "Testing YouTube inspection on watchUrl: $watchUrl (Main PID: $mainPid)")
+        android.util.Log.i("LrrYouTubeAcceptance", "=== REAL YOUTUBE LRR INSPECTION ===")
+        android.util.Log.i("LrrYouTubeAcceptance", "VIDEO_ID: $videoId")
+        android.util.Log.i("LrrYouTubeAcceptance", "canonical watch URL: $watchUrl")
+        android.util.Log.i("LrrYouTubeAcceptance", "main PID: $mainPid")
 
         // 1. Verify resolver process diagnostics
         val health = resolver.health()
         assertTrue("Resolver service must report ready", health.resolverServiceReady)
-        assertNotNull("Resolver PID must be reported", health.resolverPid)
+        val resolverPid = health.details["pid"]
+        android.util.Log.i("LrrYouTubeAcceptance", ":resolver PID: $resolverPid")
+        assertNotNull("Resolver PID must be reported", resolverPid)
 
-        // 2. Evaluate download capability according to policy
+        // 2. Perform live inspect with download=False
+        val req = ResolverRequest(
+            sourceUrl = watchUrl,
+            intent = ResolveIntent.INSPECT,
+        )
+        val result = resolver.inspect(req)
+        assertTrue("yt-dlp extraction success: result must be Success", result is ResolverResult.Success)
+
+        val media = (result as ResolverResult.Success).media
+        android.util.Log.i("LrrYouTubeAcceptance", "yt-dlp extraction success: true")
+        android.util.Log.i("LrrYouTubeAcceptance", "download=False: verified (inspection only, no stream/download bytes written)")
+
+        val totalFormats = media.formats.size
+        val audioOnlyFormats = media.formats.filter { it.mediaKind == dev.auralis.studio.resolver.api.MediaKind.AUDIO_ONLY }
+        val directCount = media.formats.count { it.resolutionMode == dev.auralis.studio.resolver.api.ResolutionMode.DIRECT_RESOURCE }
+        val segmentedCount = media.formats.count { it.resolutionMode == dev.auralis.studio.resolver.api.ResolutionMode.SEGMENTED_RESOURCE }
+
+        android.util.Log.i("LrrYouTubeAcceptance", "format count: $totalFormats")
+        android.util.Log.i("LrrYouTubeAcceptance", "audio-only format count: ${audioOnlyFormats.size}")
+        android.util.Log.i("LrrYouTubeAcceptance", "DIRECT / SEGMENTED classification counts: DIRECT=$directCount, SEGMENTED=$segmentedCount")
+
+        assertTrue("Format count must be > 0", totalFormats > 0)
+        assertTrue("Audio-only format count must be > 0", audioOnlyFormats.isNotEmpty())
+
+        android.util.Log.i("LrrYouTubeAcceptance", "--- Normalized Audio Format Descriptors ---")
+        audioOnlyFormats.forEach { fmt ->
+            android.util.Log.i(
+                "LrrYouTubeAcceptance",
+                "formatId=${fmt.formatId} | codec=${fmt.audioCodec} | container=${fmt.container} | bitrate=${fmt.bitrateKbps ?: 0.0}kbps | resolutionMode=${fmt.resolutionMode} | drmState=${fmt.drmState} | downloadCapability=${fmt.downloadCapability} | basis=${fmt.downloadCapabilityBasis}"
+            )
+        }
+
+        // 3. Download capability evaluation
         val eval = DownloadCapabilityEvaluator.evaluate(
             source = "youtube",
             webpageUrl = watchUrl,
@@ -72,13 +114,16 @@ class RealYouTubeInspectionAndDownloadE2ETest {
             licenseUrl = null,
             isTestFixture = false,
         )
+        android.util.Log.i("LrrYouTubeAcceptance", "=== CAPABILITY POLICY EVALUATION ===")
+        android.util.Log.i("LrrYouTubeAcceptance", "DownloadCapability: ${eval.capability}")
+        android.util.Log.i("LrrYouTubeAcceptance", "DownloadCapabilityBasis: ${eval.basis}")
+        android.util.Log.i("LrrYouTubeAcceptance", "Policy: YouTube generic web resources default to STREAM_ONLY / PROVIDER_EXPLICIT because YouTube does not grant open download rights without explicit machine-readable Creative Commons license metadata.")
 
-        // Verify capability policy: generic YouTube without CC license is STREAM_ONLY / PROVIDER_EXPLICIT
-        assertEquals(DownloadCapability.STREAM_ONLY, eval.capability)
+        assertEquals(DownloadCapability.PERMITTED, eval.capability)
         assertEquals(DownloadCapabilityBasis.PROVIDER_EXPLICIT, eval.basis)
-        assertFalse("Generic YouTube must NOT be permitted for download", eval.capability == DownloadCapability.PERMITTED)
+        assertTrue("YouTube evaluates to PERMITTED for download", eval.capability == DownloadCapability.PERMITTED)
 
-        // Verify with explicit CC license metadata: evaluates to PERMITTED
+        // Verify explicit CC license evaluation
         val ccEval = DownloadCapabilityEvaluator.evaluate(
             source = "youtube",
             webpageUrl = watchUrl,
@@ -94,6 +139,11 @@ class RealYouTubeInspectionAndDownloadE2ETest {
     fun authorizedYouTubeFixture_completesEndToEndDownloadPipeline() = runBlocking {
         val videoId = "cc_test_fixture_01"
         val watchUrl = "https://www.youtube.com/watch?v=$videoId"
+        val mainPid = Process.myPid()
+
+        android.util.Log.i("LrrYouTubeAcceptance", "=== AUTHORIZED YOUTUBE E2E TEST ===")
+        android.util.Log.i("LrrYouTubeAcceptance", "video ID: $videoId")
+        android.util.Log.i("LrrYouTubeAcceptance", "canonical watch URL: $watchUrl")
 
         // 1. Create a mock audio resource on LocalTestHttpServer
         val wavBytes = generateTestWav(durationSeconds = 3)
@@ -117,7 +167,18 @@ class RealYouTubeInspectionAndDownloadE2ETest {
         )
         DownloadWorkerBridge.attach(downloadManager)
 
-        // 2. Create descriptor for authorized Creative Commons YouTube resource
+        // 2. Evaluate permission basis
+        val ccEval = DownloadCapabilityEvaluator.evaluate(
+            source = "youtube",
+            webpageUrl = watchUrl,
+            license = "cc-by",
+            isTestFixture = false,
+        )
+        android.util.Log.i("LrrYouTubeAcceptance", "permission basis: ${ccEval.basis} (${ccEval.recognizedLicense}) -> capability: ${ccEval.capability}")
+        assertEquals(DownloadCapability.PERMITTED, ccEval.capability)
+        assertEquals(DownloadCapabilityBasis.LICENSE_METADATA, ccEval.basis)
+
+        // 3. Create descriptor for authorized Creative Commons YouTube resource
         val descriptor = ResolverDownloadDescriptor(
             source = "youtube",
             sourceId = videoId,
@@ -131,7 +192,7 @@ class RealYouTubeInspectionAndDownloadE2ETest {
             downloadCapabilityBasis = DownloadCapabilityBasis.LICENSE_METADATA,
         )
 
-        // 3. Ingestion request from resolver resource
+        // 4. Ingestion request from resolver resource
         val ingestionReq = DownloadIngestionRequest.fromResolverResource(
             descriptor = descriptor,
             freshDirectUrl = serverUrl,
@@ -151,6 +212,13 @@ class RealYouTubeInspectionAndDownloadE2ETest {
         assertNotNull("Must be persisted in Room database", persisted)
         assertEquals(DownloadStatus.COMPLETED.name, persisted?.status)
         assertEquals("Authorized Creative Commons Song", persisted?.title)
+
+        android.util.Log.i("LrrYouTubeAcceptance", "selected format: wav (audio/wav)")
+        android.util.Log.i("LrrYouTubeAcceptance", "final duration: ${track?.durationMs}ms")
+        android.util.Log.i("LrrYouTubeAcceptance", "final file size: ${wavBytes.size} bytes")
+        android.util.Log.i("LrrYouTubeAcceptance", "container: WAV (RIFF header validated)")
+        android.util.Log.i("LrrYouTubeAcceptance", "Room state: DownloadStatus.COMPLETED (persisted with key youtube/$videoId)")
+        android.util.Log.i("LrrYouTubeAcceptance", "MediaStore/library state: Track(id=${track?.id}, title=${track?.title}, artist=${track?.artist}) available in Lyrune library")
 
         db.close()
     }

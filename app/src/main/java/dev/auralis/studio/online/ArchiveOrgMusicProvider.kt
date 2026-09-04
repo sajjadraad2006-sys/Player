@@ -17,7 +17,7 @@ import java.net.URLEncoder
 
 private const val TAG = "ArchiveOrgProvider"
 private const val SEARCH_BASE = "https://archive.org/advancedsearch.php"
-private const val USER_AGENT = "Lyrune/0.2.0 (Android)"
+private const val USER_AGENT = "Lyrune/1.0.0 (Android)"
 
 @Serializable
 private data class ArchiveSearchResponse(

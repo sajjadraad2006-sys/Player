@@ -115,6 +115,58 @@ object SearchNormalization {
         }
         return res
     }
+
+    fun stripArabicPrefixes(word: String): String {
+        var w = word
+        if (w.startsWith("ال") && w.length > 3) {
+            w = w.substring(2)
+        } else if (w.startsWith("وال") && w.length > 4) {
+            w = w.substring(3)
+        } else if ((w.startsWith("و") || w.startsWith("ف") || w.startsWith("ب") || w.startsWith("ل")) && w.length > 3) {
+            w = w.substring(1)
+        }
+        return w
+    }
+
+    /**
+     * Calculates flexible token match ratio between a target string and a query.
+     * Returns a float between 0f (no match) and 1f (perfect match).
+     * Handles:
+     * - Arabic Al- prefixes ("الساعدي" vs "ساعدي")
+     * - Arabic conjunctions ("والسمر" vs "سمر")
+     * - Multi-word partial matches (e.g. 3 of 4 words match)
+     * - Substring tokens (prefix matching)
+     */
+    fun matchRatio(target: String, query: String): Float {
+        val normTarget = normalize(target)
+        val normQuery = normalize(query)
+        if (normTarget.isEmpty() || normQuery.isEmpty()) return 0f
+        if (normTarget == normQuery) return 1f
+        if (normTarget.contains(normQuery)) return 0.95f
+
+        val targetTokens = normTarget.split(' ').filter { it.isNotBlank() }
+        val queryTokens = normQuery.split(' ').filter { it.isNotBlank() }
+        if (queryTokens.isEmpty()) return 0f
+
+        val targetClean = targetTokens.map { stripArabicPrefixes(it) }
+        var matched = 0
+
+        for (q in queryTokens) {
+            val qc = stripArabicPrefixes(q)
+            val isNumeric = q.all { it.isDigit() }
+            val matchFound = if (isNumeric) {
+                targetTokens.any { it == q }
+            } else {
+                targetTokens.any { it == q || (q.length >= 3 && it.startsWith(q)) } ||
+                    targetClean.any { it == qc || (qc.length >= 3 && it.startsWith(qc)) }
+            }
+            if (matchFound) {
+                matched++
+            }
+        }
+
+        return matched.toFloat() / queryTokens.size.toFloat()
+    }
 }
 
 object IdentityNormalization {

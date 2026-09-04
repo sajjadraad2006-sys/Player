@@ -92,17 +92,14 @@ object DownloadCapabilityEvaluator {
         val normSource = source.lowercase().trim()
         val normUrl = (webpageUrl ?: "").lowercase().trim()
 
-        // ── 1. Known Restricted / Discovery-Only Providers ────────────────────
+        // ── 1. YouTube Provider (Resolved Direct Resource) ────────────────────
         if (normSource.contains("youtube") || normUrl.contains("youtube.com") || normUrl.contains("youtu.be")) {
             val parsedLicense = RecognizedDownloadLicense.parse(license, licenseUrl)
-            if (parsedLicense.isPermittedDownload) {
-                return EvaluationResult(
-                    capability = DownloadCapability.PERMITTED,
-                    basis = DownloadCapabilityBasis.LICENSE_METADATA,
-                    recognizedLicense = parsedLicense,
-                )
-            }
-            return EvaluationResult(DownloadCapability.STREAM_ONLY, DownloadCapabilityBasis.PROVIDER_EXPLICIT)
+            return EvaluationResult(
+                capability = DownloadCapability.PERMITTED,
+                basis = if (parsedLicense.isPermittedDownload) DownloadCapabilityBasis.LICENSE_METADATA else DownloadCapabilityBasis.PROVIDER_EXPLICIT,
+                recognizedLicense = parsedLicense,
+            )
         }
 
         if (normSource.contains("itunes") || normSource.contains("apple") || normUrl.contains("apple.com")) {

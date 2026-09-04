@@ -3,6 +3,7 @@ package dev.auralis.studio.ui
 import android.Manifest
 import android.content.Intent
 import android.os.Build
+import dev.auralis.studio.core.model.Track
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -104,6 +105,8 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     val downloads by viewModel.downloads.collectAsStateWithLifecycle()
     val downloadQuality by viewModel.downloadQuality.collectAsStateWithLifecycle()
     val lyricsCandidates by viewModel.lyricsCandidates.collectAsStateWithLifecycle()
+    val isSearchingLyricsCandidates by viewModel.isSearchingLyricsCandidates.collectAsStateWithLifecycle()
+    val youtubeApiKey by viewModel.youtubeApiKey.collectAsStateWithLifecycle()
 
 
     var audioPermissionGranted by remember { mutableStateOf(viewModel.hasAudioPermission) }
@@ -117,8 +120,26 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     var playerVisible by rememberSaveable { mutableStateOf(false) }
     var quickAudioVisible by rememberSaveable { mutableStateOf(false) }
     val destination = runCatching { MainDestination.valueOf(destinationName) }.getOrDefault(MainDestination.HOME)
+    val currentOnlineTrack by viewModel.currentPlayingOnlineTrack.collectAsStateWithLifecycle()
+    val currentMediaMetadata = playback.currentMediaItem?.mediaMetadata
     val currentTrack = playback.currentMediaItem?.mediaId?.let { uri ->
-        tracks.firstOrNull { it.uri == uri } ?: viewModel.generatedTrack(uri)
+        val found = tracks.firstOrNull { it.uri == uri }
+            ?: (if (currentOnlineTrack?.uri == uri) currentOnlineTrack else null)
+            ?: viewModel.generatedTrack(uri)
+        if (found != null && found.artworkUri == null && currentMediaMetadata?.artworkUri != null) {
+            found.copy(customArtworkUri = currentMediaMetadata.artworkUri.toString())
+        } else {
+            found ?: currentMediaMetadata?.let { meta ->
+                Track(
+                    id = -1L,
+                    uri = uri,
+                    title = meta.title?.toString() ?: currentOnlineTrack?.title.orEmpty(),
+                    artist = meta.artist?.toString() ?: currentOnlineTrack?.artist.orEmpty(),
+                    album = meta.albumTitle?.toString() ?: currentOnlineTrack?.album.orEmpty(),
+                    customArtworkUri = meta.artworkUri?.toString() ?: currentOnlineTrack?.customArtworkUri,
+                )
+            }
+        }
     }
     val artworkPalette = rememberArtworkPalette(currentTrack?.artworkUri)
     val snackbar = remember { SnackbarHostState() }
@@ -211,6 +232,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                     onLyricsOffsetChange = viewModel::updateLyricsOffset,
                     lyricsClock         = viewModel.lyricsClock,
                     lyricsCandidates    = lyricsCandidates,
+                    isSearchingLyricsCandidates = isSearchingLyricsCandidates,
                     onLoadLyricsCandidates = viewModel::loadLyricsCandidates,
                     onSelectLyricsCandidate = viewModel::selectLyricsCandidate,
                 )
@@ -281,11 +303,25 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                     val commonModifier = Modifier.fillMaxSize().padding(padding)
                     when (destination) {
                         MainDestination.HOME -> HomeScreen(
-                            tracks, favorites, history, playlists, currentTrack, scanning,
-                            viewModel::refreshLibrary, chooseFolder,
-                            viewModel.playback::play, viewModel::toggleFavorite,
-                            viewModel::playNext, viewModel::addToQueue, viewModel::addToPlaylist,
-                            { viewModel.updateAudio(it.config) }, commonModifier,
+                            tracks = tracks,
+                            favorites = favorites,
+                            historyUris = history,
+                            playlists = playlists,
+                            currentTrack = currentTrack,
+                            isScanning = scanning,
+                            onRefresh = viewModel::refreshLibrary,
+                            onChooseFolder = chooseFolder,
+                            onPlay = viewModel.playback::play,
+                            onToggleFavorite = viewModel::toggleFavorite,
+                            onPlayNext = viewModel::playNext,
+                            onAddToQueue = viewModel::addToQueue,
+                            onAddToPlaylist = viewModel::addToPlaylist,
+                            onPreset = { viewModel.updateAudio(it.config) },
+                            modifier = commonModifier,
+                            folders = folders,
+                            onCreatePlaylist = viewModel::createPlaylist,
+                            onNavigateToSearch = { destinationName = MainDestination.SEARCH.name },
+                            onNavigateToSettings = { destinationName = MainDestination.SETTINGS.name },
                         )
                         MainDestination.LIBRARY -> LibraryScreen(
                             tracks, favorites, playlists, viewModel::playlistTrackUris,
@@ -318,6 +354,8 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                             onAddToPlaylist       = viewModel::addToPlaylist,
                             mediaResolver         = viewModel.mediaResolver,
                             onEnqueueResolverDownload = viewModel::enqueueResolverDownload,
+                            youtubeApiKey         = youtubeApiKey,
+                            onSaveYoutubeApiKey   = viewModel::setYoutubeApiKey,
                             modifier              = commonModifier,
                         )
                         MainDestination.AUDIO_LAB -> AudioLabScreen(

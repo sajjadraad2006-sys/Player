@@ -35,15 +35,18 @@ class AppContainer(context: Context) {
     val jamendoProvider = JamendoClient(BuildConfig.JAMENDO_CLIENT_ID)
     val itunesProvider = ITunesCatalogProvider()
     val deezerProvider = DeezerCatalogProvider()
-    val youtubeProvider = dev.auralis.studio.online.YouTubeCatalogProvider(BuildConfig.YOUTUBE_API_KEY)
+    val youtubeProvider = dev.auralis.studio.online.YouTubeCatalogProvider(
+        apiKey = BuildConfig.YOUTUBE_API_KEY,
+        enableWebFallback = true,
+    )
     val musicProviders = MusicProviderRegistry(
-        catalogProviders = listOf(audiusProvider, jamendoProvider, itunesProvider, deezerProvider, youtubeProvider),
-        streamProviders = listOf(audiusProvider, jamendoProvider),
-        downloadProviders = listOf(audiusProvider, jamendoProvider),
+        catalogProviders = listOf(youtubeProvider),
+        streamProviders = emptyList(),
+        downloadProviders = emptyList(),
     )
     val localDiscovery = dev.auralis.studio.online.LocalLibraryDiscovery(library)
     val unifiedSearch = UnifiedSearchAggregator(
-        providers = musicProviders.catalogProviders,
+        providers = listOf(youtubeProvider),
         localDiscovery = localDiscovery,
         debugLogging = BuildConfig.DEBUG,
     )

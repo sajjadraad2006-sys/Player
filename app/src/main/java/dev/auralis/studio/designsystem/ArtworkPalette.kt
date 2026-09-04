@@ -34,18 +34,25 @@ fun rememberArtworkPalette(artworkUri: String?): ArtworkPalette? {
     val palette by produceState<ArtworkPalette?>(initialValue = artworkUri?.let(ArtworkPaletteCache.values::get), key1 = artworkUri) {
         if (artworkUri == null || value != null) return@produceState
         value = withContext(Dispatchers.IO) {
-            val drawable = ImageLoader(context).execute(
-                ImageRequest.Builder(context).data(artworkUri).allowHardware(false).build(),
-            ).drawable ?: return@withContext null
-            val generated = Palette.from(drawable.toBitmap()).maximumColorCount(24).generate()
-            val dominant = generated.dominantSwatch?.rgb ?: return@withContext null
-            ArtworkPalette(
-                dominant = Color(dominant),
-                vibrant = Color(generated.vibrantSwatch?.rgb ?: generated.lightVibrantSwatch?.rgb ?: dominant),
-                muted = Color(generated.mutedSwatch?.rgb ?: generated.darkMutedSwatch?.rgb ?: dominant),
-                dark = Color(generated.darkMutedSwatch?.rgb ?: generated.darkVibrantSwatch?.rgb ?: dominant),
-                light = Color(generated.lightMutedSwatch?.rgb ?: generated.lightVibrantSwatch?.rgb ?: dominant),
-            ).also { ArtworkPaletteCache.values.put(artworkUri, it) }
+            runCatching {
+                val model: Any = if (artworkUri.startsWith("/") && !artworkUri.startsWith("content://") && !artworkUri.startsWith("file://")) {
+                    java.io.File(artworkUri)
+                } else {
+                    artworkUri
+                }
+                val drawable = ImageLoader(context).execute(
+                    ImageRequest.Builder(context).data(model).allowHardware(false).build(),
+                ).drawable ?: return@runCatching null
+                val generated = Palette.from(drawable.toBitmap()).maximumColorCount(24).generate()
+                val dominant = generated.dominantSwatch?.rgb ?: generated.vibrantSwatch?.rgb ?: return@runCatching null
+                ArtworkPalette(
+                    dominant = Color(dominant),
+                    vibrant = Color(generated.vibrantSwatch?.rgb ?: generated.lightVibrantSwatch?.rgb ?: dominant),
+                    muted = Color(generated.mutedSwatch?.rgb ?: generated.darkMutedSwatch?.rgb ?: dominant),
+                    dark = Color(generated.darkMutedSwatch?.rgb ?: generated.darkVibrantSwatch?.rgb ?: dominant),
+                    light = Color(generated.lightMutedSwatch?.rgb ?: generated.lightVibrantSwatch?.rgb ?: dominant),
+                ).also { ArtworkPaletteCache.values.put(artworkUri, it) }
+            }.getOrNull()
         }
     }
     return palette

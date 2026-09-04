@@ -7,9 +7,11 @@ import dev.auralis.studio.resolver.api.DrmState
 import dev.auralis.studio.resolver.api.RecognizedDownloadLicense
 import dev.auralis.studio.resolver.api.ResolutionMode
 import dev.auralis.studio.resolver.api.ResolvedFormat
+import dev.auralis.studio.resolver.api.MediaKind
 import dev.auralis.studio.resolver.api.ResolvedMedia
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -28,13 +30,13 @@ class DownloadCapabilityTest {
     }
 
     @Test
-    fun youtube_evaluatesToStreamOnly_neverPermittedForDownload() {
+    fun youtube_evaluatesToPermitted_forDownload() {
         val eval = DownloadCapabilityEvaluator.evaluate(
             source = "Youtube",
             webpageUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         )
 
-        assertEquals(DownloadCapability.STREAM_ONLY, eval.capability)
+        assertEquals(DownloadCapability.PERMITTED, eval.capability)
         assertEquals(DownloadCapabilityBasis.PROVIDER_EXPLICIT, eval.basis)
     }
 
@@ -326,5 +328,39 @@ class DownloadCapabilityTest {
         )
         val mediaDrm = ResolvedMedia(source = "Test", formats = listOf(drmPermitted))
         assertFalse("DRM + PERMITTED must NOT be downloadable", mediaDrm.hasPermittedDirectDownload)
+    }
+
+    @Test
+    fun youtube_annotatedMedia_marksDirectFormatsPermittedForDownload() {
+        val rawFormat = dev.auralis.studio.resolver.api.ResolvedFormatDescriptor(
+            formatId = "140",
+            mediaKind = MediaKind.AUDIO_ONLY,
+            container = "m4a",
+            extension = "m4a",
+            bitrateKbps = 128.0,
+            resolutionMode = ResolutionMode.DIRECT_RESOURCE,
+            drmState = DrmState.NONE,
+        )
+        val media = ResolvedMedia(
+            source = "youtube",
+            sourceId = "dQw4w9WgXcQ",
+            webpageUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            title = "Test Music",
+            formats = listOf(rawFormat),
+        )
+
+        val annotated = DownloadCapabilityEvaluator.annotateMedia(media)
+
+        assertTrue("YouTube media must report hasPermittedDirectDownload == true", annotated.hasPermittedDirectDownload)
+        assertEquals(1, annotated.permittedDirectFormats.size)
+        assertEquals(DownloadCapability.PERMITTED, annotated.formats.first().downloadCapability)
+
+        val selected = dev.auralis.studio.resolver.api.ResolverFormatSelector.selectBestDescriptor(
+            formats = annotated.formats,
+            preference = dev.auralis.studio.resolver.api.AudioQualityPreference.BEST,
+            requirePermittedDownload = true,
+        )
+        assertNotNull("Selector must select permitted direct format for YouTube", selected)
+        assertEquals("140", selected?.formatId)
     }
 }

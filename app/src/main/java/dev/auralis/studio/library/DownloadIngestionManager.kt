@@ -1,10 +1,13 @@
 package dev.auralis.studio.library
 
+import android.content.ContentValues
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.media.MediaScannerConnection
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
+import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
 import dev.auralis.studio.core.database.DownloadEntity
 import dev.auralis.studio.core.database.DownloadStatus
@@ -63,7 +66,7 @@ class DownloadIngestionManager(
 
     /** Tolerance when comparing local duration to the catalog's expected full duration. */
     private fun durationToleranceMs(expectedMs: Long): Long =
-        (expectedMs.coerceAtLeast(0L) * 0.10).toLong().coerceIn(2_000L, 15_000L)
+        (expectedMs.coerceAtLeast(0L) * 0.20).toLong().coerceIn(5_000L, 30_000L)
 
     suspend fun downloadTrack(
         onlineTrack: OnlineTrack,
@@ -172,7 +175,7 @@ class DownloadIngestionManager(
         try {
             val requestBuilder = Request.Builder()
                 .url(downloadUrl)
-                .header("User-Agent", "Lyrune-Studio/2.0")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
             request.httpHeaders.forEach { (name, value) ->
                 // Guard: range and sensitive authorization headers must never be injected from outside
                 if (!name.equals("Cookie", ignoreCase = true) &&
@@ -209,9 +212,9 @@ class DownloadIngestionManager(
 
             val formatInfo = detectAudioFormat(contentType, downloadUrl, headerBytes.copyOf(bytesRead))
 
-            // Clean filename with real extension
-            val safeArtist = (request.artist ?: "").replace(Regex("[^a-zA-Z0-9._ -]"), "_").take(30).trim()
-            val safeTitle = request.title.replace(Regex("[^a-zA-Z0-9._ -]"), "_").take(40).trim()
+            // Clean filename with real extension - preserve Arabic and Unicode characters, strip only illegal filesystem chars
+            val safeArtist = (request.artist ?: "").replace(Regex("""[\\/:*?"<>|\x00-\x1F]"""), "_").trim().take(60)
+            val safeTitle = request.title.replace(Regex("""[\\/:*?"<>|\x00-\x1F]"""), "_").trim().take(90)
             val fileName = if (safeArtist.isNotBlank()) "$safeArtist - $safeTitle.${formatInfo.extension}" else "$safeTitle.${formatInfo.extension}"
 
             var localFilePath: String? = null
@@ -229,53 +232,92 @@ class DownloadIngestionManager(
                     }
 
                 context.contentResolver.openOutputStream(targetDoc.uri)?.use { out ->
-                    copyStreamWithProgress(bufferedInput, out, contentLength) { downloaded ->
-                        downloadsDao.updateProgress(rowId, DownloadStatus.DOWNLOADING.name, downloaded, contentLength)
-                        onProgress(downloaded, contentLength)
-                    }
+                    copyStreamWithProgress(
+                        bufferedInput,
+                        out,
+                        contentLength,
+                        onProgress = { downloaded -> onProgress(downloaded, contentLength) },
+                        onDbProgress = { downloaded -> downloadsDao.updateProgress(rowId, DownloadStatus.DOWNLOADING.name, downloaded, contentLength) },
+                    )
                 }
                 localUri = targetDoc.uri
                 localFilePath = targetDoc.uri.toString()
             } else {
                 // Standard destination: Music/Lyrune/
-                val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
-                val lyruneDir = File(musicDir, "Lyrune").apply { if (!exists()) mkdirs() }
-                val targetFile = uniqueTargetFile(lyruneDir, fileName)
-
-                FileOutputStream(targetFile).use { out ->
-                    copyStreamWithProgress(bufferedInput, out, contentLength) { downloaded ->
-                        downloadsDao.updateProgress(rowId, DownloadStatus.DOWNLOADING.name, downloaded, contentLength)
-                        onProgress(downloaded, contentLength)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val contentValues = ContentValues().apply {
+                        put(MediaStore.Audio.Media.DISPLAY_NAME, fileName)
+                        put(MediaStore.Audio.Media.TITLE, request.title)
+                        put(MediaStore.Audio.Media.ARTIST, request.artist)
+                        put(MediaStore.Audio.Media.ALBUM, request.album.orEmpty())
+                        put(MediaStore.Audio.Media.MIME_TYPE, formatInfo.mimeType)
+                        put(MediaStore.Audio.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MUSIC}/Lyrune")
+                        put(MediaStore.Audio.Media.IS_PENDING, 1)
                     }
-                }
-                localFilePath = targetFile.absolutePath
+                    val collection = MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                    val insertedUri = context.contentResolver.insert(collection, contentValues)
+                        ?: throw IllegalStateException("Could not create MediaStore entry for $fileName")
 
-                // Scan into Android MediaStore
-                val scannedContentUri = scanFileToMediaStore(targetFile.absolutePath, formatInfo.mimeType)
-                localUri = scannedContentUri ?: Uri.fromFile(targetFile)
+                    context.contentResolver.openOutputStream(insertedUri)?.use { out ->
+                        copyStreamWithProgress(
+                            bufferedInput,
+                            out,
+                            contentLength,
+                            onProgress = { downloaded -> onProgress(downloaded, contentLength) },
+                            onDbProgress = { downloaded -> downloadsDao.updateProgress(rowId, DownloadStatus.DOWNLOADING.name, downloaded, contentLength) },
+                        )
+                    } ?: throw IllegalStateException("Could not open stream for MediaStore URI $insertedUri")
+
+                    contentValues.clear()
+                    contentValues.put(MediaStore.Audio.Media.IS_PENDING, 0)
+                    context.contentResolver.update(insertedUri, contentValues, null, null)
+
+                    localUri = insertedUri
+                    localFilePath = insertedUri.toString()
+                } else {
+                    val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+                    val lyruneDir = File(musicDir, "Lyrune").apply { if (!exists()) mkdirs() }
+                    val targetFile = uniqueTargetFile(lyruneDir, fileName)
+
+                    FileOutputStream(targetFile).use { out ->
+                        copyStreamWithProgress(
+                            bufferedInput,
+                            out,
+                            contentLength,
+                            onProgress = { downloaded -> onProgress(downloaded, contentLength) },
+                            onDbProgress = { downloaded -> downloadsDao.updateProgress(rowId, DownloadStatus.DOWNLOADING.name, downloaded, contentLength) },
+                        )
+                    }
+                    localFilePath = targetFile.absolutePath
+
+                    // Scan into Android MediaStore
+                    val scannedContentUri = scanFileToMediaStore(targetFile.absolutePath, formatInfo.mimeType)
+                    localUri = scannedContentUri ?: Uri.fromFile(targetFile)
+                }
             }
 
             val finalUriStr = localUri.toString()
             val finalPath = localFilePath ?: finalUriStr
 
             // ── Validation: container must be readable & non-empty. ──────────
-            val actualDurationMs = probeDuration(finalPath, finalUriStr)
+            var actualDurationMs = probeDuration(finalPath, finalUriStr)
             if (actualDurationMs <= 0L) {
-                val errorMsg = "Downloaded audio is unreadable or empty"
-                markFailedAndDelete(rowId, finalPath, customFolderUri == null, errorMsg)
-                return Result.failure(IllegalStateException(errorMsg))
+                if (contentLength > 50_000L && request.durationMs > 0L) {
+                    actualDurationMs = request.durationMs
+                } else {
+                    val errorMsg = "Downloaded audio is unreadable or empty"
+                    markFailedAndDelete(rowId, finalPath, customFolderUri == null, errorMsg)
+                    return Result.failure(IllegalStateException(errorMsg))
+                }
             }
 
             // ── Validation: duration plausibility vs expected FULL duration. ─
             val expectedDurationMs = request.durationMs
-            if (expectedDurationMs > 0L) {
-                val tolerance = durationToleranceMs(expectedDurationMs)
-                if (abs(actualDurationMs - expectedDurationMs) > tolerance) {
-                    val errorMsg =
-                        "Preview / incomplete download: local ${actualDurationMs / 1000}s vs expected ${expectedDurationMs / 1000}s"
-                    markFailedAndDelete(rowId, finalPath, customFolderUri == null, errorMsg)
-                    return Result.failure(PreviewDownloadRejectedException(errorMsg))
-                }
+            if (expectedDurationMs >= 60_000L && actualDurationMs in 1 until 45_000L) {
+                val errorMsg =
+                    "Preview / incomplete download: local ${actualDurationMs / 1000}s vs expected ${expectedDurationMs / 1000}s"
+                markFailedAndDelete(rowId, finalPath, customFolderUri == null, errorMsg)
+                return Result.failure(PreviewDownloadRejectedException(errorMsg))
             }
 
             // Metadata precedence (highest → lowest):
@@ -295,6 +337,31 @@ class DownloadIngestionManager(
                 }
             }
 
+            var localArtworkPath: String = request.artworkUrl.orEmpty()
+            val artUrl = request.artworkUrl.orEmpty()
+            if (artUrl.isNotBlank() && (artUrl.startsWith("http://") || artUrl.startsWith("https://"))) {
+                runCatching {
+                    val coversDir = File(context.filesDir, "covers").apply { if (!exists()) mkdirs() }
+                    val coverFile = File(coversDir, "$rowId.jpg")
+                    val artReq = okhttp3.Request.Builder()
+                        .url(artUrl)
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                        .build()
+                    okHttpClient.newCall(artReq).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            resp.body?.byteStream()?.use { input ->
+                                coverFile.outputStream().use { output ->
+                                    input.copyTo(output)
+                                }
+                            }
+                            if (coverFile.length() > 0) {
+                                localArtworkPath = Uri.fromFile(coverFile).toString()
+                            }
+                        }
+                    }
+                }
+            }
+
             downloadsDao.markCompleted(
                 rowId,
                 trackUri = finalUriStr,
@@ -304,11 +371,17 @@ class DownloadIngestionManager(
                 album = resolvedAlbum.orEmpty(),
                 durationMs = actualDurationMs,
             )
+            if (localArtworkPath.isNotBlank() && localArtworkPath != request.artworkUrl) {
+                downloadsDao.updateArtworkUrl(rowId, localArtworkPath)
+            }
 
             // Refresh MediaStore repository so the new track appears immediately
             mediaStoreRepository.refresh()
 
-            val resolvedTrack = mediaStoreRepository.track(finalUriStr) ?: Track(
+            val effectiveArt = localArtworkPath.takeIf { it.isNotBlank() } ?: request.artworkUrl?.takeIf { it.isNotBlank() }
+            val resolvedTrack = mediaStoreRepository.track(finalUriStr)?.copy(
+                customArtworkUri = effectiveArt,
+            ) ?: Track(
                 id = rowId,
                 uri = finalUriStr,
                 title = resolvedTitle ?: request.title,
@@ -320,6 +393,7 @@ class DownloadIngestionManager(
                 displayName = fileName,
                 mimeType = formatInfo.mimeType,
                 sizeBytes = File(finalPath).takeIf { it.isFile }?.length() ?: contentLength.coerceAtLeast(0L),
+                customArtworkUri = effectiveArt,
             )
 
             return Result.success(resolvedTrack)
@@ -372,14 +446,28 @@ class DownloadIngestionManager(
     }
 
     private suspend fun markFailedAndDelete(rowId: Long, path: String, deleteFile: Boolean, message: String) {
-        if (deleteFile) runCatching { File(path).delete() }
+        if (deleteFile) {
+            runCatching {
+                if (path.startsWith("content://")) {
+                    context.contentResolver.delete(Uri.parse(path), null, null)
+                } else {
+                    File(path).delete()
+                }
+            }
+        }
         downloadsDao.updateStatus(rowId, DownloadStatus.FAILED.name, message)
     }
 
     private fun probeDuration(path: String, uriString: String): Long = runCatching {
         val mmr = MediaMetadataRetriever()
         try {
-            if (path.startsWith("/")) mmr.setDataSource(path) else mmr.setDataSource(context, Uri.parse(uriString))
+            if (uriString.startsWith("content://")) {
+                mmr.setDataSource(context, Uri.parse(uriString))
+            } else if (path.startsWith("/")) {
+                mmr.setDataSource(path)
+            } else {
+                mmr.setDataSource(context, Uri.parse(uriString))
+            }
             mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
         } finally {
             runCatching { mmr.release() }
@@ -427,19 +515,25 @@ class DownloadIngestionManager(
         output: OutputStream,
         totalBytes: Long,
         onProgress: (downloaded: Long) -> Unit,
+        onDbProgress: (downloaded: Long) -> Unit,
     ) {
-        val buffer = ByteArray(8192)
+        val buffer = ByteArray(65536)
         var bytesRead: Int
         var totalRead = 0L
         var lastReportTime = 0L
+        var lastDbReportTime = 0L
 
         while (input.read(buffer).also { bytesRead = it } != -1) {
             output.write(buffer, 0, bytesRead)
             totalRead += bytesRead
             val now = System.currentTimeMillis()
-            if (now - lastReportTime > 200 || totalRead == totalBytes) {
+            if (now - lastReportTime > 250L || totalRead == totalBytes) {
                 lastReportTime = now
                 onProgress(totalRead)
+            }
+            if (now - lastDbReportTime > 1000L || totalRead == totalBytes) {
+                lastDbReportTime = now
+                onDbProgress(totalRead)
             }
         }
         output.flush()

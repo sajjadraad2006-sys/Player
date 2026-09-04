@@ -253,24 +253,28 @@ object CanonicalSearchRanker {
         var score = 0
 
         // 1. Title matching
+        val titleRatio = SearchNormalization.matchRatio(normTitle, normQuery)
         if (normTitle == normQuery) {
             score += 10_000
         } else if (normTitle.startsWith(normQuery)) {
             score += 5_000
-        } else if (isTokenMatch(normTitle, normQuery)) {
-            score += 3_000
         } else if (normTitle.contains(normQuery)) {
-            score += 1_500
+            score += 3_500
+        } else if (titleRatio >= 1.0f) {
+            score += 3_000
         }
 
         // 2. Artist matching
         if (normArtist.isNotEmpty()) {
+            val artistRatio = SearchNormalization.matchRatio(normArtist, normQuery)
             if (normArtist == normQuery) {
                 score += 1_200
             } else if (normArtist.startsWith(normQuery)) {
                 score += 800
             } else if (normArtist.contains(normQuery)) {
                 score += 400
+            } else if (artistRatio >= 1.0f) {
+                score += 350
             }
         }
 
@@ -292,9 +296,7 @@ object CanonicalSearchRanker {
     }
 
     private fun isTokenMatch(target: String, query: String): Boolean {
-        val tokens = target.split(' ')
-        val queryTokens = query.split(' ')
-        return queryTokens.all { q -> tokens.any { it == q || it.startsWith(q) } }
+        return SearchNormalization.matchRatio(target, query) >= 0.75f
     }
 }
 
@@ -341,6 +343,11 @@ object UnifiedTrackMerger {
     }
 
     fun canMergeSources(left: RecordingSource, right: RecordingSource): Boolean {
+        // Distinct tracks from the same provider must never be merged
+        if (left.provider.equals(right.provider, true) && left.providerTrackId != right.providerTrackId) {
+            return false
+        }
+
         // 1. Version profile conflict is a hard merge blocker (ORIGINAL != LIVE != REMIX != COVER etc.)
         val leftProfile = VersionProfile.parse(left.title)
         val rightProfile = VersionProfile.parse(right.title)

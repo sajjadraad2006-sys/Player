@@ -57,7 +57,17 @@ data class AuralisTokens(
     val artworkCorner: Float = 20f,
 )
 
-enum class SurfaceTreatment { GLASS, BORDERLESS, MATERIAL_TONAL, NEON_EDGE, ARTWORK, CLASSIC_OUTLINE }
+enum class SurfaceTreatment {
+    GLASS,
+    BORDERLESS,
+    MATERIAL_TONAL,
+    NEON_EDGE,
+    ARTWORK,
+    CLASSIC_OUTLINE,
+    AURORA_FROST,
+    RETRO_ANALOG,
+    NEBULA_GLOW,
+}
 
 /** Semantic interactive colours shared by every control in the app. */
 @Immutable

@@ -80,24 +80,28 @@ object SearchEngine {
         var totalScore = 0
 
         // 1. Title matching (Highest priority)
+        val titleRatio = dev.auralis.studio.online.SearchNormalization.matchRatio(normTitle, normQuery)
         if (normTitle == normQuery) {
             totalScore += 10_000 // Exact title match
         } else if (normTitle.startsWith(normQuery)) {
             totalScore += 5_000 // Title starts with query
-        } else if (isTokenMatch(normTitle, normQuery)) {
-            totalScore += 3_000 // Title contains full query token
         } else if (normTitle.contains(normQuery)) {
-            totalScore += 1_500 // Title contains query substring
+            totalScore += 3_500 // Title contains query substring
+        } else if (titleRatio >= 1.0f) {
+            totalScore += 3_000 // All tokens matched (handling Arabic prefixes)
         }
 
         // 2. Artist matching
         if (normArtist.isNotEmpty()) {
+            val artistRatio = dev.auralis.studio.online.SearchNormalization.matchRatio(normArtist, normQuery)
             if (normArtist == normQuery) {
                 totalScore += 1_000 // Exact artist match
             } else if (normArtist.startsWith(normQuery)) {
                 totalScore += 600 // Artist starts with query
             } else if (normArtist.contains(normQuery)) {
                 totalScore += 400 // Artist contains query
+            } else if (artistRatio >= 1.0f) {
+                totalScore += 350
             }
         }
 
@@ -154,9 +158,7 @@ object SearchEngine {
     }
 
     private fun isTokenMatch(target: String, query: String): Boolean {
-        val tokens = target.split(' ')
-        val queryTokens = query.split(' ')
-        return queryTokens.all { qToken -> tokens.any { it == qToken || it.startsWith(qToken) } }
+        return dev.auralis.studio.online.SearchNormalization.matchRatio(target, query) >= 0.75f
     }
 
     private fun computeFuzzyScore(query: String, title: String, artist: String): Int {

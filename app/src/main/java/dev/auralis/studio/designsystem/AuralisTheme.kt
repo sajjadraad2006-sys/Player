@@ -320,6 +320,78 @@ internal fun buildTokens(settings: ThemeSettings, dark: Boolean): AuralisTokens 
             navigationElevation    = 5.dp,
             artworkCorner          = 6f,
         )
+        ThemeStyle.AURORA -> AuralisTokens(
+            surfaceAlpha           = 0.72f,
+            backgroundUsesArtwork  = false,
+            glassBlur              = true,
+            glassContrastScrimAlpha = 0.50f,
+            cardBorderWidth        = 1.2.dp,
+            cardBorderAlpha        = 0.40f,
+            cardElevation          = 0.dp,
+            cardCorner             = corner,
+            buttonCorner           = corner * 0.7f,
+            chipCorner             = 24f,
+            navBarContainerAlpha   = 0.80f,
+            miniPlayerElevation    = 3.dp,
+            miniPlayerAlpha        = 0.80f,
+            springStiffness        = 400f,
+            springDamping          = 0.82f,
+            accentGlowAlpha        = 0.25f,
+            gradientOverlay        = true,
+            surfaceTreatment       = SurfaceTreatment.AURORA_FROST,
+            navigationFloating     = true,
+            navigationCorner       = 24f,
+            navigationElevation    = 2.dp,
+            artworkCorner          = 20f,
+        )
+        ThemeStyle.RETRO_VINYL -> AuralisTokens(
+            surfaceAlpha           = 0.94f,
+            backgroundUsesArtwork  = false,
+            glassBlur              = false,
+            glassContrastScrimAlpha = 0f,
+            cardBorderWidth        = 1.5.dp,
+            cardBorderAlpha        = 0.45f,
+            cardElevation          = 3.dp,
+            cardCorner             = 12f,
+            buttonCorner           = 8f,
+            chipCorner             = 8f,
+            navBarContainerAlpha   = 0.95f,
+            miniPlayerElevation    = 4.dp,
+            miniPlayerAlpha        = 0.95f,
+            springStiffness        = 500f,
+            springDamping          = 0.88f,
+            accentGlowAlpha        = 0.10f,
+            gradientOverlay        = false,
+            surfaceTreatment       = SurfaceTreatment.RETRO_ANALOG,
+            navigationFloating     = false,
+            navigationCorner       = 0f,
+            navigationElevation    = 3.dp,
+            artworkCorner          = 8f,
+        )
+        ThemeStyle.MIDNIGHT_PURPLE -> AuralisTokens(
+            surfaceAlpha           = 0.70f,
+            backgroundUsesArtwork  = false,
+            glassBlur              = true,
+            glassContrastScrimAlpha = 0.55f,
+            cardBorderWidth        = 1.2.dp,
+            cardBorderAlpha        = 0.42f,
+            cardElevation          = 0.dp,
+            cardCorner             = corner,
+            buttonCorner           = corner * 0.7f,
+            chipCorner             = 28f,
+            navBarContainerAlpha   = 0.78f,
+            miniPlayerElevation    = 3.dp,
+            miniPlayerAlpha        = 0.78f,
+            springStiffness        = 400f,
+            springDamping          = 0.80f,
+            accentGlowAlpha        = 0.30f,
+            gradientOverlay        = true,
+            surfaceTreatment       = SurfaceTreatment.NEBULA_GLOW,
+            navigationFloating     = true,
+            navigationCorner       = 26f,
+            navigationElevation    = 2.dp,
+            artworkCorner          = 24f,
+        )
     }
 }
 
@@ -435,12 +507,19 @@ fun AuralisBackground(modifier: Modifier = Modifier, content: @Composable () -> 
     val brush = if (ThemeModeResolver.isAmoled(settings.appearance)) {
         Brush.linearGradient(listOf(Color.Black, Color.Black))
     } else when (settings.style) {
-        ThemeStyle.GLASS, ThemeStyle.DYNAMIC_ART -> Brush.verticalGradient(
+        ThemeStyle.GLASS, ThemeStyle.DYNAMIC_ART, ThemeStyle.AURORA, ThemeStyle.MIDNIGHT_PURPLE -> Brush.verticalGradient(
             colors = listOf(
                 lerp(base, accent, 0.16f),
                 lerp(base, secondary, 0.08f),
                 base,
                 lerp(base, accent, 0.06f),
+            ),
+        )
+        ThemeStyle.RETRO_VINYL -> Brush.verticalGradient(
+            colors = listOf(
+                lerp(base, accent, 0.12f),
+                base,
+                lerp(base, secondary, 0.08f),
             ),
         )
         ThemeStyle.NEON -> Brush.verticalGradient(

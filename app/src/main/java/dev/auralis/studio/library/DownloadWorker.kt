@@ -65,7 +65,7 @@ fun enqueueDownload(context: Context, descriptor: ResolverDownloadDescriptor) {
         .build()
     WorkManager.getInstance(context).enqueueUniqueWork(
         downloadWorkName("lrr", descriptor.downloadKey),
-        ExistingWorkPolicy.KEEP,
+        ExistingWorkPolicy.REPLACE,
         request,
     )
 }
@@ -73,6 +73,7 @@ fun enqueueDownload(context: Context, descriptor: ResolverDownloadDescriptor) {
 /** Cancels any pending/running unique work for this track (user-initiated cancel). */
 fun cancelDownload(context: Context, provider: String, providerTrackId: String) {
     WorkManager.getInstance(context).cancelUniqueWork(downloadWorkName(provider, providerTrackId))
+    DownloadNotificationHelper.cancel(context, downloadWorkName(provider, providerTrackId).hashCode())
 }
 
 private fun jsonTrack(track: OnlineTrack): String =
@@ -256,6 +257,7 @@ internal sealed interface FreshResolutionResult {
     data class Success(
         val format: ResolvedFormatDescriptor,
         val lease: EphemeralResourceLease,
+        val resolvedDurationMs: Long? = null,
     ) : FreshResolutionResult
 
     data class TerminalFailure(val message: String, val code: ResolverErrorCode = ResolverErrorCode.Unknown) : FreshResolutionResult
@@ -289,19 +291,29 @@ class DownloadWorker(
                 return Result.failure(workDataOf(KEY_ERROR to PREVIEW_REJECTION))
             }
 
-            val result = manager.downloadTrack(track)
-            val failure = result.exceptionOrNull() ?: return Result.success()
+            val notifId = track.id.hashCode()
+            DownloadNotificationHelper.showStarting(applicationContext, notifId, track.title, track.artist)
+
+            val result = manager.downloadTrack(track, onProgress = { downloaded, total ->
+                DownloadNotificationHelper.showProgress(applicationContext, notifId, track.title, track.artist, downloaded, total)
+            })
+            val failure = result.exceptionOrNull()
+            if (failure == null) {
+                DownloadNotificationHelper.showCompleted(applicationContext, notifId, track.title, track.artist)
+                return Result.success()
+            }
+            val errorMsg = failure.message.orEmpty()
+            DownloadNotificationHelper.showError(applicationContext, notifId, track.title, errorMsg.ifBlank { "Download failed" })
             return when (failure) {
                 is PreviewDownloadRejectedException ->
                     Result.failure(workDataOf(KEY_ERROR to PREVIEW_REJECTION))
                 else -> {
-                    val msg = failure.message.orEmpty()
-                    if (msg.contains("404")) {
-                        Result.failure(workDataOf(KEY_ERROR to msg))
+                    if (errorMsg.contains("404")) {
+                        Result.failure(workDataOf(KEY_ERROR to errorMsg))
                     } else if (runAttemptCount < MAX_AUTO_RETRIES) {
                         Result.retry()
                     } else {
-                        Result.failure(workDataOf(KEY_ERROR to failure.message))
+                        Result.failure(workDataOf(KEY_ERROR to errorMsg))
                     }
                 }
             }
@@ -330,15 +342,23 @@ class DownloadWorker(
         resolver: MediaResolver,
         manager: DownloadIngestionManager,
     ): Result {
+        val notifId = descriptor.downloadKey.hashCode()
+        DownloadNotificationHelper.showStarting(applicationContext, notifId, descriptor.title, descriptor.artist)
+
         // Fresh resolution attempt #1
         val res1 = resolveFreshFormat(descriptor, resolver)
         when (res1) {
             is FreshResolutionResult.TerminalFailure -> {
+                DownloadNotificationHelper.showError(applicationContext, notifId, descriptor.title, res1.message)
                 return Result.failure(workDataOf(KEY_ERROR to res1.message))
             }
             is FreshResolutionResult.TransientFailure -> {
-                return if (runAttemptCount < MAX_AUTO_RETRIES) Result.retry()
-                else Result.failure(workDataOf(KEY_ERROR to res1.message))
+                if (runAttemptCount < MAX_AUTO_RETRIES) {
+                    return Result.retry()
+                } else {
+                    DownloadNotificationHelper.showError(applicationContext, notifId, descriptor.title, res1.message)
+                    return Result.failure(workDataOf(KEY_ERROR to res1.message))
+                }
             }
             is FreshResolutionResult.Success -> {
                 val format1 = res1.format
@@ -347,13 +367,16 @@ class DownloadWorker(
                 val req1 = DownloadIngestionRequest.fromResolverResource(
                     descriptor = descriptor,
                     freshDirectUrl = lease1.url,
-                    durationMs = descriptor.expectedDurationMs,
+                    durationMs = res1.resolvedDurationMs ?: descriptor.expectedDurationMs,
                     safeHeaders = SecretSanitizer.extractSafeHeaders(lease1.headers),
                     formatExtension = format1.extension ?: format1.container,
                 )
 
-                val result1 = manager.download(req1)
+                val result1 = manager.download(req1, onProgress = { downloaded, total ->
+                    DownloadNotificationHelper.showProgress(applicationContext, notifId, descriptor.title, descriptor.artist, downloaded, total)
+                })
                 if (result1.isSuccess) {
+                    DownloadNotificationHelper.showCompleted(applicationContext, notifId, descriptor.title, descriptor.artist)
                     return Result.success()
                 }
 
@@ -369,22 +392,36 @@ class DownloadWorker(
                         val req2 = DownloadIngestionRequest.fromResolverResource(
                             descriptor = descriptor,
                             freshDirectUrl = lease2.url,
-                            durationMs = descriptor.expectedDurationMs,
+                            durationMs = res2.resolvedDurationMs ?: descriptor.expectedDurationMs,
                             safeHeaders = SecretSanitizer.extractSafeHeaders(lease2.headers),
                             formatExtension = format2.extension ?: format2.container,
                         )
-                        val result2 = manager.download(req2)
+                        val result2 = manager.download(req2, onProgress = { downloaded, total ->
+                            DownloadNotificationHelper.showProgress(applicationContext, notifId, descriptor.title, descriptor.artist, downloaded, total)
+                        })
                         if (result2.isSuccess) {
+                            DownloadNotificationHelper.showCompleted(applicationContext, notifId, descriptor.title, descriptor.artist)
                             return Result.success()
                         }
                         val failure2 = result2.exceptionOrNull()
-                        return Result.failure(workDataOf(KEY_ERROR to (failure2?.message ?: "Re-resolution download failed")))
+                        val failureMsg2 = failure2?.message ?: "Re-resolution download failed"
+                        DownloadNotificationHelper.showError(applicationContext, notifId, descriptor.title, failureMsg2)
+                        return Result.failure(workDataOf(KEY_ERROR to failureMsg2))
                     } else if (res2 is FreshResolutionResult.TerminalFailure) {
+                        DownloadNotificationHelper.showError(applicationContext, notifId, descriptor.title, res2.message)
                         return Result.failure(workDataOf(KEY_ERROR to res2.message))
                     } else if (res2 is FreshResolutionResult.TransientFailure) {
                         return if (runAttemptCount < MAX_AUTO_RETRIES) Result.retry()
-                        else Result.failure(workDataOf(KEY_ERROR to res2.message))
+                        else {
+                            DownloadNotificationHelper.showError(applicationContext, notifId, descriptor.title, res2.message)
+                            Result.failure(workDataOf(KEY_ERROR to res2.message))
+                        }
                     }
+                }
+
+                val finalError = failureMsg1.ifBlank { "Download failed" }
+                if (runAttemptCount >= MAX_AUTO_RETRIES || failure1 is PreviewDownloadRejectedException || failureMsg1.contains("404") || failureMsg1.contains("401")) {
+                    DownloadNotificationHelper.showError(applicationContext, notifId, descriptor.title, finalError)
                 }
 
                 return when {
@@ -472,7 +509,9 @@ class DownloadWorker(
         }
 
         // 5. Ephemeral lease validation
-        val lease = resolveResult.lease ?: run {
+        val lease = if (resolveResult.lease != null && resolveResult.lease.formatId == selectedFormat.formatId) {
+            resolveResult.lease
+        } else {
             val rawMatch = media.rawFormats.firstOrNull { it.formatId == selectedFormat.formatId }
             if (rawMatch != null && rawMatch.url.isNotBlank()) {
                 EphemeralResourceLease(
@@ -486,7 +525,7 @@ class DownloadWorker(
                     mediaKind = selectedFormat.mediaKind,
                 )
             } else {
-                return FreshResolutionResult.TerminalFailure("No delivery lease available for selected format", ResolverErrorCode.FormatUnavailable)
+                resolveResult.lease ?: return FreshResolutionResult.TerminalFailure("No delivery lease available for selected format", ResolverErrorCode.FormatUnavailable)
             }
         }
 
@@ -494,7 +533,11 @@ class DownloadWorker(
             return FreshResolutionResult.TerminalFailure("Delivery lease is not a valid direct resource", ResolverErrorCode.UnsupportedUrl)
         }
 
-        return FreshResolutionResult.Success(selectedFormat, lease)
+        return FreshResolutionResult.Success(
+            format = selectedFormat,
+            lease = lease,
+            resolvedDurationMs = media.durationMs,
+        )
     }
 
     companion object {

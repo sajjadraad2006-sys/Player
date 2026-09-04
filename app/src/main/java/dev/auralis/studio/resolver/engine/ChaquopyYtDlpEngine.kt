@@ -76,7 +76,9 @@ class ChaquopyYtDlpEngine(private val context: Context) {
         }
     }
 
-    fun inspect(requestJson: String): String {
+    private val executionLock = Any()
+
+    fun inspect(requestJson: String): String = synchronized(executionLock) {
         ensurePythonInitialized()
         val module = pythonModule
         if (module == null) {
@@ -108,7 +110,7 @@ class ChaquopyYtDlpEngine(private val context: Context) {
         }
     }
 
-    fun resolve(requestJson: String): String {
+    fun resolve(requestJson: String): String = synchronized(executionLock) {
         ensurePythonInitialized()
         val module = pythonModule
         if (module == null) {

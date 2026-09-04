@@ -108,7 +108,7 @@ fun AudioLabScreen(
                     StudioChip(
                         selected = config == preset.config,
                         onClick = { onChange(preset.config) },
-                        label = presetLabel(preset.name),
+                        label = preset.name,
                     )
                 }
             }

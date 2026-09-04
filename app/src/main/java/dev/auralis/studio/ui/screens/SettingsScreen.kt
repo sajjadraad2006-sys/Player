@@ -826,12 +826,15 @@ private fun SettingsCard(title: String, content: @Composable ColumnScope.() -> U
 @Composable
 private fun themeLabel(style: ThemeStyle): String = stringResource(
     when (style) {
-        ThemeStyle.GLASS       -> R.string.glass
-        ThemeStyle.MINIMAL     -> R.string.minimal
-        ThemeStyle.MATERIAL    -> R.string.material
-        ThemeStyle.NEON        -> R.string.neon
-        ThemeStyle.DYNAMIC_ART -> R.string.dynamic_art
-        ThemeStyle.CLASSIC     -> R.string.classic
+        ThemeStyle.GLASS           -> R.string.glass
+        ThemeStyle.MINIMAL         -> R.string.minimal
+        ThemeStyle.MATERIAL        -> R.string.material
+        ThemeStyle.NEON            -> R.string.neon
+        ThemeStyle.DYNAMIC_ART     -> R.string.dynamic_art
+        ThemeStyle.AURORA          -> R.string.aurora
+        ThemeStyle.RETRO_VINYL     -> R.string.retro_vinyl
+        ThemeStyle.MIDNIGHT_PURPLE -> R.string.midnight_purple
+        ThemeStyle.CLASSIC         -> R.string.classic
     },
 )
 

@@ -141,49 +141,89 @@ object ColorTonalPalette {
         val isMinimal = settings.style == ThemeStyle.MINIMAL
         val isMaterial = settings.style == ThemeStyle.MATERIAL
 
-        val rawAccentInt = if (isDynamic && artwork != null) {
-            artwork.vibrant.toArgbInt()
-        } else {
-            (settings.accentArgb and 0xFFFFFFFFL).toInt()
+        val isAurora = settings.style == ThemeStyle.AURORA
+        val isRetro = settings.style == ThemeStyle.RETRO_VINYL
+        val isMidnightPurple = settings.style == ThemeStyle.MIDNIGHT_PURPLE
+
+        val rawAccentInt = when {
+            isDynamic && artwork != null -> artwork.vibrant.toArgbInt()
+            isNeon -> 0xFF00F5FF.toInt()
+            isAurora -> 0xFF2DD4BF.toInt()
+            isRetro -> 0xFFF59E0B.toInt()
+            isMidnightPurple -> 0xFFC084FC.toInt()
+            else -> (settings.accentArgb and 0xFFFFFFFFL).toInt()
         }
         val tonalPalette = TonalPalette.fromInt(rawAccentInt)
 
         if (dark) {
             val bg = when {
                 amoled -> BgAmoled
-                isDynamic && artwork != null -> lerp(BgDeepDark, artwork.dark, 0.42f)
-                isNeon -> Color(0xFF0C0C20)
-                isGlass -> Color(0xFF101124)
+                isDynamic && artwork != null -> lerp(Color(0xFF0A0C14), artwork.dark, 0.45f)
+                isNeon -> Color(0xFF080814)
+                isAurora -> Color(0xFF07131B)
+                isRetro -> Color(0xFF17120E)
+                isMidnightPurple -> Color(0xFF12091D)
+                isGlass -> Color(0xFF0D111E)
+                isMaterial -> Color(0xFF1A1C1E)
+                isMinimal -> Color(0xFF0F0F10)
                 else -> BgDeepDark
             }
             val surf = when {
                 amoled -> SurfAmoled
-                isDynamic && artwork != null -> lerp(SurfDark, artwork.muted, 0.24f)
-                isNeon -> Color(0xFF161633)
-                isGlass -> GlassSurfDark
+                isDynamic && artwork != null -> lerp(Color(0xFF141824), artwork.muted, 0.35f)
+                isNeon -> Color(0xFF121226)
+                isAurora -> Color(0xFF0E222F)
+                isRetro -> Color(0xFF251D17)
+                isMidnightPurple -> Color(0xFF1F1133)
+                isGlass -> Color(0xFF161C2E)
+                isMaterial -> Color(0xFF222428)
+                isMinimal -> Color(0xFF18181B)
                 else -> SurfDark
             }
             val surfVar = when {
                 amoled -> Color(0xFF1A1A24)
-                isDynamic && artwork != null -> lerp(SurfVarDark, artwork.dominant, 0.30f)
-                isNeon -> Color(0xFF22224A)
-                isGlass -> Color(0xFF2A2E52)
+                isDynamic && artwork != null -> lerp(Color(0xFF1E2436), artwork.dominant, 0.35f)
+                isNeon -> Color(0xFF1C1C3B)
+                isAurora -> Color(0xFF163445)
+                isRetro -> Color(0xFF382C23)
+                isMidnightPurple -> Color(0xFF2F1B4B)
+                isGlass -> Color(0xFF222A42)
+                isMaterial -> Color(0xFF2D3035)
+                isMinimal -> Color(0xFF27272A)
                 else -> SurfVarDark
             }
 
-            val primary = resolveAccessiblePrimary(tonalPalette, dark = true, background = bg)
+            val primary = when {
+                isNeon -> Color(0xFF00F5FF)
+                isAurora -> Color(0xFF2DD4BF)
+                isRetro -> Color(0xFFF59E0B)
+                isMidnightPurple -> Color(0xFFC084FC)
+                else -> resolveAccessiblePrimary(tonalPalette, dark = true, background = bg)
+            }
             val onPrimary = resolveOnPrimary(primary)
-            val primaryContainer = lerp(surfVar, primary, 0.28f)
+            val primaryContainer = lerp(surfVar, primary, 0.32f)
             val onPrimaryContainer = OnDark
 
             val secondary = when (settings.style) {
-                ThemeStyle.NEON -> Color(0xFFFF52BF)
+                ThemeStyle.NEON -> Color(0xFFFF007F)
+                ThemeStyle.AURORA -> Color(0xFF38BDF8)
+                ThemeStyle.RETRO_VINYL -> Color(0xFFEA580C)
+                ThemeStyle.MIDNIGHT_PURPLE -> Color(0xFFF472B6)
                 ThemeStyle.DYNAMIC_ART -> artwork?.light ?: Color(paletteTone(tonalPalette, 70))
-                ThemeStyle.GLASS -> artwork?.muted ?: Color(0xFFB39DDB)
-                ThemeStyle.CLASSIC -> Color(0xFFB5B0D8)
+                ThemeStyle.GLASS -> Color(0xFFA78BFA)
+                ThemeStyle.CLASSIC -> Color(0xFF60A5FA)
                 else -> Color(paletteTone(tonalPalette, 70))
             }
-            val secondaryContainer = lerp(surfVar, secondary, 0.24f)
+            val secondaryContainer = lerp(surfVar, secondary, 0.26f)
+
+            val outlineColor = when {
+                isNeon -> Color(0xFF00F5FF).copy(alpha = 0.50f)
+                isAurora -> Color(0xFF2DD4BF).copy(alpha = 0.40f)
+                isRetro -> Color(0xFFF59E0B).copy(alpha = 0.38f)
+                isMidnightPurple -> Color(0xFFA855F7).copy(alpha = 0.40f)
+                isGlass -> Color(0xFF6366F1).copy(alpha = 0.45f)
+                else -> OutlineDark
+            }
 
             return DerivedPalette(
                 primary = primary,
@@ -200,8 +240,8 @@ object ColorTonalPalette {
                 onBackground = OnDark,
                 onSurface = OnDark,
                 onSurfaceVariant = OnDarkSub,
-                outline = if (isGlass) GlassBorder else OutlineDark,
-                outlineVariant = OutlineDark.copy(alpha = 0.6f),
+                outline = outlineColor,
+                outlineVariant = outlineColor.copy(alpha = 0.6f),
             )
         } else {
             val bg = when {

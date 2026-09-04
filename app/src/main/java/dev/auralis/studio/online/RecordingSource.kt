@@ -127,6 +127,7 @@ data class LocalRecordingSource(
  */
 fun OnlineTrack.toRecordingSource(): RecordingSource {
     val playbackCap = when {
+        provider.equals("youtube", true) -> PlaybackCapability.FULL_STREAM
         streamAllowed && !streamUrl.isNullOrBlank() -> PlaybackCapability.FULL_STREAM
         !previewUrl.isNullOrBlank() -> PlaybackCapability.PREVIEW
         else -> PlaybackCapability.UNAVAILABLE
@@ -144,6 +145,7 @@ fun OnlineTrack.toRecordingSource(): RecordingSource {
             DownloadCapability.STREAM_ONLY to DownloadCapabilityBasis.PROVIDER_EXPLICIT
         }
         "itunes", "deezer" -> DownloadCapability.NOT_PERMITTED to DownloadCapabilityBasis.PROVIDER_EXPLICIT
+        "youtube" -> DownloadCapability.PERMITTED to DownloadCapabilityBasis.PROVIDER_EXPLICIT
         else -> DownloadCapability.UNKNOWN to DownloadCapabilityBasis.NONE
     }
 

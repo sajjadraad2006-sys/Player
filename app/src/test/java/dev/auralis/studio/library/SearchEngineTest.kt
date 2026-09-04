@@ -95,6 +95,22 @@ class SearchEngineTest {
     }
 
     @Test
+    fun arabicFlexibleSearch_matchesVariationsAndSubPhrases() {
+        val tracks = listOf(
+            track(1, "احمد الساعدي عاشت ايمينك يابو زنود السمر", "علي حسين"),
+        )
+
+        // Without "ال" prefix
+        assertTrue("Query without Al- prefix should match", SearchEngine.search(tracks, "احمد ساعدي").isNotEmpty())
+
+        // Sub-phrase in middle
+        assertTrue("Sub-phrase should match", SearchEngine.search(tracks, "زنود السمر").isNotEmpty())
+
+        // Skipping words in between
+        assertTrue("Skipping middle words should match", SearchEngine.search(tracks, "احمد الساعدي زنود السمر").isNotEmpty())
+    }
+
+    @Test
     fun searchScalesTo10kTracks() {
         // Correctness/scale smoke test, NOT a device benchmark: wall-clock timing
         // on shared CI JVMs is unreliable, so only functional results are asserted.

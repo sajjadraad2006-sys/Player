@@ -125,5 +125,6 @@ fun OnlineTrack.toStreamableTrack(): Track? {
         sizeBytes = 0L,
         trackNumber = null,
         year = null,
+        customArtworkUri = artworkUrl.takeIf { it.isNotBlank() },
     )
 }

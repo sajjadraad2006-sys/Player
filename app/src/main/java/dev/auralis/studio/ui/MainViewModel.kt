@@ -19,6 +19,7 @@ import dev.auralis.studio.core.model.AudioConfig
 import dev.auralis.studio.core.model.ThemeSettings
 import dev.auralis.studio.core.model.Track
 import dev.auralis.studio.core.model.LyricsUiState
+import dev.auralis.studio.library.DownloadIngestionRequest
 import dev.auralis.studio.lyrics.LrclibTrack
 import dev.auralis.studio.lyrics.LyricsClock
 import dev.auralis.studio.online.CanonicalRecording
@@ -85,6 +86,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val lyricsClock = LyricsClock()
     private val _lyricsCandidates = MutableStateFlow<List<LrclibTrack>>(emptyList())
     val lyricsCandidates: StateFlow<List<LrclibTrack>> = _lyricsCandidates.asStateFlow()
+    private val _isSearchingLyricsCandidates = MutableStateFlow(false)
+    val isSearchingLyricsCandidates: StateFlow<Boolean> = _isSearchingLyricsCandidates.asStateFlow()
     private val stemModelManager = StemModelManager(File(application.filesDir, "stem_models"))
     private val stemEngine = VocFtLiteRtEngine(stemModelManager)
     private val _stemState = MutableStateFlow<StemUiState>(StemUiState.CheckingModel)
@@ -93,7 +96,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val generatedStemTracks = ConcurrentHashMap<String, Track>()
     private val generatedStemSources = ConcurrentHashMap<String, Track>()
     private var currentLyricsTrack: Track? = null
-    val tracks: StateFlow<List<Track>> = container.library.tracks
+    val currentPlayingOnlineTrack = MutableStateFlow<Track?>(null)
+
+    val tracks: StateFlow<List<Track>> = combine(container.library.tracks, downloadsDao.observeAll()) { libTracks, downloadList ->
+        if (downloadList.isEmpty()) return@combine libTracks
+        val byUri = downloadList.filter { it.trackUri.isNotBlank() }.associateBy { it.trackUri }
+        val byPath = downloadList.filter { it.destinationPath.isNotBlank() }.associateBy { it.destinationPath }
+        val byIdentity = downloadList.filter { it.recordingIdentity.isNotBlank() }.associateBy { it.recordingIdentity }
+        libTracks.map { track ->
+            val match = byUri[track.uri]
+                ?: byPath[track.uri]
+                ?: byIdentity[DownloadIngestionRequest.deriveRecordingIdentity(track.artist, track.title)]
+            if (match != null) {
+                // If title was corrupted by underscores from older downloads or media scanner, restore proper title
+                val isCorruptedTitle = track.title.all { it == '_' || it == '-' || it == ' ' } || track.title.contains("___")
+                val restoredTitle = if (isCorruptedTitle && match.title.isNotBlank()) match.title else track.title
+                val restoredArtist = if (track.artist.isBlank() && match.artist.isNotBlank()) match.artist else track.artist
+                val artwork = match.artworkUrl.takeIf { it.isNotBlank() } ?: track.customArtworkUri
+                track.copy(
+                    title = restoredTitle,
+                    artist = restoredArtist,
+                    customArtworkUri = artwork,
+                )
+            } else {
+                track
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val favorites: StateFlow<Set<String>> = dao.observeFavoriteUris()
         .map { it.toSet() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
@@ -161,6 +190,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val recentSearches: StateFlow<List<String>> = container.settings.recentSearches
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val youtubeApiKey: StateFlow<String> = container.settings.youtubeApiKey
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
+
+    fun setYoutubeApiKey(key: String) {
+        viewModelScope.launch {
+            container.settings.setYoutubeApiKey(key)
+        }
+    }
 
     val searchResults: StateFlow<List<Track>> = combine(
         searchQuery.debounce(180),
@@ -171,6 +208,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
+        viewModelScope.launch {
+            container.settings.youtubeApiKey.collect { key ->
+                container.youtubeProvider.updateApiKey(key)
+            }
+        }
         viewModelScope.launch {
             audioConfig.value = container.settings.audioConfig.first()
             playback.applyAudioConfig(audioConfig.value)
@@ -228,6 +270,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         refreshLibrary()
         viewModelScope.launch { refreshStemModelState() }
+        viewModelScope.launch {
+            downloadsDao.observeByStatus(DownloadStatus.COMPLETED.name)
+                .distinctUntilChanged { old, new -> old.map { it.id } == new.map { it.id } }
+                .collect { list ->
+                    if (list.isNotEmpty()) {
+                        delay(350)
+                        refreshLibrary()
+                    }
+                }
+        }
     }
 
     val hasAudioPermission: Boolean get() = container.library.hasPermission
@@ -294,8 +346,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun playOnlineTrack(unifiedTrack: CanonicalRecording) {
         viewModelScope.launch {
             // Check completed download in local database first
+            val derivedId = DownloadIngestionRequest.deriveRecordingIdentity(unifiedTrack.artist, unifiedTrack.title)
             val downloadedUri: String? = withContext(Dispatchers.IO) {
-                downloadsDao.findCompletedByRecordingIdentity(unifiedTrack.recordingIdentity)
+                (downloadsDao.findCompletedByRecordingIdentity(unifiedTrack.recordingIdentity)
+                    ?: downloadsDao.findCompletedByRecordingIdentity(derivedId))
                     ?.takeIf { it.status == DownloadStatus.COMPLETED.name && it.trackUri.isNotBlank() }
                     ?.trackUri
             }
@@ -303,13 +357,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (downloadedUri != null) {
                 val isReadable = withContext(Dispatchers.IO) { isUriReadable(downloadedUri) }
                 if (isReadable) {
-                    val localTrack = container.library.track(downloadedUri) ?: Track(
+                    val localTrack = container.library.track(downloadedUri)?.let {
+                        if (it.customArtworkUri.isNullOrBlank() && unifiedTrack.artworkUrl.isNotBlank()) {
+                            it.copy(customArtworkUri = unifiedTrack.artworkUrl)
+                        } else it
+                    } ?: Track(
                         id = -1L,
                         uri = downloadedUri,
                         title = unifiedTrack.title,
                         artist = unifiedTrack.artist,
                         album = unifiedTrack.album,
                         durationMs = unifiedTrack.durationMs,
+                        customArtworkUri = unifiedTrack.artworkUrl.takeIf { it.isNotBlank() },
                     )
                     playback.play(localTrack, listOf(localTrack))
                     return@launch
@@ -324,13 +383,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     is LocalRecordingSource -> {
                         val localTrack = candidate.originalLocalTrack ?: container.library.track(candidate.contentUri)
                         if (localTrack != null) {
-                            playback.play(localTrack, listOf(localTrack))
+                            val trackWithArt = if (localTrack.customArtworkUri.isNullOrBlank() && unifiedTrack.artworkUrl.isNotBlank()) {
+                                localTrack.copy(customArtworkUri = unifiedTrack.artworkUrl)
+                            } else localTrack
+                            playback.play(trackWithArt, listOf(trackWithArt))
                             return@launch
                         }
                     }
                     is OnlineRecordingSource -> {
                         val onlineTrack = candidate.originalTrack
                         if (onlineTrack != null) {
+                            if (onlineTrack.provider.equals("youtube", true)) {
+                                val watchUrl = onlineTrack.sourceUrl.takeIf { it.isNotBlank() }
+                                    ?: "https://www.youtube.com/watch?v=${onlineTrack.id}"
+                                val app = getApplication<Application>()
+                                Toast.makeText(app, app.getString(R.string.loading_stream), Toast.LENGTH_SHORT).show()
+                                val resolvedMedia = withContext(Dispatchers.IO) {
+                                    container.mediaResolver.resolve(
+                                        dev.auralis.studio.resolver.api.ResolverRequest(
+                                            sourceUrl = watchUrl,
+                                            sourceId = onlineTrack.id,
+                                            intent = dev.auralis.studio.resolver.api.ResolveIntent.PLAYBACK,
+                                        )
+                                    )
+                                }
+                                if (resolvedMedia is dev.auralis.studio.resolver.api.ResolverResult.Success) {
+                                    val streamUrl = resolvedMedia.lease?.url
+                                        ?: resolvedMedia.media.rawFormats.firstOrNull { it.isAudioOnly && it.url.isNotBlank() }?.url
+                                        ?: resolvedMedia.media.rawFormats.firstOrNull { it.url.isNotBlank() }?.url
+                                    if (!streamUrl.isNullOrBlank()) {
+                                        val trackToPlay = Track(
+                                            id = -1L,
+                                            uri = streamUrl,
+                                            title = unifiedTrack.title,
+                                            artist = unifiedTrack.artist,
+                                            album = unifiedTrack.album,
+                                            durationMs = resolvedMedia.media.durationMs ?: unifiedTrack.durationMs,
+                                            customArtworkUri = unifiedTrack.artworkUrl.takeIf { it.isNotBlank() },
+                                        )
+                                        currentPlayingOnlineTrack.value = trackToPlay
+                                        playback.play(trackToPlay, listOf(trackToPlay))
+                                        return@launch
+                                    }
+                                } else if (resolvedMedia is dev.auralis.studio.resolver.api.ResolverResult.Failure) {
+                                    Toast.makeText(app, resolvedMedia.error.safeUserMessage, Toast.LENGTH_SHORT).show()
+                                }
+                            }
                             val resolved = providerRegistry.resolveStream(onlineTrack)
                             if (resolved is ProviderResult.Success) {
                                 val trackToPlay = onlineTrack.copy(
@@ -339,12 +437,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                     streamAllowed = resolved.data.kind == dev.auralis.studio.online.MediaUrlKind.STREAM,
                                 ).toStreamableTrack()
                                 if (trackToPlay != null) {
+                                    currentPlayingOnlineTrack.value = trackToPlay
                                     playback.play(trackToPlay, listOf(trackToPlay))
                                     return@launch
                                 }
                             } else if (!onlineTrack.bestStreamUrl.isNullOrBlank()) {
                                 val trackToPlay = onlineTrack.toStreamableTrack()
                                 if (trackToPlay != null) {
+                                    currentPlayingOnlineTrack.value = trackToPlay
                                     playback.play(trackToPlay, listOf(trackToPlay))
                                     return@launch
                                 }
@@ -363,6 +463,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val app = getApplication<Application>()
         val selectedSource = unifiedTrack.bestDownloadSource(downloadQuality.value) as? OnlineRecordingSource
         val source = selectedSource?.originalTrack
+            ?: unifiedTrack.sources.firstOrNull { it.provider.equals("youtube", true) }?.let { (it as? OnlineRecordingSource)?.originalTrack }
+
         if (source == null) {
             Toast.makeText(app, app.getString(R.string.preview_only_no_download), Toast.LENGTH_SHORT).show()
             return
@@ -372,14 +474,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!inFlightDownloads.add(unifiedTrack.recordingIdentity)) return
         viewModelScope.launch {
             try {
+                val derivedId = DownloadIngestionRequest.deriveRecordingIdentity(unifiedTrack.artist, unifiedTrack.title)
                 val existing = withContext(Dispatchers.IO) {
                     downloadsDao.findOwnedByRecordingIdentity(unifiedTrack.recordingIdentity)
+                        ?: downloadsDao.findOwnedByRecordingIdentity(derivedId)
                 }
                 if (existing != null) {
-                    val message = if (existing.status == DownloadStatus.COMPLETED.name) R.string.downloaded else R.string.downloading
-                    Toast.makeText(app, app.getString(message), Toast.LENGTH_SHORT).show()
+                    val fileExists = existing.trackUri.isNotBlank() && isUriReadable(existing.trackUri)
+                    if (existing.status == DownloadStatus.COMPLETED.name && fileExists) {
+                        Toast.makeText(app, app.getString(R.string.downloaded), Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+                    if (existing.status != DownloadStatus.DOWNLOADING.name || !fileExists) {
+                        withContext(Dispatchers.IO) { downloadsDao.deleteById(existing.id) }
+                    } else {
+                        Toast.makeText(app, app.getString(R.string.downloading), Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+                }
+
+                if (source.provider.equals("youtube", true)) {
+                    val canonicalUrl = source.sourceUrl.takeIf { it.isNotBlank() }
+                        ?: "https://www.youtube.com/watch?v=${source.id}"
+                    val descriptor = dev.auralis.studio.resolver.api.ResolverDownloadDescriptor(
+                        source = "youtube",
+                        sourceId = source.id,
+                        canonicalUrl = canonicalUrl,
+                        title = unifiedTrack.title,
+                        artist = unifiedTrack.artist,
+                        album = unifiedTrack.album,
+                        artworkUrl = unifiedTrack.artworkUrl,
+                        expectedDurationMs = unifiedTrack.durationMs,
+                        qualityPreference = when (downloadQuality.value) {
+                            DownloadQuality.DATA_SAVER -> dev.auralis.studio.resolver.api.AudioQualityPreference.LOW
+                            DownloadQuality.HIGH -> dev.auralis.studio.resolver.api.AudioQualityPreference.HIGH
+                            DownloadQuality.BEST_AVAILABLE -> dev.auralis.studio.resolver.api.AudioQualityPreference.BEST
+                        },
+                        downloadCapability = dev.auralis.studio.resolver.api.DownloadCapability.PERMITTED,
+                    )
+                    enqueueResolverDownload(descriptor)
+                    Toast.makeText(app, app.getString(R.string.downloading_location, downloadFolderLocation.value), Toast.LENGTH_SHORT).show()
                     return@launch
                 }
+
                 val resolved = providerRegistry.resolveDownload(source, downloadQuality.value)
                 if (resolved !is ProviderResult.Success) {
                     Toast.makeText(app, app.getString(R.string.preview_only_no_download), Toast.LENGTH_SHORT).show()
@@ -771,7 +908,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun loadLyricsCandidates() {
         val track = currentLyricsTrack ?: return
         viewModelScope.launch {
-            _lyricsCandidates.value = container.lyrics.searchCandidates(track)
+            _lyricsCandidates.value = emptyList()
+            _isSearchingLyricsCandidates.value = true
+            try {
+                _lyricsCandidates.value = container.lyrics.searchCandidates(track)
+            } finally {
+                _isSearchingLyricsCandidates.value = false
+            }
         }
     }
 
@@ -790,7 +933,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val cleanTitle = title.trim()
         if (cleanTitle.isBlank()) return
         viewModelScope.launch {
-            resolveLyrics(track.copy(title = cleanTitle, artist = ""), forceRefresh = true)
+            val norm = dev.auralis.studio.lyrics.LyricsMetadataNormalizer.normalize(cleanTitle, track.artist)
+            resolveLyrics(track.copy(title = norm.title, artist = norm.artist), forceRefresh = true)
         }
     }
 

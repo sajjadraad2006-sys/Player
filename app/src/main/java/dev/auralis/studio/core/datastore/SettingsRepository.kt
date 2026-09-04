@@ -66,6 +66,7 @@ class SettingsRepository(private val context: Context) {
         val queuePosition = longPreferencesKey("queue_position")
         val recentSearches = stringPreferencesKey("recent_searches")
         val downloadQuality = stringPreferencesKey("download_quality")
+        val youtubeApiKey = stringPreferencesKey("youtube_api_key")
     }
 
     val recentSearches: Flow<List<String>> = context.settingsDataStore.data.map { preferences ->
@@ -78,6 +79,17 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setDownloadQuality(quality: DownloadQuality) {
         context.settingsDataStore.edit { it[Keys.downloadQuality] = quality.name }
+    }
+
+    val youtubeApiKey: Flow<String> = context.settingsDataStore.data.map { preferences ->
+        preferences[Keys.youtubeApiKey].orEmpty()
+    }
+
+    suspend fun setYoutubeApiKey(key: String) {
+        context.settingsDataStore.edit { preferences ->
+            if (key.isBlank()) preferences.remove(Keys.youtubeApiKey)
+            else preferences[Keys.youtubeApiKey] = key.trim()
+        }
     }
 
     suspend fun addRecentSearch(query: String) {

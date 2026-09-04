@@ -17,7 +17,7 @@ import kotlinx.serialization.json.Json
 
 private const val TAG = "JamendoClient"
 private const val BASE = "https://api.jamendo.com/v3.0"
-private const val USER_AGENT = "Lyrune/0.2.0 (Android)"
+private const val USER_AGENT = "Lyrune/1.0.0 (Android)"
 
 // ─── Jamendo API response models ─────────────────────────────────────────────
 

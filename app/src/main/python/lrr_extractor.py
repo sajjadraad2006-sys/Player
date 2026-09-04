@@ -455,6 +455,8 @@ def _normalize_format_descriptors(
             continue
 
         media_kind = _classify_media_kind(f)
+        if media_kind == "UNKNOWN":
+            continue
         mode, block_reason, reqs = _classify_format_delivery(f, info)
         drm_state = _classify_drm_state(f, info)
 
@@ -503,7 +505,7 @@ def _normalize_format_descriptors(
     # Deterministic ranking and bounding to top 20 formats to prevent giant Binder payloads
     descriptors.sort(
         key=lambda d: (
-            1 if d["mediaKind"] == "AUDIO_ONLY" else 0,
+            2 if d["mediaKind"] == "AUDIO_ONLY" else (1 if d["mediaKind"] == "MUXED_AUDIO_VIDEO" else 0),
             1 if d["resolutionMode"] == "DIRECT_RESOURCE" else 0,
             1 if d["drmState"] == "NONE" else 0,
             d["bitrateKbps"] or 0,
@@ -526,17 +528,32 @@ def _extract_best_lease(
     candidate = None
     if format_hint:
         for f in raw_formats:
-            if str(f.get("format_id")) == str(format_hint):
+            if str(f.get("format_id")) == str(format_hint) and f.get("url"):
                 candidate = f
                 break
 
     if not candidate:
-        # Pick best audio format
-        audio_formats = [f for f in raw_formats if _classify_media_kind(f) == "AUDIO_ONLY"]
+        # Pick best audio-only format with direct URL
+        audio_formats = [f for f in raw_formats if _classify_media_kind(f) == "AUDIO_ONLY" and f.get("url")]
         if audio_formats:
+            audio_formats.sort(
+                key=lambda f: (
+                    1 if str(f.get("ext") or "").lower() in ("m4a", "mp4") else 0,
+                    f.get("abr") or f.get("tbr") or 0,
+                ),
+                reverse=True,
+            )
             candidate = audio_formats[0]
         else:
-            candidate = raw_formats[0]
+            # Fallback to muxed audio/video format with direct URL (e.g. format 18 MP4)
+            muxed_formats = [f for f in raw_formats if _classify_media_kind(f) == "MUXED_AUDIO_VIDEO" and f.get("url")]
+            if muxed_formats:
+                candidate = muxed_formats[0]
+            else:
+                candidate = next((f for f in raw_formats if f.get("url") and _classify_media_kind(f) != "UNKNOWN"), None)
+
+    if not candidate:
+        return None
 
     url = candidate.get("url") or ""
     if not url:
@@ -754,6 +771,14 @@ def _execute_extraction(request_json: str, is_resolve: bool) -> str:
             "ignoreerrors": False,
             "no_color": True,
             "socket_timeout": 15,
+            "noplaylist": True,
+            "youtube_include_dash_manifest": False,
+            "youtube_include_hls_manifest": False,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android", "visionos", "mweb"],
+                }
+            },
         }
 
         # Apply strictly whitelisted extraOptions
@@ -767,90 +792,106 @@ def _execute_extraction(request_json: str, is_resolve: bool) -> str:
         if qjs and os.path.exists(qjs):
             ydl_opts["js_runtimes"] = {"quickjs": {"path": qjs}}
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(source_url, download=False)
-            if not info:
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(source_url, download=False)
+        except Exception as first_err:
+            first_err_str = str(first_err).lower()
+            if "sign in" in first_err_str or "bot" in first_err_str or "login" in first_err_str or "authentication" in first_err_str:
+                logger.info(f"Bot/auth challenge detected, executing visionos fallback: {first_err}")
+                fallback_opts = dict(ydl_opts)
+                fallback_opts["extractor_args"] = {
+                    "youtube": {
+                        "player_client": ["visionos", "tv_downgraded"],
+                    }
+                }
+                with yt_dlp.YoutubeDL(fallback_opts) as ydl_fb:
+                    info = ydl_fb.extract_info(source_url, download=False)
+            else:
+                raise first_err
+
+        if not info:
+            return json.dumps({
+                "success": False,
+                "error": {
+                    "source": source_url,
+                    "technicalCode": "NotFound",
+                    "isRetryable": False,
+                    "safeUserMessage": "No media information found.",
+                    "debugDetails": "extract_info returned None",
+                },
+            })
+
+        # Check for playlist/collection
+        if info.get("_type") == "playlist" or (info.get("entries") and isinstance(info.get("entries"), list)):
+            entries = info.get("entries")
+            if not entries:
                 return json.dumps({
                     "success": False,
                     "error": {
                         "source": source_url,
-                        "technicalCode": "NotFound",
+                        "technicalCode": "CollectionNotSupported",
                         "isRetryable": False,
-                        "safeUserMessage": "No media information found.",
-                        "debugDetails": "extract_info returned None",
+                        "safeUserMessage": "Empty playlist.",
+                        "debugDetails": "Playlist had 0 entries",
                     },
                 })
-
-            # Check for playlist/collection
-            if info.get("_type") == "playlist" or (info.get("entries") and isinstance(info.get("entries"), list)):
-                entries = info.get("entries")
-                if not entries:
-                    return json.dumps({
-                        "success": False,
-                        "error": {
-                            "source": source_url,
-                            "technicalCode": "CollectionNotSupported",
-                            "isRetryable": False,
-                            "safeUserMessage": "Empty playlist.",
-                            "debugDetails": "Playlist had 0 entries",
-                        },
-                    })
-                # Single-recording contract: use first valid entry if single-recording was requested
-                first_entry = None
-                for e in entries:
-                    if e and isinstance(e, dict):
-                        first_entry = e
-                        break
-                if not first_entry:
-                    return json.dumps({
-                        "success": False,
-                        "error": {
-                            "source": source_url,
-                            "technicalCode": "CollectionNotSupported",
-                            "isRetryable": False,
-                            "safeUserMessage": "Playlist collections are not supported for single track resolution.",
-                            "debugDetails": "No playable entries found in playlist",
-                        },
-                    })
-                info = first_entry
-
-            # Use sanitize_info internally
-            info_sanitized = ydl.sanitize_info(info)
-
-            raw_formats = info_sanitized.get("formats") or []
-            if not raw_formats and info_sanitized.get("url"):
-                raw_formats = [info_sanitized]
-
-            media_dto = _normalize_media(info_sanitized, source_url, raw_formats)
-
-            response_payload = {
-                "success": True,
-                "media": media_dto,
-            }
-
-            if is_resolve or intent in ("PLAYBACK", "DOWNLOAD"):
-                lease_dto = _extract_best_lease(raw_formats, request_id, info_sanitized, format_hint)
-                if lease_dto:
-                    response_payload["lease"] = lease_dto
-
-            serialized = json.dumps(response_payload)
-
-            # Binder payload preflight ceiling (< 512 KB)
-            payload_bytes = len(serialized.encode("utf-8"))
-            if payload_bytes > MAX_BINDER_PAYLOAD_BYTES:
+            # Single-recording contract: use first valid entry if single-recording was requested
+            first_entry = None
+            for e in entries:
+                if e and isinstance(e, dict):
+                    first_entry = e
+                    break
+            if not first_entry:
                 return json.dumps({
                     "success": False,
                     "error": {
-                        "source": _sanitize_url(source_url),
-                        "technicalCode": "PayloadTooLarge",
+                        "source": source_url,
+                        "technicalCode": "CollectionNotSupported",
                         "isRetryable": False,
-                        "safeUserMessage": "The media resolution response exceeded safe communication limits.",
-                        "debugDetails": f"Payload size {payload_bytes} bytes exceeds ceiling {MAX_BINDER_PAYLOAD_BYTES}",
+                        "safeUserMessage": "Playlist collections are not supported for single track resolution.",
+                        "debugDetails": "No playable entries found in playlist",
                     },
                 })
+            info = first_entry
 
-            _real_extraction_succeeded = True
-            return serialized
+        # Use sanitize_info internally
+        info_sanitized = yt_dlp.YoutubeDL.sanitize_info(info)
+
+        raw_formats = info_sanitized.get("formats") or []
+        if not raw_formats and info_sanitized.get("url"):
+            raw_formats = [info_sanitized]
+
+        media_dto = _normalize_media(info_sanitized, source_url, raw_formats)
+
+        response_payload = {
+            "success": True,
+            "media": media_dto,
+        }
+
+        if is_resolve or intent in ("PLAYBACK", "DOWNLOAD"):
+            lease_dto = _extract_best_lease(raw_formats, request_id, info_sanitized, format_hint)
+            if lease_dto:
+                response_payload["lease"] = lease_dto
+
+        serialized = json.dumps(response_payload)
+
+        # Binder payload preflight ceiling (< 512 KB)
+        payload_bytes = len(serialized.encode("utf-8"))
+        if payload_bytes > MAX_BINDER_PAYLOAD_BYTES:
+            return json.dumps({
+                "success": False,
+                "error": {
+                    "source": _sanitize_url(source_url),
+                    "technicalCode": "PayloadTooLarge",
+                    "isRetryable": False,
+                    "safeUserMessage": "The media resolution response exceeded safe communication limits.",
+                    "debugDetails": f"Payload size {payload_bytes} bytes exceeds ceiling {MAX_BINDER_PAYLOAD_BYTES}",
+                },
+            })
+
+        _real_extraction_succeeded = True
+        return serialized
 
     except Exception as e:
         error_dto = _map_exception_to_error(e, _sanitize_url(source_url))

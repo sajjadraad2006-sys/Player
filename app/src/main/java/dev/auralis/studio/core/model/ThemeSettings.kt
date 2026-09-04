@@ -1,7 +1,17 @@
 package dev.auralis.studio.core.model
 
 /** Visual language only. Luminance is controlled exclusively by [AppearanceMode]. */
-enum class ThemeStyle { GLASS, MINIMAL, MATERIAL, NEON, DYNAMIC_ART, CLASSIC }
+enum class ThemeStyle {
+    GLASS,
+    DYNAMIC_ART,
+    NEON,
+    MATERIAL,
+    MINIMAL,
+    AURORA,
+    RETRO_VINYL,
+    MIDNIGHT_PURPLE,
+    CLASSIC,
+}
 enum class AppearanceMode { SYSTEM, LIGHT, DARK, AMOLED }
 enum class VisualQuality { FULL, BALANCED, REDUCED }
 enum class CornerStyle { COMPACT, BALANCED, ROUND }

@@ -34,6 +34,20 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.sp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.FilledIconButton
@@ -116,13 +130,24 @@ fun SearchScreen(
     onAddToPlaylist: (Long, String) -> Unit,
     mediaResolver: dev.auralis.studio.resolver.api.MediaResolver? = null,
     onEnqueueResolverDownload: (dev.auralis.studio.resolver.api.ResolverDownloadDescriptor) -> Unit = {},
+    youtubeApiKey: String = "",
+    onSaveYoutubeApiKey: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var sourceSheetTrack by remember { mutableStateOf<UnifiedTrack?>(null) }
     var inspectingSource by remember { mutableStateOf<dev.auralis.studio.online.RecordingSource?>(null) }
     var showImportDialog by remember { mutableStateOf(false) }
+    var showApiKeyGuideDialog by remember { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
+
+    if (showApiKeyGuideDialog) {
+        YouTubeApiKeyGuideDialog(
+            currentApiKey = youtubeApiKey,
+            onSaveApiKey = onSaveYoutubeApiKey,
+            onDismiss = { showApiKeyGuideDialog = false },
+        )
+    }
 
     if (showImportDialog && mediaResolver != null) {
         dev.auralis.studio.ui.components.ImportFromLinkDialog(
@@ -155,15 +180,24 @@ fun SearchScreen(
                 fontWeight = FontWeight.Bold,
                 color = colors.onBackground,
             )
-            if (mediaResolver != null) {
-                IconButton(
-                    onClick = { showImportDialog = true },
-                ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { showApiKeyGuideDialog = true }) {
                     Icon(
-                        imageVector = Icons.Outlined.Link,
-                        contentDescription = stringResource(R.string.import_from_link),
-                        tint = colors.primary,
+                        imageVector = Icons.Default.Key,
+                        contentDescription = "YouTube API Key & Guide",
+                        tint = if (youtubeApiKey.isNotBlank()) colors.primary else colors.onSurfaceVariant,
                     )
+                }
+                if (mediaResolver != null) {
+                    IconButton(
+                        onClick = { showImportDialog = true },
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Link,
+                            contentDescription = stringResource(R.string.import_from_link),
+                            tint = colors.primary,
+                        )
+                    }
                 }
             }
         }
@@ -200,7 +234,7 @@ fun SearchScreen(
             keyboardActions = KeyboardActions(
                 onSearch = {
                     onCommitSearch(query)
-                    if (selectedTab == 1 && query.isNotBlank()) onSearchOnline(query)
+                    if (query.isNotBlank()) onSearchOnline(query)
                 }
             ),
             singleLine = true,
@@ -473,12 +507,34 @@ fun SearchScreen(
                     }
                 }
             } else if (results.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
                     Text(
                         stringResource(R.string.no_results),
                         color = colors.onBackground.copy(alpha = 0.65f),
                         style = MaterialTheme.typography.bodyLarge,
                     )
+                    Spacer(Modifier.height(16.dp))
+                    Button(
+                        onClick = {
+                            selectedTab = 1
+                            onSearchOnline(query)
+                        },
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = colors.primary,
+                            contentColor = colors.onPrimary,
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                    ) {
+                        Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.search_online_for, query))
+                    }
                 }
             } else {
                 LazyColumn(
@@ -550,26 +606,16 @@ fun SearchScreen(
                     ) {
                         items(onlineResults, key = { "online:${it.uiKey}" }) { onlineTrack ->
                             val downloadStatus = RecordingDownloadMatcher.status(onlineTrack, downloads)
-                            val isYouTubeOnly = onlineTrack.bestPlaybackSource == null && onlineTrack.sources.any { it.provider.equals("youtube", true) }
-
                             OnlineTrackCard(
                                 track = onlineTrack,
                                 downloadStatus = downloadStatus,
                                 onPlay = {
                                     if (query.isNotBlank()) onCommitSearch(query)
-                                    if (isYouTubeOnly) {
-                                        inspectingSource = onlineTrack.sources.firstOrNull { it.provider.equals("youtube", true) } ?: onlineTrack.sources.first()
-                                    } else {
-                                        onPlayOnline(onlineTrack)
-                                    }
+                                    onPlayOnline(onlineTrack)
                                 },
                                 onDownload = {
                                     if (query.isNotBlank()) onCommitSearch(query)
-                                    if (isYouTubeOnly) {
-                                        inspectingSource = onlineTrack.sources.firstOrNull { it.provider.equals("youtube", true) } ?: onlineTrack.sources.first()
-                                    } else {
-                                        onDownloadOnline(onlineTrack)
-                                    }
+                                    onDownloadOnline(onlineTrack)
                                 },
                                 onSources = { sourceSheetTrack = onlineTrack },
                             )
@@ -686,10 +732,7 @@ private fun OnlineTrackCard(
                         downloadStatus == DownloadStatus.COMPLETED.name -> stringResource(R.string.downloaded)
                         downloadStatus == DownloadStatus.DOWNLOADING.name -> stringResource(R.string.downloading)
                         track.isLocal -> stringResource(R.string.on_device_count, 1)
-                        // Honest capability: previews are labelled Preview, never Download.
-                        !track.isDownloadable && track.bestPlaybackSource?.playbackCapability == dev.auralis.studio.online.PlaybackCapability.PREVIEW -> stringResource(R.string.preview_available)
-                        !track.isDownloadable -> stringResource(R.string.full_stream)
-                        else -> stringResource(R.string.free_stream_download)
+                        else -> stringResource(R.string.youtube_download_available)
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = if (downloadStatus == DownloadStatus.COMPLETED.name) colors.primary else colors.primary.copy(alpha = 0.85f),
@@ -762,27 +805,20 @@ private fun OnlineTrackCard(
                     }
                 }
                 else -> {
-                    if (track.preferredDownloadSource(DownloadQuality.BEST_AVAILABLE) != null) {
-                        FilledIconButton(
-                            onClick = onDownload,
-                            modifier = Modifier.size(40.dp),
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = colors.surfaceVariant,
-                                contentColor = colors.onSurface,
-                            ),
-                        ) {
-                            Icon(
-                                Icons.Default.Download,
-                                contentDescription = stringResource(R.string.download),
-                                tint = colors.primary,
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                    } else {
-                        // Preview-only: no Download action is offered.
-                        IconButton(onClick = onSources) {
-                            Icon(Icons.Default.Info, contentDescription = stringResource(R.string.available_sources), tint = colors.onSurfaceVariant)
-                        }
+                    FilledIconButton(
+                        onClick = onDownload,
+                        modifier = Modifier.size(40.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = colors.surfaceVariant,
+                            contentColor = colors.onSurface,
+                        ),
+                    ) {
+                        Icon(
+                            Icons.Default.Download,
+                            contentDescription = stringResource(R.string.download),
+                            tint = colors.primary,
+                            modifier = Modifier.size(20.dp),
+                        )
                     }
                 }
             }
@@ -794,4 +830,133 @@ private fun formatDuration(durationMs: Long): String {
     if (durationMs <= 0L) return ""
     val seconds = durationMs / 1_000L
     return "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
+}
+
+@Composable
+fun YouTubeApiKeyGuideDialog(
+    currentApiKey: String,
+    onSaveApiKey: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val colors = MaterialTheme.colorScheme
+    var keyText by remember { mutableStateOf(currentApiKey) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Key,
+                    contentDescription = null,
+                    tint = colors.primary,
+                    modifier = Modifier.size(24.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = stringResource(R.string.yt_api_guide_title),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // Info banner: Works without API key
+                Surface(
+                    color = colors.primaryContainer.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = colors.primary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = stringResource(R.string.yt_api_guide_no_key_needed),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onPrimaryContainer,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+
+                Text(
+                    text = stringResource(R.string.yt_api_guide_steps_header),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.onSurface,
+                )
+
+                Text(
+                    text = stringResource(R.string.yt_api_guide_steps_content),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                    lineHeight = 18.sp,
+                )
+
+                // Open Google Cloud Console button
+                OutlinedButton(
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://console.cloud.google.com/apis/credentials"))
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.yt_api_guide_open_console))
+                }
+
+                Spacer(Modifier.height(4.dp))
+
+                // Input Field for API Key
+                OutlinedTextField(
+                    value = keyText,
+                    onValueChange = { keyText = it },
+                    label = { Text(stringResource(R.string.yt_api_guide_input_label)) },
+                    placeholder = { Text("AIzaSy...") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    trailingIcon = {
+                        if (keyText.isNotBlank()) {
+                            IconButton(onClick = { keyText = "" }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Clear")
+                            }
+                        }
+                    },
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onSaveApiKey(keyText.trim())
+                    onDismiss()
+                },
+                shape = RoundedCornerShape(10.dp),
+            ) {
+                Text(stringResource(R.string.action_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.close))
+            }
+        },
+    )
 }

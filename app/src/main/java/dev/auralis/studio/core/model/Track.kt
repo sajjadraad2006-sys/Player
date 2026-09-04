@@ -14,7 +14,9 @@ data class Track(
     val sizeBytes: Long = 0L,
     val trackNumber: Int? = null,
     val year: Int? = null,
+    val customArtworkUri: String? = null,
 ) {
     val artworkUri: String?
-        get() = albumId?.let { "content://media/external/audio/albumart/$it" }
+        get() = customArtworkUri?.takeIf { it.isNotBlank() }
+            ?: albumId?.let { "content://media/external/audio/albumart/$it" }
 }

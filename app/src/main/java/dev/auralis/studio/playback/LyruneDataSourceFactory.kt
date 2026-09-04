@@ -17,7 +17,13 @@ class LyruneDataSourceFactory(
     private val context: Context,
 ) : DataSource.Factory {
 
-    private val defaultFactory = DefaultDataSource.Factory(context)
+    private val httpDataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+        .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .setAllowCrossProtocolRedirects(true)
+        .setConnectTimeoutMs(15_000)
+        .setReadTimeoutMs(25_000)
+
+    private val defaultFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
 
     override fun createDataSource(): DataSource = object : DataSource {
         private var activeSource: DataSource? = null

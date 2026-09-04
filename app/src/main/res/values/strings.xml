@@ -113,6 +113,9 @@
     <string name="material">Material</string>
     <string name="neon">Neon</string>
     <string name="dynamic_art">Dynamic art</string>
+    <string name="aurora">Aurora</string>
+    <string name="retro_vinyl">Retro Vinyl</string>
+    <string name="midnight_purple">Midnight Purple</string>
     <string name="classic">Classic</string>
     <string name="appearance_mode">Appearance mode</string>
     <string name="system">System</string>
@@ -212,6 +215,7 @@
     <string name="privacy_summary">Permissions and data</string>
     <string name="about_summary">Version, diagnostics and licenses</string>
     <string name="search_online_hint">Search for any song, artist, album or genre…</string>
+    <string name="search_online_for">Search online for \"%1$s\"</string>
     <string name="on_device_count">On device (%1$d)</string>
     <string name="search_download_online">Search &amp; download online</string>
     <string name="searching">Searching…</string>
@@ -389,4 +393,16 @@
     <string name="import_link_auth_required">Authorization required</string>
     <string name="import_link_unknown_permission">Download status unverified</string>
     <string name="import_link_inspecting">Inspecting link…</string>
+    <string name="yt_api_guide_title">YouTube API &amp; Guide</string>
+    <string name="yt_api_guide_no_key_needed">Search and downloads work 100% automatically without requiring any API key.</string>
+    <string name="yt_api_guide_steps_header">Steps to get your own YouTube Data API key (Optional):</string>
+    <string name="yt_api_guide_steps_content">1. Open Google Cloud Console using the button below.\n2. Create a new project (e.g. LyruneMusic).\n3. Go to APIs &amp; Services &gt; Library, find YouTube Data API v3, and click Enable.\n4. Go to Credentials &gt; Create Credentials &gt; API Key.\n5. Copy the key and paste it below.</string>
+    <string name="yt_api_guide_open_console">Google Cloud Console</string>
+    <string name="yt_api_guide_input_label">YouTube API Key (Optional)</string>
+    <string name="yt_api_guide_chip">API Guide</string>
+    <string name="action_save">Save</string>
+    <string name="youtube_download_available">YouTube · Download Available</string>
+    <string name="loading_stream">Loading stream…</string>
+    <string name="downloads">Downloads</string>
+    <string name="download_notifications_desc">Shows progress and status of active downloads.</string>
 </resources>

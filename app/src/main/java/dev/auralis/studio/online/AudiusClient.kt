@@ -19,7 +19,7 @@ import kotlinx.serialization.json.JsonNull
 
 private const val AUDIUS_TAG = "AudiusClient"
 private const val AUDIUS_BASE = "https://api.audius.co/v1"
-private const val AUDIUS_USER_AGENT = "Lyrune/0.2.0 (Android)"
+private const val AUDIUS_USER_AGENT = "Lyrune/1.0.0 (Android)"
 
 @Serializable
 internal data class AudiusResponse<T>(val data: T)
@@ -297,7 +297,7 @@ internal object AudiusDns : okhttp3.Dns {
             connectTimeout = 4_000
             readTimeout = 4_000
             setRequestProperty("Accept", "application/dns-json")
-            setRequestProperty("User-Agent", "Lyrune/0.2.0 (Android)")
+            setRequestProperty("User-Agent", "Lyrune/1.0.0 (Android)")
         }
         if (conn.responseCode == 200) {
             conn.inputStream.bufferedReader().use { it.readText() }

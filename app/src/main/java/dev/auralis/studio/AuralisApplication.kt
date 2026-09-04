@@ -44,6 +44,7 @@ class AuralisApplication : Application() {
     private fun initializeMainProcess() {
         // Main process: eagerly instantiate container (Room DB, DownloadWorkerBridge, Providers, Resolver Client)
         _container = AppContainer(this)
+        dev.auralis.studio.library.DownloadNotificationHelper.init(this)
     }
 
     private fun initializeResolverProcess() {
