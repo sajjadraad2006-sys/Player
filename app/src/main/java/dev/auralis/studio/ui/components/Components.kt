@@ -16,11 +16,17 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.composed
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -83,15 +89,28 @@ fun GlassCard(
         SurfaceTreatment.BORDERLESS -> Color.Transparent
         SurfaceTreatment.MATERIAL_TONAL -> colors.surfaceVariant
         SurfaceTreatment.CLASSIC_OUTLINE, SurfaceTreatment.RETRO_ANALOG -> colors.surface
-        SurfaceTreatment.NEON_EDGE -> colors.surface.copy(alpha = requestedAlpha)
+        SurfaceTreatment.NEON_EDGE -> Color(0xFF090A16).copy(alpha = requestedAlpha)
+        SurfaceTreatment.SKY_BREEZE -> colors.surface.copy(alpha = requestedAlpha)
         SurfaceTreatment.ARTWORK, SurfaceTreatment.GLASS, SurfaceTreatment.AURORA_FROST, SurfaceTreatment.NEBULA_GLOW -> colors.surface.copy(alpha = requestedAlpha)
     }
 
-    // Border color — use accent tint for glass/neon, neutral for others
-    val borderColor = if (tokens.accentGlowAlpha > 0f) {
-        accent.copy(alpha = tokens.cardBorderAlpha)
-    } else {
-        colors.outline.copy(alpha = tokens.cardBorderAlpha)
+    val cardBorder = when (tokens.surfaceTreatment) {
+        SurfaceTreatment.NEON_EDGE -> BorderStroke(
+            tokens.cardBorderWidth,
+            Brush.linearGradient(listOf(accent, colors.secondary)),
+        )
+        SurfaceTreatment.SKY_BREEZE -> BorderStroke(
+            tokens.cardBorderWidth,
+            colors.primary.copy(alpha = 0.35f),
+        )
+        else -> if (tokens.cardBorderWidth > 0.dp) {
+            val borderColor = if (tokens.accentGlowAlpha > 0f) {
+                accent.copy(alpha = tokens.cardBorderAlpha)
+            } else {
+                colors.outline.copy(alpha = tokens.cardBorderAlpha)
+            }
+            BorderStroke(tokens.cardBorderWidth, borderColor)
+        } else null
     }
 
     val cardModifier = if (onClick != null) modifier.clip(shape).clickable(onClick = onClick) else modifier
@@ -104,9 +123,7 @@ fun GlassCard(
             contentColor   = colors.onSurface,
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = elevation ?: tokens.cardElevation),
-        border    = if (tokens.cardBorderWidth > 0.dp) {
-            BorderStroke(tokens.cardBorderWidth, borderColor)
-        } else null,
+        border    = cardBorder,
     ) {
         if (tokens.gradientOverlay) {
             // Subtle gradient overlay inside the card for glass depth
@@ -114,7 +131,8 @@ fun GlassCard(
                 Modifier.background(
                     Brush.verticalGradient(
                         when (tokens.surfaceTreatment) {
-                            SurfaceTreatment.NEON_EDGE -> listOf(accent.copy(alpha = 0.13f), Color.Transparent, colors.secondary.copy(alpha = 0.08f))
+                            SurfaceTreatment.NEON_EDGE -> listOf(accent.copy(alpha = 0.22f), Color.Transparent, colors.secondary.copy(alpha = 0.14f))
+                            SurfaceTreatment.SKY_BREEZE -> listOf(Color(0xFF38BDF8).copy(alpha = 0.12f), Color.Transparent, colors.primary.copy(alpha = 0.06f))
                             SurfaceTreatment.ARTWORK -> listOf(colors.secondary.copy(alpha = 0.12f), Color.Transparent, accent.copy(alpha = 0.08f))
                             else -> listOf(Color.White.copy(alpha = 0.07f), Color.Transparent, accent.copy(alpha = 0.035f))
                         },
@@ -171,8 +189,9 @@ fun ArtworkContrastScrim(modifier: Modifier = Modifier) {
 @Composable
 fun TrackArtwork(track: Track?, modifier: Modifier = Modifier) {
     val tokens = LocalAuralisTokens.current
-    val shape  = RoundedCornerShape(tokens.artworkCorner.dp)
+    val shape  = remember(tokens.artworkCorner) { RoundedCornerShape(tokens.artworkCorner.dp) }
     val rawUri = track?.artworkUri
+    val context = androidx.compose.ui.platform.LocalContext.current
     val model: Any? = remember(rawUri) {
         if (rawUri.isNullOrBlank()) null
         else if (rawUri.startsWith("/") && !rawUri.startsWith("content://") && !rawUri.startsWith("file://")) {
@@ -181,17 +200,28 @@ fun TrackArtwork(track: Track?, modifier: Modifier = Modifier) {
             rawUri
         }
     }
-    if (model != null) {
-        SubcomposeAsyncImage(
-            model           = model,
-            contentDescription = track?.album,
-            contentScale    = ContentScale.Crop,
-            modifier        = modifier.clip(shape),
-            loading         = { DefaultArtworkPlaceholder(shape, modifier) },
-            error           = { DefaultArtworkPlaceholder(shape, modifier) },
-        )
-    } else {
-        DefaultArtworkPlaceholder(shape, modifier)
+    Box(modifier = modifier.clip(shape), contentAlignment = Alignment.Center) {
+        if (model == null) {
+            DefaultArtworkPlaceholder(shape, Modifier.fillMaxSize())
+        } else {
+            val request = remember(model) {
+                coil.request.ImageRequest.Builder(context)
+                    .data(model)
+                    .size(coil.size.Size(160, 160))
+                    .precision(coil.size.Precision.INEXACT)
+                    .allowRgb565(true)
+                    .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                    .diskCachePolicy(coil.request.CachePolicy.ENABLED)
+                    .crossfade(false)
+                    .build()
+            }
+            AsyncImage(
+                model = request,
+                contentDescription = track?.album,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
     }
 }
 
@@ -220,7 +250,7 @@ fun DefaultArtworkPlaceholder(shape: RoundedCornerShape, modifier: Modifier = Mo
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TrackRow — compact list item with improved visuals
+// TrackRow — compact list item with high performance rendering
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
 fun TrackRow(
@@ -233,8 +263,11 @@ fun TrackRow(
     onAddToQueue: () -> Unit,
     onAddToPlaylist: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    maxTitleLines: Int = 2,
+    onRemove: (() -> Unit)? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    val colors = MaterialTheme.colorScheme
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -247,10 +280,10 @@ fun TrackRow(
         Column(Modifier.weight(1f)) {
             Text(
                 track.title,
-                maxLines  = 1,
+                maxLines  = maxTitleLines,
                 overflow  = TextOverflow.Ellipsis,
                 style     = MaterialTheme.typography.titleMedium,
-                color     = MaterialTheme.colorScheme.onSurface,
+                color     = colors.onSurface,
             )
             Spacer(Modifier.height(2.dp))
             Text(
@@ -258,51 +291,51 @@ fun TrackRow(
                 maxLines  = 1,
                 overflow  = TextOverflow.Ellipsis,
                 style     = MaterialTheme.typography.bodySmall,
-                color     = MaterialTheme.colorScheme.onSurfaceVariant,
+                color     = colors.onSurfaceVariant,
             )
         }
         Text(
             DateUtils.formatElapsedTime(track.durationMs / 1000),
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = colors.onSurfaceVariant,
         )
-        AnimatedContent(
-            targetState = isFavorite,
-            transitionSpec = {
-                (scaleIn(spring(Spring.DampingRatioMediumBouncy)) + fadeIn()) togetherWith fadeOut()
-            },
-            label = "favorite_icon",
-        ) { fav ->
-            IconButton(onClick = onToggleFavorite) {
-                Icon(
-                    if (fav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                    contentDescription = stringResource(if (fav) R.string.remove_favorite else R.string.favorite),
-                    tint = if (fav) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+        IconButton(onClick = onToggleFavorite) {
+            Icon(
+                imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                contentDescription = stringResource(if (isFavorite) R.string.remove_favorite else R.string.favorite),
+                tint = if (isFavorite) colors.primary else colors.onSurfaceVariant,
+            )
         }
         Box {
             IconButton(onClick = { menuExpanded = true }) {
                 Icon(
                     Icons.Default.MoreVert,
                     contentDescription = stringResource(R.string.more_actions),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = colors.onSurfaceVariant,
                 )
             }
-            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.play_next)) },
-                    onClick = { menuExpanded = false; onPlayNext() },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.add_to_queue)) },
-                    onClick = { menuExpanded = false; onAddToQueue() },
-                )
-                playlists.forEach { playlist ->
+            if (menuExpanded) {
+                DropdownMenu(expanded = true, onDismissRequest = { menuExpanded = false }) {
                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.add_to_playlist) + ": " + playlist.name) },
-                        onClick = { menuExpanded = false; onAddToPlaylist(playlist.id) },
+                        text = { Text(stringResource(R.string.play_next)) },
+                        onClick = { menuExpanded = false; onPlayNext() },
                     )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.add_to_queue)) },
+                        onClick = { menuExpanded = false; onAddToQueue() },
+                    )
+                    if (onRemove != null) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.remove_from_playlist)) },
+                            onClick = { menuExpanded = false; onRemove() },
+                        )
+                    }
+                    playlists.forEach { playlist ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.add_to_playlist) + ": " + playlist.name) },
+                            onClick = { menuExpanded = false; onAddToPlaylist(playlist.id) },
+                        )
+                    }
                 }
             }
         }
@@ -359,5 +392,28 @@ fun PagerDotIndicator(
                     .background(color),
             )
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Universal bounce click modifier for interactive tactile feedback
+// ─────────────────────────────────────────────────────────────────────────────
+fun Modifier.bounceClick(
+    interactionSource: MutableInteractionSource? = null,
+    scaleDown: Float = 0.96f,
+): Modifier = composed {
+    val source = interactionSource ?: remember { MutableInteractionSource() }
+    val isPressed by source.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) scaleDown else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium,
+        ),
+        label = "bounce_click_scale",
+    )
+    this.graphicsLayer {
+        scaleX = scale
+        scaleY = scale
     }
 }

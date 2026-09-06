@@ -39,9 +39,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -78,8 +80,17 @@ import dev.auralis.studio.ui.components.GlassCard
 import dev.auralis.studio.ui.components.SectionHeader
 import kotlin.math.roundToInt
 
+import androidx.activity.compose.BackHandler
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings as AndroidSettings
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Dashboard
+import dev.auralis.studio.ui.components.ColorPickerDialog
+
 // ─── Sub-screen navigation ────────────────────────────────────────────────────
-private enum class SettingsSection { ROOT, APPEARANCE, LANGUAGE, LIBRARY, PROVIDERS, PRIVACY, ABOUT }
+private enum class SettingsSection { ROOT, APPEARANCE, HOME_LAYOUT, LANGUAGE, LIBRARY, PROVIDERS, PRIVACY, ABOUT }
 
 @Composable
 fun SettingsScreen(
@@ -87,6 +98,7 @@ fun SettingsScreen(
     folders: Set<String>,
     minimumDurationMs: Long,
     notificationPermissionGranted: Boolean,
+    audioPermissionGranted: Boolean = true,
     downloadLocation: String,
     downloadQuality: DownloadQuality,
     onThemeChange: (ThemeSettings) -> Unit,
@@ -94,6 +106,8 @@ fun SettingsScreen(
     onChooseFolder: () -> Unit,
     onRemoveFolder: (String) -> Unit,
     onRequestNotifications: () -> Unit,
+    onRequestAudioPermission: () -> Unit = {},
+    onNavigateHome: () -> Unit = {},
     onChooseDownloadFolder: () -> Unit,
     onResetDownloadFolder: () -> Unit,
     onDownloadQualityChange: (DownloadQuality) -> Unit,
@@ -104,19 +118,33 @@ fun SettingsScreen(
     onKeepSuspiciousFile: (Long) -> Unit = {},
     onRepairDownloadMetadata: () -> Unit = {},
     metadataRepairMessage: String? = null,
+    homeLayout: dev.auralis.studio.core.model.HomeLayoutSettings = dev.auralis.studio.core.model.HomeLayoutSettings(),
+    onHomeLayoutChange: (dev.auralis.studio.core.model.HomeLayoutSettings) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var section by remember { mutableStateOf(SettingsSection.ROOT) }
+
+    // Intercept system Back when inside a sub-screen
+    BackHandler(enabled = section != SettingsSection.ROOT) {
+        section = SettingsSection.ROOT
+    }
 
     when (section) {
         SettingsSection.ROOT -> SettingsRoot(
             modifier = modifier,
             onNavigate = { section = it },
+            onBack = onNavigateHome,
             notificationNeeded = Build.VERSION.SDK_INT >= 33 && !notificationPermissionGranted,
         )
         SettingsSection.APPEARANCE -> AppearanceSection(
             theme = theme,
             onThemeChange = onThemeChange,
+            onBack = { section = SettingsSection.ROOT },
+            modifier = modifier,
+        )
+        SettingsSection.HOME_LAYOUT -> HomeLayoutSection(
+            homeLayout = homeLayout,
+            onHomeLayoutChange = onHomeLayoutChange,
             onBack = { section = SettingsSection.ROOT },
             modifier = modifier,
         )
@@ -152,6 +180,10 @@ fun SettingsScreen(
             modifier = modifier,
         )
         SettingsSection.PRIVACY -> PrivacySection(
+            audioPermissionGranted = audioPermissionGranted,
+            notificationPermissionGranted = notificationPermissionGranted,
+            onRequestAudioPermission = onRequestAudioPermission,
+            onRequestNotifications = onRequestNotifications,
             onBack = { section = SettingsSection.ROOT },
             modifier = modifier,
         )
@@ -166,15 +198,37 @@ fun SettingsScreen(
 @Composable
 private fun SettingsRoot(
     onNavigate: (SettingsSection) -> Unit,
+    onBack: () -> Unit = {},
     notificationNeeded: Boolean,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp, 20.dp, 16.dp, 40.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text(stringResource(R.string.settings), style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.onBackground) }
+        item {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        Icons.Default.ArrowBack,
+                        contentDescription = stringResource(R.string.back),
+                        tint = MaterialTheme.colorScheme.onBackground,
+                    )
+                }
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    stringResource(R.string.settings),
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+            }
+        }
         item {
             GlassCard(Modifier.fillMaxWidth()) {
                 Column {
                     NavRow(Icons.Default.Palette, stringResource(R.string.appearance), stringResource(R.string.appearance_summary)) { onNavigate(SettingsSection.APPEARANCE) }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(0.42f))
+                    NavRow(Icons.Default.Dashboard, stringResource(R.string.home_layout), stringResource(R.string.home_layout_desc)) { onNavigate(SettingsSection.HOME_LAYOUT) }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(0.42f))
                     NavRow(Icons.Default.Language, stringResource(R.string.language), stringResource(R.string.language_summary)) { onNavigate(SettingsSection.LANGUAGE) }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(0.42f))
@@ -328,6 +382,21 @@ private fun AppearanceSection(
                             selected = theme.cornerStyle == style,
                             onClick  = { onThemeChange(theme.copy(cornerStyle = style)) },
                             label    = { Text(cornerLabel(style)) },
+                        )
+                    }
+                }
+            }
+        }
+
+        // Transition Animation Style
+        item {
+            SettingsCard(stringResource(R.string.animation_style)) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(dev.auralis.studio.core.model.AnimationStyle.entries.filter { it != dev.auralis.studio.core.model.AnimationStyle.EXPRESSIVE }) { anim ->
+                        FilterChip(
+                            selected = theme.animationStyle == anim,
+                            onClick  = { onThemeChange(theme.copy(animationStyle = anim)) },
+                            label    = { Text(animationLabel(anim)) },
                         )
                     }
                 }
@@ -633,16 +702,23 @@ private fun ProvidersSection(
                     note  = stringResource(if (jamendoConfigured) R.string.client_id_configured else R.string.client_id_not_configured),
                 )
                 HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
+                ProviderRow(
+                    name = "Archive.org",
+                    role = stringResource(R.string.online_music_role),
+                    ready = true,
+                    note = "Live Music Archive (Creative Commons & Public Domain)",
+                )
+                HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
+                ProviderRow(
+                    name = "YouTube",
+                    role = stringResource(R.string.online_music_role),
+                    ready = true,
+                    note = "InnerTube Discovery + yt-dlp Resolver Engine",
+                )
+                HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
                 ProviderRow("iTunes", stringResource(R.string.metadata_lookup), ready = true, note = stringResource(R.string.catalog_preview_only))
                 HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
                 ProviderRow("Deezer", stringResource(R.string.metadata_lookup), ready = true, note = stringResource(R.string.catalog_preview_only))
-                HorizontalDivider(color = colors.outline.copy(0.42f), modifier = Modifier.padding(vertical = 4.dp))
-                ProviderRow(
-                    "YouTube",
-                    stringResource(R.string.metadata_lookup),
-                    ready = false,
-                    note = stringResource(if (youtubeKeyConfigured) R.string.youtube_discovery_not_enabled else R.string.youtube_not_configured),
-                )
             }
         }
         item {
@@ -744,8 +820,24 @@ private fun ProviderRow(name: String, role: String, ready: Boolean, note: String
 
 // ─── Privacy section ──────────────────────────────────────────────────────────
 @Composable
-private fun PrivacySection(onBack: () -> Unit, modifier: Modifier = Modifier) {
+private fun PrivacySection(
+    audioPermissionGranted: Boolean,
+    notificationPermissionGranted: Boolean,
+    onRequestAudioPermission: () -> Unit,
+    onRequestNotifications: () -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = MaterialTheme.colorScheme
+    val context = LocalContext.current
+    val openAppSettings = {
+        val intent = Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", context.packageName, null)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        context.startActivity(intent)
+    }
+
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 40.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -753,8 +845,49 @@ private fun PrivacySection(onBack: () -> Unit, modifier: Modifier = Modifier) {
                 Text(stringResource(R.string.privacy), style = MaterialTheme.typography.headlineMedium, color = colors.onBackground)
             }
         }
+
+        // Real Permission Status Card
         item {
-            SettingsCard(stringResource(R.string.privacy)) {
+            SettingsCard(stringResource(R.string.system_permissions)) {
+                Text(
+                    stringResource(R.string.permission_explanation),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurface.copy(alpha = 0.72f),
+                )
+                Spacer(Modifier.height(8.dp))
+
+                // Music / Audio Permission Row
+                PermissionStatusRow(
+                    title = stringResource(R.string.music_permission_title),
+                    description = stringResource(R.string.music_permission_desc),
+                    isGranted = audioPermissionGranted,
+                    onRequest = onRequestAudioPermission,
+                )
+
+                HorizontalDivider(color = colors.outline.copy(alpha = 0.25f), modifier = Modifier.padding(vertical = 8.dp))
+
+                // Notifications Permission Row
+                val notifNeeded = Build.VERSION.SDK_INT >= 33
+                PermissionStatusRow(
+                    title = stringResource(R.string.playback_notifications),
+                    description = stringResource(R.string.notification_permission_description),
+                    isGranted = !notifNeeded || notificationPermissionGranted,
+                    onRequest = onRequestNotifications,
+                )
+
+                Spacer(Modifier.height(10.dp))
+                FilledTonalButton(
+                    onClick = openAppSettings,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text(stringResource(R.string.open_app_settings))
+                }
+            }
+        }
+
+        item {
+            SettingsCard(stringResource(R.string.privacy_commitments)) {
                 Text(stringResource(R.string.privacy_description), color = colors.onSurface.copy(0.72f))
                 Spacer(Modifier.height(4.dp))
                 listOf(
@@ -770,6 +903,49 @@ private fun PrivacySection(onBack: () -> Unit, modifier: Modifier = Modifier) {
                         Text(point, style = MaterialTheme.typography.bodyMedium, color = colors.onSurface.copy(0.80f))
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PermissionStatusRow(
+    title: String,
+    description: String,
+    isGranted: Boolean,
+    onRequest: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, style = MaterialTheme.typography.titleSmall, color = colors.onSurface, fontWeight = FontWeight.SemiBold)
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (isGranted) Color(0xFF10B981).copy(alpha = 0.2f) else colors.error.copy(alpha = 0.2f))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+            ) {
+                Text(
+                    text = stringResource(if (isGranted) R.string.permission_granted else R.string.permission_denied),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isGranted) Color(0xFF10B981) else colors.error,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+        Text(description, style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(alpha = 0.65f))
+        if (!isGranted) {
+            Spacer(Modifier.height(4.dp))
+            Button(
+                onClick = onRequest,
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                Text(stringResource(R.string.grant_permission))
             }
         }
     }
@@ -826,15 +1002,26 @@ private fun SettingsCard(title: String, content: @Composable ColumnScope.() -> U
 @Composable
 private fun themeLabel(style: ThemeStyle): String = stringResource(
     when (style) {
-        ThemeStyle.GLASS           -> R.string.glass
-        ThemeStyle.MINIMAL         -> R.string.minimal
-        ThemeStyle.MATERIAL        -> R.string.material
-        ThemeStyle.NEON            -> R.string.neon
-        ThemeStyle.DYNAMIC_ART     -> R.string.dynamic_art
-        ThemeStyle.AURORA          -> R.string.aurora
-        ThemeStyle.RETRO_VINYL     -> R.string.retro_vinyl
-        ThemeStyle.MIDNIGHT_PURPLE -> R.string.midnight_purple
-        ThemeStyle.CLASSIC         -> R.string.classic
+        ThemeStyle.GLASS        -> R.string.glass
+        ThemeStyle.NEON         -> R.string.neon
+        ThemeStyle.MINIMAL      -> R.string.minimal
+        ThemeStyle.AURORA       -> R.string.aurora
+        ThemeStyle.SKY_BREEZE   -> R.string.sky_breeze
+        ThemeStyle.RETRO_SYNTH  -> R.string.retro_synth
+        ThemeStyle.DYNAMIC_ART  -> R.string.dynamic_art
+        ThemeStyle.MATERIAL     -> R.string.material
+    },
+)
+
+@Composable
+private fun animationLabel(style: dev.auralis.studio.core.model.AnimationStyle): String = stringResource(
+    when (style) {
+        dev.auralis.studio.core.model.AnimationStyle.SMOOTH     -> R.string.anim_smooth
+        dev.auralis.studio.core.model.AnimationStyle.SPRING     -> R.string.anim_spring
+        dev.auralis.studio.core.model.AnimationStyle.FADE_ZOOM  -> R.string.anim_fade_zoom
+        dev.auralis.studio.core.model.AnimationStyle.FAST       -> R.string.anim_fast
+        dev.auralis.studio.core.model.AnimationStyle.EXPRESSIVE -> R.string.anim_spring
+        dev.auralis.studio.core.model.AnimationStyle.REDUCED    -> R.string.anim_reduced
     },
 )
 
@@ -873,25 +1060,37 @@ private fun AccentColorSettingCard(
 ) {
     val colors = MaterialTheme.colorScheme
     val accents = AccentPalette.PRESETS
-    val currentHex = remember(theme.accentArgb) {
-        HexColorParser.formatToHex(theme.accentArgb)
+    var showColorPicker by remember { mutableStateOf(false) }
+
+    val primaryColor = remember(theme.accentArgb) { Color(theme.accentArgb.toInt()) }
+    val secondaryColor = remember(theme.secondaryArgb) { Color(theme.secondaryArgb.toInt()) }
+
+    if (showColorPicker) {
+        ColorPickerDialog(
+            initialPrimaryArgb = theme.accentArgb,
+            initialSecondaryArgb = theme.secondaryArgb,
+            onApply = { newPrimary, newSecondary ->
+                onThemeChange(theme.copy(accentArgb = newPrimary, secondaryArgb = newSecondary))
+                showColorPicker = false
+            },
+            onDismiss = { showColorPicker = false },
+        )
     }
-    var customHexInput by remember(theme.accentArgb) {
-        mutableStateOf(currentHex)
-    }
-    val parsedCustomColor = remember(customHexInput) {
-        HexColorParser.parse(customHexInput)
-    }
-    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
 
     SettingsCard(stringResource(R.string.accent_color)) {
+        // Quick Presets Row
+        Text(
+            stringResource(R.string.primary_accent),
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.onSurfaceVariant,
+        )
         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             items(accents) { color ->
                 val colorArgb = HexColorParser.fromComposeColor(color)
                 val isSelected = (theme.accentArgb and 0xFFFFFFFFL) == colorArgb
                 Box(
                     Modifier
-                        .size(42.dp)
+                        .size(40.dp)
                         .clip(CircleShape)
                         .background(color)
                         .then(
@@ -915,91 +1114,256 @@ private fun AccentColorSettingCard(
             }
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
         HorizontalDivider(color = colors.outline.copy(alpha = 0.25f))
         Spacer(Modifier.height(8.dp))
 
-        Text(
-            stringResource(R.string.custom_hex_color),
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(6.dp))
-
+        // Dual-Color Preview & Customizer Card
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(colors.surfaceVariant.copy(alpha = 0.4f))
+                .clickable { showColorPicker = true }
+                .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // Color swatch preview
+            // Gradient preview disc or rounded rect
             Box(
                 modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(
-                        parsedCustomColor?.let { Color(it.toInt()) } ?: colors.surfaceVariant
-                    )
-                    .border(1.dp, colors.outline.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (parsedCustomColor == null) {
-                    Text("?", color = colors.onSurfaceVariant, fontWeight = FontWeight.Bold)
-                }
-            }
-
-            androidx.compose.material3.OutlinedTextField(
-                value = customHexInput,
-                onValueChange = { customHexInput = it },
-                placeholder = { Text(stringResource(R.string.hex_color_hint)) },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-                isError = parsedCustomColor == null && customHexInput.isNotBlank(),
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Brush.linearGradient(listOf(primaryColor, secondaryColor)))
+                    .border(1.5.dp, colors.outline.copy(alpha = 0.3f), RoundedCornerShape(10.dp)),
             )
 
-            TextButton(
-                onClick = {
-                    val clipText = clipboardManager.getText()?.text
-                    if (!clipText.isNullOrBlank()) {
-                        customHexInput = clipText
-                    }
-                }
-            ) {
-                Text(stringResource(R.string.paste))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    stringResource(R.string.dual_color_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.onSurface,
+                )
+                Text(
+                    stringResource(
+                        R.string.dual_color_subtitle,
+                        HexColorParser.formatToHex(theme.accentArgb),
+                        HexColorParser.formatToHex(theme.secondaryArgb),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
             }
-        }
 
-        if (parsedCustomColor == null && customHexInput.isNotBlank()) {
-            Spacer(Modifier.height(2.dp))
-            Text(
-                stringResource(R.string.invalid_hex),
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.error,
-            )
+            FilledTonalButton(
+                onClick = { showColorPicker = true },
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                Text(stringResource(R.string.customize_color))
+            }
         }
 
         Spacer(Modifier.height(8.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
         ) {
             TextButton(
                 onClick = {
-                    onThemeChange(theme.copy(accentArgb = AccentPalette.DEFAULT_ARGB))
-                }
+                    onThemeChange(
+                        theme.copy(
+                            accentArgb = AccentPalette.DEFAULT_ARGB,
+                            secondaryArgb = 0xFF38BDF8L,
+                        ),
+                    )
+                },
             ) {
                 Text(stringResource(R.string.reset_default))
             }
-            Spacer(Modifier.width(8.dp))
-            Button(
-                onClick = {
-                    parsedCustomColor?.let { validArgb ->
-                        onThemeChange(theme.copy(accentArgb = validArgb))
-                    }
-                },
-                enabled = parsedCustomColor != null && (theme.accentArgb and 0xFFFFFFFFL) != parsedCustomColor,
+        }
+    }
+}
+
+@Composable
+private fun HomeLayoutSection(
+    homeLayout: dev.auralis.studio.core.model.HomeLayoutSettings,
+    onHomeLayoutChange: (dev.auralis.studio.core.model.HomeLayoutSettings) -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    LazyColumn(
+        modifier = modifier,
+        contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 40.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        item {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(stringResource(R.string.apply))
+                IconButton(onClick = onBack) {
+                    Icon(
+                        Icons.Default.ArrowBack,
+                        contentDescription = stringResource(R.string.back),
+                        tint = colors.onBackground,
+                    )
+                }
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    stringResource(R.string.home_layout),
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = colors.onBackground,
+                )
+            }
+        }
+
+        // Layout Style Picker
+        item {
+            SettingsCard(stringResource(R.string.home_layout)) {
+                Text(
+                    stringResource(R.string.home_layout_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurface.copy(0.65f),
+                )
+                Spacer(Modifier.height(8.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = homeLayout.style == dev.auralis.studio.core.model.HomeLayoutStyle.STUDIO_HUB,
+                        onClick = { onHomeLayoutChange(homeLayout.copy(style = dev.auralis.studio.core.model.HomeLayoutStyle.STUDIO_HUB)) },
+                        label = { Text(stringResource(R.string.layout_studio_hub)) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    FilterChip(
+                        selected = homeLayout.style == dev.auralis.studio.core.model.HomeLayoutStyle.GRID_CARDS,
+                        onClick = { onHomeLayoutChange(homeLayout.copy(style = dev.auralis.studio.core.model.HomeLayoutStyle.GRID_CARDS)) },
+                        label = { Text(stringResource(R.string.layout_grid_cards)) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    FilterChip(
+                        selected = homeLayout.style == dev.auralis.studio.core.model.HomeLayoutStyle.MINIMAL_STREAM,
+                        onClick = { onHomeLayoutChange(homeLayout.copy(style = dev.auralis.studio.core.model.HomeLayoutStyle.MINIMAL_STREAM)) },
+                        label = { Text(stringResource(R.string.layout_minimal_stream)) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    FilterChip(
+                        selected = homeLayout.style == dev.auralis.studio.core.model.HomeLayoutStyle.VINYL_TURNTABLE,
+                        onClick = { onHomeLayoutChange(homeLayout.copy(style = dev.auralis.studio.core.model.HomeLayoutStyle.VINYL_TURNTABLE)) },
+                        label = { Text(stringResource(R.string.layout_vinyl_turntable)) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    FilterChip(
+                        selected = homeLayout.style == dev.auralis.studio.core.model.HomeLayoutStyle.IMMERSIVE_CAROUSEL,
+                        onClick = { onHomeLayoutChange(homeLayout.copy(style = dev.auralis.studio.core.model.HomeLayoutStyle.IMMERSIVE_CAROUSEL)) },
+                        label = { Text(stringResource(R.string.layout_immersive_carousel)) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
+
+        // Visible Sections Toggles
+        item {
+            SettingsCard(stringResource(R.string.customize_home)) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(stringResource(R.string.show_quick_categories), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+                        Switch(
+                            checked = homeLayout.showQuickCategories,
+                            onCheckedChange = { onHomeLayoutChange(homeLayout.copy(showQuickCategories = it)) },
+                        )
+                    }
+                    HorizontalDivider(color = colors.outline.copy(0.25f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(stringResource(R.string.show_playlists), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+                        Switch(
+                            checked = homeLayout.showPlaylists,
+                            onCheckedChange = { onHomeLayoutChange(homeLayout.copy(showPlaylists = it)) },
+                        )
+                    }
+                    HorizontalDivider(color = colors.outline.copy(0.25f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(stringResource(R.string.show_recently_played), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+                        Switch(
+                            checked = homeLayout.showRecentlyPlayed,
+                            onCheckedChange = { onHomeLayoutChange(homeLayout.copy(showRecentlyPlayed = it)) },
+                        )
+                    }
+                    HorizontalDivider(color = colors.outline.copy(0.25f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(stringResource(R.string.show_recent_tracks), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+                        Switch(
+                            checked = homeLayout.showRecentTracks,
+                            onCheckedChange = { onHomeLayoutChange(homeLayout.copy(showRecentTracks = it)) },
+                        )
+                    }
+                    HorizontalDivider(color = colors.outline.copy(0.25f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(stringResource(R.string.show_floating_shuffle), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+                        Switch(
+                            checked = homeLayout.showFloatingShuffle,
+                            onCheckedChange = { onHomeLayoutChange(homeLayout.copy(showFloatingShuffle = it)) },
+                        )
+                    }
+                    HorizontalDivider(color = colors.outline.copy(0.25f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(stringResource(R.string.show_filter_chips), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+                        Switch(
+                            checked = homeLayout.showFilterChips,
+                            onCheckedChange = { onHomeLayoutChange(homeLayout.copy(showFilterChips = it)) },
+                        )
+                    }
+                    HorizontalDivider(color = colors.outline.copy(0.25f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(stringResource(R.string.show_recommendations), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+                        Switch(
+                            checked = homeLayout.showRecommendations,
+                            onCheckedChange = { onHomeLayoutChange(homeLayout.copy(showRecommendations = it)) },
+                        )
+                    }
+                    HorizontalDivider(color = colors.outline.copy(0.25f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(stringResource(R.string.show_greeting_header), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+                        Switch(
+                            checked = homeLayout.showGreetingHeader,
+                            onCheckedChange = { onHomeLayoutChange(homeLayout.copy(showGreetingHeader = it)) },
+                        )
+                    }
+                }
             }
         }
     }

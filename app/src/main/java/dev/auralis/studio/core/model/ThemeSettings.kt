@@ -3,24 +3,51 @@ package dev.auralis.studio.core.model
 /** Visual language only. Luminance is controlled exclusively by [AppearanceMode]. */
 enum class ThemeStyle {
     GLASS,
-    DYNAMIC_ART,
     NEON,
-    MATERIAL,
     MINIMAL,
     AURORA,
-    RETRO_VINYL,
-    MIDNIGHT_PURPLE,
-    CLASSIC,
+    SKY_BREEZE,
+    RETRO_SYNTH,
+    DYNAMIC_ART,
+    MATERIAL,
 }
 enum class AppearanceMode { SYSTEM, LIGHT, DARK, AMOLED }
 enum class VisualQuality { FULL, BALANCED, REDUCED }
 enum class CornerStyle { COMPACT, BALANCED, ROUND }
-enum class AnimationStyle { REDUCED, SMOOTH, EXPRESSIVE }
+enum class AnimationStyle {
+    SMOOTH,
+    SPRING,
+    FADE_ZOOM,
+    FAST,
+    EXPRESSIVE,
+    REDUCED,
+}
+
+enum class HomeLayoutStyle {
+    STUDIO_HUB,
+    GRID_CARDS,
+    MINIMAL_STREAM,
+    VINYL_TURNTABLE,
+    IMMERSIVE_CAROUSEL,
+}
+
+data class HomeLayoutSettings(
+    val style: HomeLayoutStyle = HomeLayoutStyle.GRID_CARDS,
+    val showQuickCategories: Boolean = true,
+    val showPlaylists: Boolean = true,
+    val showRecentlyPlayed: Boolean = true,
+    val showRecentTracks: Boolean = true,
+    val showFloatingShuffle: Boolean = true,
+    val showFilterChips: Boolean = true,
+    val showRecommendations: Boolean = true,
+    val showGreetingHeader: Boolean = true,
+)
 
 data class ThemeSettings(
     val style: ThemeStyle = ThemeStyle.GLASS,
     val appearance: AppearanceMode = AppearanceMode.SYSTEM,
     val accentArgb: Long = 0xFFA78BFA,
+    val secondaryArgb: Long = 0xFF38BDF8,
     val glassAlpha: Float = 0.16f,
     val cornerRadius: Float = 24f,
     val animationScale: Float = 1f,
@@ -53,6 +80,9 @@ object ThemeModeResolver {
     /** Migrates the removed legacy visual style without changing explicit luminance. */
     fun migrateLegacyStyle(value: String?): ThemeStyle = when (value) {
         "AMOLED" -> ThemeStyle.MINIMAL
+        "CLASSIC" -> ThemeStyle.MATERIAL
+        "MIDNIGHT_PURPLE" -> ThemeStyle.AURORA
+        "RETRO_VINYL" -> ThemeStyle.RETRO_SYNTH
         else -> value?.let { stored -> ThemeStyle.entries.firstOrNull { it.name == stored } } ?: ThemeStyle.GLASS
     }
 }

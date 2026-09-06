@@ -48,7 +48,7 @@ class LyricsRepository(
      * poisoned LRCLIB exact lookups. Current version requires full-track metadata.
      */
     private companion object {
-        const val NEGATIVE_CACHE_MS = 6L * 60L * 60L * 1_000L
+        const val NEGATIVE_CACHE_MS = 15L * 60L * 1_000L
         const val MATCHER_VERSION = 2
         /** Local durations below this are previews/incomplete — never used for lyric matching. */
         const val MIN_FULL_TRACK_MS_FOR_MATCHING = 45_000L

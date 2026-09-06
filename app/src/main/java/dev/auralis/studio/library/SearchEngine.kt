@@ -66,16 +66,49 @@ object SearchEngine {
 
     fun normalizeArabic(text: String): String = normalize(text)
 
+    data class NormalizedTrack(
+        val track: Track,
+        val normTitle: String,
+        val normArtist: String,
+        val normAlbum: String,
+        val normFile: String,
+        val normUri: String,
+    )
+
+    private val trackNormCache = java.util.concurrent.ConcurrentHashMap<String, NormalizedTrack>()
+
+    fun getNormalized(track: Track): NormalizedTrack {
+        val cacheKey = "${track.uri}#${track.title}#${track.artist}#${track.displayName}"
+        return trackNormCache.computeIfAbsent(cacheKey) {
+            NormalizedTrack(
+                track = track,
+                normTitle = normalize(track.title),
+                normArtist = normalize(track.artist),
+                normAlbum = normalize(track.album),
+                normFile = normalize(track.displayName),
+                normUri = normalize(track.uri),
+            )
+        }
+    }
+
+    fun clearCache() {
+        trackNormCache.clear()
+    }
+
     /**
      * Scores a track against the pre-normalized query.
      */
     fun score(track: Track, normQuery: String): Int {
         if (normQuery.isEmpty()) return 0
+        return scoreNormalized(getNormalized(track), normQuery)
+    }
 
-        val normTitle = normalize(track.title)
-        val normArtist = normalize(track.artist)
-        val normAlbum = normalize(track.album)
-        val normFile = normalize(track.displayName)
+    fun scoreNormalized(n: NormalizedTrack, normQuery: String): Int {
+        val normTitle = n.normTitle
+        val normArtist = n.normArtist
+        val normAlbum = n.normAlbum
+        val normFile = n.normFile
+        val normUri = n.normUri
 
         var totalScore = 0
 
@@ -118,11 +151,8 @@ object SearchEngine {
         if (totalScore == 0) {
             if (normFile.isNotEmpty() && normFile.contains(normQuery)) {
                 totalScore += 150
-            } else {
-                val normUri = normalize(track.uri)
-                if (normUri.isNotEmpty() && normUri.contains(normQuery)) {
-                    totalScore += 120
-                }
+            } else if (normUri.isNotEmpty() && normUri.contains(normQuery)) {
+                totalScore += 120
             }
         }
 
@@ -130,7 +160,6 @@ object SearchEngine {
         if (totalScore == 0 && normQuery.length >= 4) {
             val fuzzyScore = computeFuzzyScore(normQuery, normTitle, normArtist)
             if (fuzzyScore > 0) {
-                // Strictly bounded between 30 and 100 so it can never outrank exact matches
                 totalScore = fuzzyScore.coerceIn(30, 100)
             }
         }
@@ -147,7 +176,7 @@ object SearchEngine {
 
         return tracks
             .mapNotNull { track ->
-                val s = score(track, normQuery)
+                val s = scoreNormalized(getNormalized(track), normQuery)
                 if (s > 0) track to s else null
             }
             .sortedWith(

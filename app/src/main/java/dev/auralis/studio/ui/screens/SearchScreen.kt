@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
@@ -37,8 +38,11 @@ import androidx.compose.material.icons.filled.Search
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -132,9 +136,13 @@ fun SearchScreen(
     onEnqueueResolverDownload: (dev.auralis.studio.resolver.api.ResolverDownloadDescriptor) -> Unit = {},
     youtubeApiKey: String = "",
     onSaveYoutubeApiKey: (String) -> Unit = {},
+    onBack: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
+    var localPage by remember(query, results.size) { mutableIntStateOf(1) }
+    var onlinePage by remember(query, onlineResults.size) { mutableIntStateOf(1) }
+    val pageSize = 12
     var sourceSheetTrack by remember { mutableStateOf<UnifiedTrack?>(null) }
     var inspectingSource by remember { mutableStateOf<dev.auralis.studio.online.RecordingSource?>(null) }
     var showImportDialog by remember { mutableStateOf(false) }
@@ -170,16 +178,26 @@ fun SearchScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 4.dp),
+                .padding(start = 8.dp, end = 8.dp, top = 16.dp, bottom = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                stringResource(R.string.search),
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Bold,
-                color = colors.onBackground,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowBack,
+                        contentDescription = stringResource(R.string.back),
+                        tint = colors.onBackground,
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    stringResource(R.string.search),
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.onBackground,
+                )
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { showApiKeyGuideDialog = true }) {
                     Icon(
@@ -537,11 +555,19 @@ fun SearchScreen(
                     }
                 }
             } else {
+                val localTotalPages = maxOf(1, (results.size + pageSize - 1) / pageSize)
+                val currentLocalPage = localPage.coerceIn(1, localTotalPages)
+                val pagedResults = remember(results, currentLocalPage) {
+                    val from = (currentLocalPage - 1) * pageSize
+                    val to = minOf(from + pageSize, results.size)
+                    if (from < results.size) results.subList(from, to) else emptyList()
+                }
+
                 LazyColumn(
                     contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    items(results, key = Track::uri) { track ->
+                    items(pagedResults, key = Track::uri) { track ->
                         TrackRow(
                             track = track,
                             isFavorite = track.uri in favorites,
@@ -551,7 +577,18 @@ fun SearchScreen(
                             onPlayNext = { onPlayNext(track) },
                             onAddToQueue = { onAddToQueue(track) },
                             onAddToPlaylist = { onAddToPlaylist(it, track.uri) },
+                            maxTitleLines = 3,
                         )
+                    }
+
+                    if (localTotalPages > 1) {
+                        item(key = "local_pagination_bar") {
+                            SearchPaginationBar(
+                                currentPage = currentLocalPage,
+                                totalPages = localTotalPages,
+                                onPageChange = { localPage = it },
+                            )
+                        }
                     }
                 }
             }
@@ -600,11 +637,19 @@ fun SearchScreen(
                             trackColor = colors.surfaceVariant,
                         )
                     }
+                    val onlineTotalPages = maxOf(1, (onlineResults.size + pageSize - 1) / pageSize)
+                    val currentOnlinePage = onlinePage.coerceIn(1, onlineTotalPages)
+                    val pagedOnlineResults = remember(onlineResults, currentOnlinePage) {
+                        val from = (currentOnlinePage - 1) * pageSize
+                        val to = minOf(from + pageSize, onlineResults.size)
+                        if (from < onlineResults.size) onlineResults.subList(from, to) else emptyList()
+                    }
+
                     LazyColumn(
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 28.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        items(onlineResults, key = { "online:${it.uiKey}" }) { onlineTrack ->
+                        items(pagedOnlineResults, key = { "online:${it.uiKey}" }) { onlineTrack ->
                             val downloadStatus = RecordingDownloadMatcher.status(onlineTrack, downloads)
                             OnlineTrackCard(
                                 track = onlineTrack,
@@ -619,6 +664,16 @@ fun SearchScreen(
                                 },
                                 onSources = { sourceSheetTrack = onlineTrack },
                             )
+                        }
+
+                        if (onlineTotalPages > 1) {
+                            item(key = "online_pagination_bar") {
+                                SearchPaginationBar(
+                                    currentPage = currentOnlinePage,
+                                    totalPages = onlineTotalPages,
+                                    onPageChange = { onlinePage = it },
+                                )
+                            }
                         }
                     }
                 }
@@ -712,16 +767,17 @@ private fun OnlineTrackCard(
             Column(Modifier.weight(1f)) {
                 Text(
                     track.title,
-                    maxLines = 1,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = colors.onSurface,
+                    lineHeight = 20.sp,
                 )
-                Spacer(Modifier.height(2.dp))
+                Spacer(Modifier.height(3.dp))
                 Text(
                     listOf(track.artist, track.album, formatDuration(track.durationMs)).filter(String::isNotBlank).joinToString(" · "),
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.onSurfaceVariant,
@@ -959,4 +1015,113 @@ fun YouTubeApiKeyGuideDialog(
             }
         },
     )
+}
+
+@Composable
+private fun SearchPaginationBar(
+    currentPage: Int,
+    totalPages: Int,
+    onPageChange: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (totalPages <= 1) return
+    val colors = MaterialTheme.colorScheme
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp, horizontal = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = stringResource(R.string.page_number, currentPage, totalPages),
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 6.dp),
+        )
+
+        Row(
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Previous Page Button
+            IconButton(
+                onClick = { if (currentPage > 1) onPageChange(currentPage - 1) },
+                enabled = currentPage > 1,
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.page_previous),
+                    tint = if (currentPage > 1) colors.primary else colors.onSurface.copy(alpha = 0.25f),
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+
+            Spacer(Modifier.width(4.dp))
+
+            val displayPages = remember(currentPage, totalPages) {
+                val list = mutableListOf<Int?>()
+                if (totalPages <= 6) {
+                    for (i in 1..totalPages) list.add(i)
+                } else {
+                    list.add(1)
+                    if (currentPage > 3) list.add(null)
+                    val start = maxOf(2, currentPage - 1)
+                    val end = minOf(totalPages - 1, currentPage + 1)
+                    for (i in start..end) {
+                        if (!list.contains(i)) list.add(i)
+                    }
+                    if (currentPage < totalPages - 2) list.add(null)
+                    if (!list.contains(totalPages)) list.add(totalPages)
+                }
+                list
+            }
+
+            displayPages.forEach { page ->
+                if (page == null) {
+                    Text(
+                        text = "...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                    )
+                } else {
+                    val isSelected = page == currentPage
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 3.dp)
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(if (isSelected) colors.primary else colors.surfaceVariant.copy(alpha = 0.6f))
+                            .clickable { onPageChange(page) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = "$page",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) colors.onPrimary else colors.onSurface,
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.width(4.dp))
+
+            // Next Page Button
+            IconButton(
+                onClick = { if (currentPage < totalPages) onPageChange(currentPage + 1) },
+                enabled = currentPage < totalPages,
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = stringResource(R.string.page_next),
+                    tint = if (currentPage < totalPages) colors.primary else colors.onSurface.copy(alpha = 0.25f),
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
 }

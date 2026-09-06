@@ -5,12 +5,18 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.togetherWith
@@ -47,8 +53,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
-import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.filled.Favorite
+import dev.auralis.studio.ui.components.bounceClick
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.MusicNote
@@ -129,6 +139,28 @@ private const val PAGE_PLAYER    = 1
 private const val PAGE_VISUALIZER = 2
 private const val PAGE_COUNT     = 3
 
+private fun Modifier.swipeUpToTrigger(onTrigger: () -> Unit): Modifier = this.pointerInput(Unit) {
+    var accumulatedDrag = 0f
+    detectVerticalDragGestures(
+        onDragStart = { accumulatedDrag = 0f },
+        onDragEnd = {
+            if (accumulatedDrag < -35f) {
+                onTrigger()
+            }
+            accumulatedDrag = 0f
+        },
+        onDragCancel = { accumulatedDrag = 0f },
+        onVerticalDrag = { change, dragAmount ->
+            accumulatedDrag += dragAmount
+            if (accumulatedDrag < -55f) {
+                change.consume()
+                onTrigger()
+                accumulatedDrag = 0f
+            }
+        }
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerScreen(
@@ -164,6 +196,7 @@ fun PlayerScreen(
     isSearchingLyricsCandidates: Boolean = false,
     onLoadLyricsCandidates: () -> Unit = {},
     onSelectLyricsCandidate: (dev.auralis.studio.lyrics.LrclibTrack) -> Unit = {},
+    onOpenRecommendations: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     BackHandler(onBack = onBack)
@@ -334,6 +367,7 @@ fun PlayerScreen(
                         onSetPointA         = { pointA = state.positionMs },
                         onSetPointB         = { if (pointA >= 0 && state.positionMs > pointA) pointB = state.positionMs },
                         onClearAB           = { pointA = -1; pointB = -1 },
+                        onOpenRecommendations = onOpenRecommendations,
                     )
                     PAGE_VISUALIZER -> VisualizerPage(
                         bands     = visualizerBands,
@@ -349,7 +383,10 @@ fun PlayerScreen(
             // ── Explicit view selector: no ambiguous dots/icons ──────────────
             val logicalPage = if (isLtr) pagerState.currentPage else PAGE_COUNT - 1 - pagerState.currentPage
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .swipeUpToTrigger { onOpenRecommendations() }
+                    .padding(horizontal = 20.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment     = Alignment.CenterVertically,
             ) {
@@ -367,6 +404,46 @@ fun PlayerScreen(
                         },
                         label = label,
                         modifier = Modifier.padding(horizontal = 4.dp),
+                    )
+                }
+            }
+
+            // Pull-down / swipe recommendations grabber bar (supports tap AND swipe up gesture)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .swipeUpToTrigger { onOpenRecommendations() }
+                    .clickable { onOpenRecommendations() }
+                    .padding(bottom = 2.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(colors.surfaceVariant.copy(alpha = 0.35f))
+                        .padding(horizontal = 14.dp, vertical = 4.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowUp,
+                        contentDescription = null,
+                        tint = colors.primary,
+                        modifier = Modifier.size(15.dp),
+                    )
+                    Spacer(Modifier.width(3.dp))
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = colors.primary,
+                        modifier = Modifier.size(13.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = stringResource(R.string.smart_recommendations),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurfaceVariant,
+                        fontSize = 11.sp,
                     )
                 }
             }
@@ -403,6 +480,7 @@ private fun PlayerPage(
     onSetPointA: () -> Unit,
     onSetPointB: () -> Unit,
     onClearAB: () -> Unit,
+    onOpenRecommendations: () -> Unit = {},
 ) {
     val colors = MaterialTheme.colorScheme
     val tokens = LocalAuralisTokens.current
@@ -417,42 +495,61 @@ private fun PlayerPage(
                 Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.Center,
             ) {
-                TrackArtwork(
-                    track,
-                    Modifier
-                        .fillMaxWidth(0.82f)
-                        .aspectRatio(1f),
-                )
+                AnimatedContent(
+                    targetState = track?.id to (track?.uri ?: ""),
+                    transitionSpec = {
+                        (fadeIn(tween(260)) + scaleIn(initialScale = 0.94f, animationSpec = tween(260)))
+                            .togetherWith(fadeOut(tween(180)))
+                    },
+                    label = "player_art_change",
+                ) {
+                    TrackArtwork(
+                        track,
+                        Modifier
+                            .fillMaxWidth(0.82f)
+                            .aspectRatio(1f),
+                    )
+                }
             }
         }
 
         // Track info
         item {
-            Column(
-                Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
+            AnimatedContent(
+                targetState = track?.id to (track?.uri ?: ""),
+                transitionSpec = {
+                    (fadeIn(tween(240)) + slideInVertically(animationSpec = tween(240)) { it / 4 })
+                        .togetherWith(fadeOut(tween(160)))
+                },
+                modifier = Modifier.fillMaxWidth(),
+                label = "player_title_change",
             ) {
-                Text(
-                    track?.title ?: stringResource(R.string.nothing_playing),
-                    style    = MaterialTheme.typography.headlineMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    color    = colors.onBackground,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    listOfNotNull(
-                        track?.artist?.ifBlank { null },
-                        track?.album?.ifBlank { null },
-                    ).joinToString(" · "),
-                    style   = MaterialTheme.typography.bodyLarge,
-                    color   = colors.onBackground.copy(alpha = 0.65f),
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Column(
+                    Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        track?.title ?: stringResource(R.string.nothing_playing),
+                        style    = MaterialTheme.typography.headlineMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                        color    = colors.onBackground,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        listOfNotNull(
+                            track?.artist?.ifBlank { null },
+                            track?.album?.ifBlank { null },
+                        ).joinToString(" · "),
+                        style   = MaterialTheme.typography.bodyLarge,
+                        color   = colors.onBackground.copy(alpha = 0.65f),
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
 
@@ -564,21 +661,19 @@ private fun PlayerPage(
             }
         }
 
-
-
-        // Secondary action row: Quick Audio | Queue | Audio Lab
+        // Secondary actions: Audio Effects | Queue | Smart Recommendations
         item {
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                // Quick Audio Sheet
+                // Audio effects button
                 GlassCard(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).bounceClick(),
                     onClick  = onOpenQuickAudio,
                 ) {
                     Row(
-                        Modifier.padding(12.dp),
+                        Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center,
                     ) {
@@ -586,19 +681,27 @@ private fun PlayerPage(
                             Icons.Default.Tune,
                             contentDescription = null,
                             tint     = colors.primary,
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(16.dp),
                         )
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.audio), style = MaterialTheme.typography.labelLarge, color = colors.onSurface)
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            stringResource(R.string.audio_effects),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            fontSize = 11.sp,
+                        )
                     }
                 }
                 // Queue toggle
                 GlassCard(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).bounceClick(),
                     onClick  = onQueueToggle,
                 ) {
                     Row(
-                        Modifier.padding(12.dp),
+                        Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center,
                     ) {
@@ -606,30 +709,46 @@ private fun PlayerPage(
                             Icons.AutoMirrored.Filled.QueueMusic,
                             contentDescription = null,
                             tint     = if (queueVisible) colors.primary else colors.onSurface.copy(0.7f),
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(16.dp),
                         )
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.queue), style = MaterialTheme.typography.labelLarge, color = colors.onSurface)
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            stringResource(R.string.queue),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            fontSize = 11.sp,
+                        )
                     }
                 }
-                // Audio Lab (full DSP)
+                // Recommendations 3rd Button
                 GlassCard(
-                    modifier = Modifier.weight(1f),
-                    onClick  = onOpenAudioLab,
+                    modifier = Modifier.weight(1f).bounceClick(),
+                    onClick  = onOpenRecommendations,
                 ) {
                     Row(
-                        Modifier.padding(12.dp),
+                        Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center,
                     ) {
                         Icon(
-                            Icons.Default.Audiotrack,
+                            Icons.Default.AutoAwesome,
                             contentDescription = null,
-                            tint     = colors.onSurface.copy(0.7f),
-                            modifier = Modifier.size(18.dp),
+                            tint     = colors.primary,
+                            modifier = Modifier.size(16.dp),
                         )
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.lab), style = MaterialTheme.typography.labelLarge, color = colors.onSurface)
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            stringResource(R.string.smart_recommendations),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            fontSize = 11.sp,
+                        )
                     }
                 }
             }
@@ -961,21 +1080,75 @@ private fun LyricsPage(
             ) {
                 if (lyrics.synced) {
                     item(key = "offset") {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                            Text(
-                                stringResource(R.string.lyrics_offset_value, lyrics.offsetMs),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = colors.onSurfaceVariant,
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs - 250L) }) { Text("-250ms") }
-                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs - 50L) }) { Text("-50ms") }
-                                TextButton(onClick = { onOffsetChange(0L) }) { Text(stringResource(R.string.reset)) }
-                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs + 50L) }) { Text("+50ms") }
-                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs + 250L) }) { Text("+250ms") }
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(colors.surfaceVariant.copy(alpha = 0.35f))
+                                .padding(vertical = 10.dp, horizontal = 12.dp),
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                            ) {
+                                IconButton(
+                                    onClick = { onOffsetChange(lyrics.offsetMs - 500L) },
+                                    modifier = Modifier.size(32.dp),
+                                ) {
+                                    Text("-", fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = colors.primary)
+                                }
+
+                                Spacer(Modifier.width(10.dp))
+
+                                Text(
+                                    text = stringResource(R.string.lyrics_offset_value, lyrics.offsetMs),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = colors.onSurface,
+                                )
+
+                                Spacer(Modifier.width(10.dp))
+
+                                IconButton(
+                                    onClick = { onOffsetChange(lyrics.offsetMs + 500L) },
+                                    modifier = Modifier.size(32.dp),
+                                ) {
+                                    Text("+", fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = colors.primary)
+                                }
                             }
+
+                            Spacer(Modifier.height(6.dp))
+
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs - 1000L) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                                    Text("-1s", fontSize = 11.sp)
+                                }
+                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs - 500L) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                                    Text("-500ms", fontSize = 11.sp)
+                                }
+                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs - 100L) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                                    Text("-100ms", fontSize = 11.sp)
+                                }
+                                TextButton(onClick = { onOffsetChange(0L) }, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                                    Text(stringResource(R.string.reset), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs + 100L) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                                    Text("+100ms", fontSize = 11.sp)
+                                }
+                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs + 500L) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                                    Text("+500ms", fontSize = 11.sp)
+                                }
+                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs + 1000L) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                                    Text("+1s", fontSize = 11.sp)
+                                }
+                            }
+
                             Spacer(Modifier.height(4.dp))
+
                             TextButton(
                                 onClick = {
                                     onLoadCandidates()
@@ -1098,86 +1271,112 @@ private fun VisualizerPage(
     val tokens = LocalAuralisTokens.current
     val theme = LocalThemeSettings.current
     val semantic = LocalLyruneSemanticColors.current
-    val displayedBands = rememberInterpolatedSpectrum(bands)
     val lyricWindow = (lyricsState as? LyricsUiState.Found)?.lyrics?.takeIf { it.synced }?.windowAt(positionMs)
-    var discRotation by rememberSaveable { mutableFloatStateOf(0f) }
 
-    // One elapsed-time clock, active only while Media3 reports actual playback.
-    LaunchedEffect(isPlaying) {
-        if (!isPlaying) return@LaunchedEffect
-        var previousFrame = 0L
-        while (isActive) {
-            withFrameNanos { now ->
-                if (previousFrame != 0L) {
-                    val deltaSeconds = ((now - previousFrame) / 1_000_000_000f).coerceIn(0f, 0.1f)
-                    discRotation = (discRotation + deltaSeconds * 48f) % 360f // calm 8 RPM visual rotation
-                }
-                previousFrame = now
-            }
-        }
+    // Butter-smooth vinyl rotation running directly on GPU RenderNode without recomposing the page
+    val infiniteTransition = rememberInfiniteTransition(label = "vinyl_disc")
+    val discRotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 11000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "rotation",
+    )
+
+    // Reactive bass energy for glowing pulse aura
+    val bassEnergy = remember(bands) {
+        if (bands.isEmpty()) 0f
+        else (bands.take(5).average().toFloat() * 1.5f).coerceIn(0f, 1f)
     }
+
+    val spectrumRenderer = remember { SpectrumRenderer(44) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(horizontal = 20.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceEvenly,
+        verticalArrangement = Arrangement.SpaceBetween,
     ) {
-        // Rotating record bound to actual playback state.
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        // ── Rotating Vinyl Record with Reactive Audio Aura ────────────────────
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(top = 4.dp),
+        ) {
             Box(contentAlignment = Alignment.Center) {
+                // Reactive Ambient Bass Glow Halo
                 Box(
                     modifier = Modifier
-                        .size(202.dp)
+                        .size(210.dp)
+                        .graphicsLayer {
+                            val pulse = if (isPlaying) 1f + bassEnergy * 0.16f else 1f
+                            scaleX = pulse
+                            scaleY = pulse
+                            alpha = if (isPlaying) 0.45f + bassEnergy * 0.45f else 0.15f
+                        }
                         .clip(CircleShape)
                         .background(
                             Brush.radialGradient(
                                 listOf(
-                                    colors.primary.copy(alpha = if (isPlaying) 0.35f else 0.12f),
-                                    colors.secondary.copy(alpha = if (isPlaying) 0.18f else 0.05f),
+                                    colors.primary.copy(alpha = 0.65f),
+                                    colors.secondary.copy(alpha = 0.35f),
                                     Color.Transparent,
                                 ),
                             ),
                         ),
                 )
+
+                // Vinyl Disc Body
                 Box(
                     Modifier
-                        .size(172.dp)
+                        .size(184.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF080910)),
+                        .background(Color(0xFF07080E))
+                        .border(2.dp, colors.outline.copy(alpha = 0.2f), CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
+                    // Concentric Vinyl Micro-Groove Texture
                     androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
-                        repeat(6) { ring ->
+                        repeat(10) { ring ->
                             drawCircle(
-                                color = Color.White.copy(alpha = 0.025f + ring * 0.006f),
-                                radius = size.minDimension * (0.49f - ring * 0.045f),
+                                color = Color.White.copy(alpha = 0.025f + ring * 0.005f),
+                                radius = size.minDimension * (0.48f - ring * 0.034f),
                                 style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1f),
                             )
                         }
                     }
-                    Crossfade(targetState = track, animationSpec = tween(420), label = "disc_artwork") { discTrack ->
-                        TrackArtwork(
-                            discTrack,
-                            Modifier
-                                .size(148.dp)
-                                .graphicsLayer { rotationZ = discRotation }
-                                .clip(CircleShape),
-                        )
-                    }
+
+                    // Album Artwork Label Spinning on Vinyl Disc
+                    TrackArtwork(
+                        track,
+                        Modifier
+                            .size(126.dp)
+                            .graphicsLayer { rotationZ = if (isPlaying) discRotation else 0f }
+                            .clip(CircleShape),
+                    )
+
+                    // Spindle Hole with Metallic Inner Ring
                     Box(
                         Modifier
-                            .size(18.dp)
+                            .size(24.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF090A12))
-                            .border(2.dp, colors.primary.copy(alpha = 0.72f), CircleShape),
-                    )
-                    Box(Modifier.size(4.dp).clip(CircleShape).background(colors.onSurface.copy(alpha = 0.8f)))
+                            .background(Color(0xFF0D0E18))
+                            .border(2.5.dp, colors.primary.copy(alpha = 0.85f), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(
+                            Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.8f))
+                        )
+                    }
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(14.dp))
 
             Text(
                 track?.title ?: stringResource(R.string.visualizer),
@@ -1187,43 +1386,59 @@ private fun VisualizerPage(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            Spacer(Modifier.height(2.dp))
             Text(
                 stringResource(if (isPlaying) R.string.live_post_dsp_spectrum else R.string.paused_spectrum_settling),
                 style = MaterialTheme.typography.bodySmall,
                 color = if (isPlaying) colors.primary else colors.onSurfaceVariant,
             )
 
+            // Frosted Glass Synced Lyrics Bubble
             lyricWindow?.current?.text?.takeIf(String::isNotBlank)?.let { currentLine ->
-                Spacer(Modifier.height(10.dp))
-                AnimatedContent(currentLine, label = "visualizer_lyric") { line ->
-                    Text(
-                        line,
-                        style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content),
-                        color = colors.primary,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        modifier = Modifier.padding(horizontal = 18.dp),
-                    )
-                }
-                lyricWindow.next?.text?.takeIf(String::isNotBlank)?.let { nextLine ->
-                    Text(
-                        nextLine,
-                        style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Content),
-                        color = colors.onSurfaceVariant.copy(alpha = 0.58f),
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                    )
+                Spacer(Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.92f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(colors.surfaceVariant.copy(alpha = 0.5f))
+                        .border(1.dp, colors.primary.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        AnimatedContent(currentLine, label = "visualizer_lyric") { line ->
+                            Text(
+                                line,
+                                style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content),
+                                color = colors.primary,
+                                textAlign = TextAlign.Center,
+                                maxLines = 2,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                        lyricWindow.next?.text?.takeIf(String::isNotBlank)?.let { nextLine ->
+                            Text(
+                                nextLine,
+                                style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Content),
+                                color = colors.onSurfaceVariant.copy(alpha = 0.65f),
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                            )
+                        }
+                    }
                 }
             }
         }
 
+        // ── 44-Band Studio Spectrum Visualizer with Falling Peak Caps ─────────
         val spectrumShape = RoundedCornerShape(tokens.cardCorner.dp)
         val spectrumContainer = when (theme.style) {
             dev.auralis.studio.core.model.ThemeStyle.MINIMAL -> Color.Transparent
-            dev.auralis.studio.core.model.ThemeStyle.NEON -> colors.surface.copy(alpha = 0.42f)
-            dev.auralis.studio.core.model.ThemeStyle.CLASSIC -> colors.surface
+            dev.auralis.studio.core.model.ThemeStyle.NEON -> Color(0xFF090A16).copy(alpha = 0.75f)
+            dev.auralis.studio.core.model.ThemeStyle.MATERIAL -> colors.surface
             else -> colors.surface.copy(alpha = tokens.surfaceAlpha)
         }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1237,114 +1452,142 @@ private fun VisualizerPage(
                         spectrumShape,
                     ) else Modifier,
                 )
-                .padding(16.dp),
+                .padding(14.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             androidx.compose.foundation.Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(160.dp),
+                    .height(145.dp),
             ) {
-                val barCount = if (displayedBands.isEmpty()) 32 else displayedBands.size
-                val barWidth = (size.width / (barCount * 1.4f)).coerceAtLeast(4f)
-                val gap = barWidth * 0.4f
-                val totalWidth = barCount * (barWidth + gap)
+                spectrumRenderer.update(bands, System.nanoTime())
+                val count = spectrumRenderer.count
+                val barWidth = (size.width / (count * 1.35f)).coerceAtLeast(4f)
+                val gap = barWidth * 0.35f
+                val totalWidth = count * (barWidth + gap)
                 val startX = (size.width - totalWidth) / 2f
-                val maxHeight = size.height - 12f
+                val maxHeight = size.height - 14f
 
-                for (i in 0 until barCount) {
+                val gradientColors = when (theme.style) {
+                    dev.auralis.studio.core.model.ThemeStyle.MATERIAL -> listOf(colors.primary, colors.primary.copy(alpha = 0.65f))
+                    dev.auralis.studio.core.model.ThemeStyle.NEON -> listOf(Color(0xFF38BDF8), colors.secondary, colors.primary)
+                    dev.auralis.studio.core.model.ThemeStyle.RETRO_SYNTH -> listOf(Color(0xFFEC4899), Color(0xFF06B6D4), colors.primary)
+                    dev.auralis.studio.core.model.ThemeStyle.SKY_BREEZE -> listOf(Color(0xFF38BDF8), Color(0xFF06B6D4), colors.primary)
+                    dev.auralis.studio.core.model.ThemeStyle.DYNAMIC_ART -> listOf(semantic.artworkAccent, colors.primary, semantic.visualizerBass.copy(alpha = 0.75f))
+                    else -> listOf(semantic.visualizerTreble, colors.primary, semantic.visualizerBass.copy(alpha = 0.75f))
+                }
+
+                for (i in 0 until count) {
                     val x = startX + i * (barWidth + gap)
-                    val rawMag = displayedBands.getOrElse(i) { 0f }.coerceIn(0f, 1f)
+                    val mag = spectrumRenderer.currentMagnitudes[i]
+                    val peak = spectrumRenderer.peakCaps[i]
 
-                    val barHeight = if (rawMag < 0.008f) 0f else (rawMag * maxHeight).coerceAtLeast(2.5f)
+                    val barHeight = if (mag < 0.005f) 0f else (mag * maxHeight).coerceAtLeast(3f)
                     val y = size.height - barHeight
 
+                    // Subtle neon glow under active bars
                     if (barHeight > 0f && tokens.accentGlowAlpha > 0f) {
                         drawRoundRect(
-                            color = colors.primary.copy(alpha = tokens.accentGlowAlpha * rawMag),
-                            topLeft = androidx.compose.ui.geometry.Offset(x - barWidth * 0.45f, y - 3f),
-                            size = androidx.compose.ui.geometry.Size(barWidth * 1.9f, barHeight + 6f),
+                            color = colors.primary.copy(alpha = (tokens.accentGlowAlpha * mag * 0.45f).coerceIn(0f, 0.45f)),
+                            topLeft = androidx.compose.ui.geometry.Offset(x - barWidth * 0.3f, y - 2f),
+                            size = androidx.compose.ui.geometry.Size(barWidth * 1.6f, barHeight + 4f),
                             cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth, barWidth),
                         )
                     }
 
-                    if (barHeight > 0f) drawRoundRect(
-                        brush = Brush.verticalGradient(
-                            when (theme.style) {
-                                dev.auralis.studio.core.model.ThemeStyle.CLASSIC -> listOf(colors.primary, colors.primary.copy(alpha = 0.62f))
-                                dev.auralis.studio.core.model.ThemeStyle.NEON -> listOf(colors.secondary, colors.primary, Color.White.copy(alpha = 0.55f))
-                                dev.auralis.studio.core.model.ThemeStyle.DYNAMIC_ART -> listOf(semantic.artworkAccent, colors.primary, semantic.visualizerBass.copy(alpha = 0.72f))
-                                else -> listOf(semantic.visualizerTreble, colors.primary, semantic.visualizerBass.copy(alpha = 0.72f))
-                            },
-                            startY = y,
-                            endY = size.height,
-                        ),
-                        topLeft = androidx.compose.ui.geometry.Offset(x, y),
-                        size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2, barWidth / 2),
-                    )
+                    // Main Spectrum Frequency Bar
+                    if (barHeight > 0f) {
+                        drawRoundRect(
+                            brush = Brush.verticalGradient(
+                                colors = gradientColors,
+                                startY = y,
+                                endY = size.height,
+                            ),
+                            topLeft = androidx.compose.ui.geometry.Offset(x, y),
+                            size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f, barWidth / 2f),
+                        )
+                    }
+
+                    // Floating Peak Cap Marker (Hi-Fi studio equipment feel)
+                    if (peak > 0.02f) {
+                        val peakY = (size.height - (peak * maxHeight) - 3f).coerceAtLeast(0f)
+                        drawRoundRect(
+                            color = Color.White.copy(alpha = 0.92f),
+                            topLeft = androidx.compose.ui.geometry.Offset(x, peakY),
+                            size = androidx.compose.ui.geometry.Size(barWidth, 2.5f),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.5f, 1.5f),
+                        )
+                    }
                 }
             }
 
+            // Smooth Audio Waveform Line
             if (waveform.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
                 androidx.compose.foundation.Canvas(
-                    modifier = Modifier.fillMaxWidth().height(34.dp),
+                    modifier = Modifier.fillMaxWidth().height(28.dp),
                 ) {
                     val path = androidx.compose.ui.graphics.Path()
                     waveform.forEachIndexed { index, sample ->
                         val x = index * size.width / (waveform.size - 1).coerceAtLeast(1)
-                        val y = size.height * (0.5f - sample.coerceIn(-1f, 1f) * 0.42f)
+                        val y = size.height * (0.5f - sample.coerceIn(-1f, 1f) * 0.44f)
                         if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
                     }
-                    drawPath(path, color = colors.primary.copy(alpha = 0.75f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f))
+                    drawPath(
+                        path = path,
+                        color = colors.primary.copy(alpha = 0.85f),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.2f),
+                    )
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
 
-            // Frequency spectrum labels
+            // Professional Frequency Spectrum Labels
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text(stringResource(R.string.sub), style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
-                Text(stringResource(R.string.bass), style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
-                Text(stringResource(R.string.mid), style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
-                Text(stringResource(R.string.treble), style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
-                Text(stringResource(R.string.air), style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
+                Text(stringResource(R.string.sub), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = colors.onSurfaceVariant)
+                Text(stringResource(R.string.bass), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = colors.onSurfaceVariant)
+                Text(stringResource(R.string.mid), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = colors.onSurfaceVariant)
+                Text(stringResource(R.string.treble), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = colors.onSurfaceVariant)
+                Text(stringResource(R.string.air), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = colors.onSurfaceVariant)
             }
         }
     }
 }
 
 /**
- * A single frame-clock interpolator follows real FFT targets. It never generates
- * spectrum energy: zero input converges to zero and no oscillator/random source exists.
+ * 120Hz Hardware-accelerated spectrum renderer with realistic physics
+ * and peak-hold gravity falloff for studio-grade audio visualization.
  */
-@Composable
-private fun rememberInterpolatedSpectrum(target: FloatArray): FloatArray {
-    val latestTarget by rememberUpdatedState(target)
-    val rendered = remember(target.size) { FloatArray(target.size) }
-    var frameVersion by remember(target.size) { mutableIntStateOf(0) }
-    LaunchedEffect(target.size) {
-        var previousFrame = 0L
-        while (isActive) {
-            withFrameNanos { now ->
-                if (previousFrame != 0L) {
-                    val delta = ((now - previousFrame) / 1_000_000_000f).coerceIn(0.001f, 0.05f)
-                    for (index in rendered.indices) {
-                        val destination = latestTarget.getOrElse(index) { 0f }.coerceIn(0f, 1f)
-                        val timeConstant = if (destination > rendered[index]) 0.050f else 0.165f
-                        val coefficient = 1f - exp(-delta / timeConstant)
-                        rendered[index] += (destination - rendered[index]) * coefficient
-                        if (rendered[index] < 0.001f && destination == 0f) rendered[index] = 0f
-                    }
-                    frameVersion++
-                }
-                previousFrame = now
+private class SpectrumRenderer(val count: Int = 44) {
+    val currentMagnitudes = FloatArray(count)
+    val peakCaps = FloatArray(count)
+    val peakVelocities = FloatArray(count)
+    var lastNanos: Long = 0L
+
+    fun update(targets: FloatArray, nowNanos: Long) {
+        val deltaSec = if (lastNanos == 0L) 0.016f else ((nowNanos - lastNanos) / 1_000_000_000f).coerceIn(0.001f, 0.05f)
+        lastNanos = nowNanos
+        val gravity = 1.6f * deltaSec
+
+        for (i in 0 until count) {
+            val target = targets.getOrElse(i) { 0f }.coerceIn(0f, 1f)
+            val timeConstant = if (target > currentMagnitudes[i]) 0.035f else 0.140f
+            val factor = 1f - kotlin.math.exp(-deltaSec / timeConstant)
+            currentMagnitudes[i] += (target - currentMagnitudes[i]) * factor
+
+            // Peak cap physics (gravity drop)
+            if (currentMagnitudes[i] >= peakCaps[i]) {
+                peakCaps[i] = currentMagnitudes[i]
+                peakVelocities[i] = 0f
+            } else {
+                peakVelocities[i] += gravity
+                peakCaps[i] = (peakCaps[i] - peakVelocities[i]).coerceAtLeast(currentMagnitudes[i])
             }
         }
     }
-    frameVersion // Snapshot read invalidates the Canvas once per display frame.
-    return rendered
 }

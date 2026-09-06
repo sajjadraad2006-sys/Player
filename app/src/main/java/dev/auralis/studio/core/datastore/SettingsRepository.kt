@@ -19,6 +19,8 @@ import dev.auralis.studio.core.model.ThemeStyle
 import dev.auralis.studio.core.model.ThemeModeResolver
 import dev.auralis.studio.core.model.CornerStyle
 import dev.auralis.studio.core.model.AnimationStyle
+import dev.auralis.studio.core.model.HomeLayoutStyle
+import dev.auralis.studio.core.model.HomeLayoutSettings
 import dev.auralis.studio.core.model.VisualQuality
 import dev.auralis.studio.online.DownloadQuality
 import kotlinx.coroutines.flow.Flow
@@ -49,6 +51,7 @@ class SettingsRepository(private val context: Context) {
         val theme = stringPreferencesKey("theme")
         val appearance = stringPreferencesKey("appearance")
         val accent = longPreferencesKey("accent")
+        val secondaryAccent = longPreferencesKey("secondary_accent")
         val glassAlpha = floatPreferencesKey("glass_alpha")
         val radius = floatPreferencesKey("radius")
         val animation = floatPreferencesKey("animation")
@@ -67,6 +70,43 @@ class SettingsRepository(private val context: Context) {
         val recentSearches = stringPreferencesKey("recent_searches")
         val downloadQuality = stringPreferencesKey("download_quality")
         val youtubeApiKey = stringPreferencesKey("youtube_api_key")
+        val homeLayoutStyle = stringPreferencesKey("home_layout_style")
+        val homeShowCategories = booleanPreferencesKey("home_show_categories")
+        val homeShowPlaylists = booleanPreferencesKey("home_show_playlists")
+        val homeShowRecentlyPlayed = booleanPreferencesKey("home_show_recently_played")
+        val homeShowRecentTracks = booleanPreferencesKey("home_show_recent_tracks")
+        val homeShowFloatingShuffle = booleanPreferencesKey("home_show_floating_shuffle")
+        val homeShowFilterChips = booleanPreferencesKey("home_show_filter_chips")
+        val homeShowRecommendations = booleanPreferencesKey("home_show_recommendations")
+        val homeShowGreetingHeader = booleanPreferencesKey("home_show_greeting_header")
+    }
+
+    val homeLayoutSettings: Flow<HomeLayoutSettings> = context.settingsDataStore.data.map { p ->
+        HomeLayoutSettings(
+            style = enumValue(p[Keys.homeLayoutStyle], HomeLayoutStyle.GRID_CARDS),
+            showQuickCategories = p[Keys.homeShowCategories] ?: true,
+            showPlaylists = p[Keys.homeShowPlaylists] ?: true,
+            showRecentlyPlayed = p[Keys.homeShowRecentlyPlayed] ?: true,
+            showRecentTracks = p[Keys.homeShowRecentTracks] ?: true,
+            showFloatingShuffle = p[Keys.homeShowFloatingShuffle] ?: true,
+            showFilterChips = p[Keys.homeShowFilterChips] ?: true,
+            showRecommendations = p[Keys.homeShowRecommendations] ?: true,
+            showGreetingHeader = p[Keys.homeShowGreetingHeader] ?: true,
+        )
+    }
+
+    suspend fun setHomeLayoutSettings(settings: HomeLayoutSettings) {
+        context.settingsDataStore.edit { p ->
+            p[Keys.homeLayoutStyle] = settings.style.name
+            p[Keys.homeShowCategories] = settings.showQuickCategories
+            p[Keys.homeShowPlaylists] = settings.showPlaylists
+            p[Keys.homeShowRecentlyPlayed] = settings.showRecentlyPlayed
+            p[Keys.homeShowRecentTracks] = settings.showRecentTracks
+            p[Keys.homeShowFloatingShuffle] = settings.showFloatingShuffle
+            p[Keys.homeShowFilterChips] = settings.showFilterChips
+            p[Keys.homeShowRecommendations] = settings.showRecommendations
+            p[Keys.homeShowGreetingHeader] = settings.showGreetingHeader
+        }
     }
 
     val recentSearches: Flow<List<String>> = context.settingsDataStore.data.map { preferences ->
@@ -158,6 +198,7 @@ class SettingsRepository(private val context: Context) {
             p[Keys.theme] = settings.style.name
             p[Keys.appearance] = settings.appearance.name
             p[Keys.accent] = settings.accentArgb
+            p[Keys.secondaryAccent] = settings.secondaryArgb
             p[Keys.glassAlpha] = settings.glassAlpha
             p[Keys.radius] = settings.cornerRadius
             p[Keys.animation] = settings.animationScale
@@ -223,6 +264,7 @@ class SettingsRepository(private val context: Context) {
         style = ThemeModeResolver.migrateLegacyStyle(this[Keys.theme]),
         appearance = enumValue(this[Keys.appearance], AppearanceMode.SYSTEM),
         accentArgb = this[Keys.accent] ?: 0xFFA78BFA,
+        secondaryArgb = this[Keys.secondaryAccent] ?: 0xFF38BDF8,
         glassAlpha = this[Keys.glassAlpha] ?: 0.16f,
         cornerRadius = this[Keys.radius] ?: 24f,
         animationScale = this[Keys.animation] ?: 1f,

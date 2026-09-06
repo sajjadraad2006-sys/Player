@@ -249,28 +249,28 @@ internal fun buildTokens(settings: ThemeSettings, dark: Boolean): AuralisTokens 
             artworkCorner          = 20f,
         )
         ThemeStyle.NEON -> AuralisTokens(
-            surfaceAlpha           = 0.82f,
+            surfaceAlpha           = 0.90f,
             backgroundUsesArtwork  = false,
             glassBlur              = false,
-            glassContrastScrimAlpha = 0.6f,
-            cardBorderWidth        = 1.8.dp,
-            cardBorderAlpha        = 0.75f,
+            glassContrastScrimAlpha = 0.70f,
+            cardBorderWidth        = 2.dp,
+            cardBorderAlpha        = 0.95f,
             cardElevation          = 0.dp,
-            cardCorner             = corner,
-            buttonCorner           = corner * 0.7f,
-            chipCorner             = 32f,
-            navBarContainerAlpha   = 0.88f,
-            miniPlayerElevation    = 2.dp,
-            miniPlayerAlpha        = 0.88f,
-            springStiffness        = 450f,
-            springDamping          = 0.75f,
-            accentGlowAlpha        = 0.50f,
+            cardCorner             = corner.coerceAtMost(16f),
+            buttonCorner           = 12f,
+            chipCorner             = 16f,
+            navBarContainerAlpha   = 0.95f,
+            miniPlayerElevation    = 4.dp,
+            miniPlayerAlpha        = 0.95f,
+            springStiffness        = 500f,
+            springDamping          = 0.70f,
+            accentGlowAlpha        = 0.85f,
             gradientOverlay        = true,
             surfaceTreatment       = SurfaceTreatment.NEON_EDGE,
             navigationFloating     = true,
-            navigationCorner       = 12f,
+            navigationCorner       = 14f,
             navigationElevation    = 0.dp,
-            artworkCorner          = 12f,
+            artworkCorner          = 14f,
         )
         ThemeStyle.DYNAMIC_ART -> AuralisTokens(
             surfaceAlpha           = 0.62f,
@@ -296,30 +296,6 @@ internal fun buildTokens(settings: ThemeSettings, dark: Boolean): AuralisTokens 
             navigationElevation    = 2.dp,
             artworkCorner          = 30f,
         )
-        ThemeStyle.CLASSIC -> AuralisTokens(
-            surfaceAlpha           = 0.98f,
-            backgroundUsesArtwork  = false,
-            glassBlur              = false,
-            glassContrastScrimAlpha = 0f,
-            cardBorderWidth        = 1.dp,
-            cardBorderAlpha        = 0.42f,
-            cardElevation          = 2.dp,
-            cardCorner             = 10f,
-            buttonCorner           = 6f,
-            chipCorner             = 6f,
-            navBarContainerAlpha   = 1.0f,
-            miniPlayerElevation    = 6.dp,
-            miniPlayerAlpha        = 1.0f,
-            springStiffness        = 600f,
-            springDamping          = 0.90f,
-            accentGlowAlpha        = 0f,
-            gradientOverlay        = false,
-            surfaceTreatment       = SurfaceTreatment.CLASSIC_OUTLINE,
-            navigationFloating     = false,
-            navigationCorner       = 2f,
-            navigationElevation    = 5.dp,
-            artworkCorner          = 6f,
-        )
         ThemeStyle.AURORA -> AuralisTokens(
             surfaceAlpha           = 0.72f,
             backgroundUsesArtwork  = false,
@@ -336,7 +312,7 @@ internal fun buildTokens(settings: ThemeSettings, dark: Boolean): AuralisTokens 
             miniPlayerAlpha        = 0.80f,
             springStiffness        = 400f,
             springDamping          = 0.82f,
-            accentGlowAlpha        = 0.25f,
+            accentGlowAlpha        = 0.35f,
             gradientOverlay        = true,
             surfaceTreatment       = SurfaceTreatment.AURORA_FROST,
             navigationFloating     = true,
@@ -344,53 +320,53 @@ internal fun buildTokens(settings: ThemeSettings, dark: Boolean): AuralisTokens 
             navigationElevation    = 2.dp,
             artworkCorner          = 20f,
         )
-        ThemeStyle.RETRO_VINYL -> AuralisTokens(
-            surfaceAlpha           = 0.94f,
+        ThemeStyle.SKY_BREEZE -> AuralisTokens(
+            surfaceAlpha           = if (dark) 0.80f else 0.92f,
+            backgroundUsesArtwork  = true,
+            glassBlur              = settings.visualQuality != dev.auralis.studio.core.model.VisualQuality.REDUCED,
+            glassContrastScrimAlpha = if (dark) 0.50f else 0.20f,
+            cardBorderWidth        = 1.dp,
+            cardBorderAlpha        = 0.35f,
+            cardElevation          = 3.dp,
+            cardCorner             = 22f,
+            buttonCorner           = 18f,
+            chipCorner             = 20f,
+            navBarContainerAlpha   = 0.92f,
+            miniPlayerElevation    = 4.dp,
+            miniPlayerAlpha        = 0.94f,
+            springStiffness        = 400f,
+            springDamping          = 0.82f,
+            accentGlowAlpha        = 0.25f,
+            gradientOverlay        = true,
+            surfaceTreatment       = SurfaceTreatment.SKY_BREEZE,
+            navigationFloating     = true,
+            navigationCorner       = 24f,
+            navigationElevation    = 3.dp,
+            artworkCorner          = 22f,
+        )
+        ThemeStyle.RETRO_SYNTH -> AuralisTokens(
+            surfaceAlpha           = 0.92f,
             backgroundUsesArtwork  = false,
             glassBlur              = false,
             glassContrastScrimAlpha = 0f,
-            cardBorderWidth        = 1.5.dp,
-            cardBorderAlpha        = 0.45f,
-            cardElevation          = 3.dp,
-            cardCorner             = 12f,
+            cardBorderWidth        = 1.8.dp,
+            cardBorderAlpha        = 0.70f,
+            cardElevation          = 2.dp,
+            cardCorner             = 10f,
             buttonCorner           = 8f,
             chipCorner             = 8f,
             navBarContainerAlpha   = 0.95f,
             miniPlayerElevation    = 4.dp,
             miniPlayerAlpha        = 0.95f,
             springStiffness        = 500f,
-            springDamping          = 0.88f,
-            accentGlowAlpha        = 0.10f,
-            gradientOverlay        = false,
+            springDamping          = 0.85f,
+            accentGlowAlpha        = 0.40f,
+            gradientOverlay        = true,
             surfaceTreatment       = SurfaceTreatment.RETRO_ANALOG,
             navigationFloating     = false,
             navigationCorner       = 0f,
             navigationElevation    = 3.dp,
             artworkCorner          = 8f,
-        )
-        ThemeStyle.MIDNIGHT_PURPLE -> AuralisTokens(
-            surfaceAlpha           = 0.70f,
-            backgroundUsesArtwork  = false,
-            glassBlur              = true,
-            glassContrastScrimAlpha = 0.55f,
-            cardBorderWidth        = 1.2.dp,
-            cardBorderAlpha        = 0.42f,
-            cardElevation          = 0.dp,
-            cardCorner             = corner,
-            buttonCorner           = corner * 0.7f,
-            chipCorner             = 28f,
-            navBarContainerAlpha   = 0.78f,
-            miniPlayerElevation    = 3.dp,
-            miniPlayerAlpha        = 0.78f,
-            springStiffness        = 400f,
-            springDamping          = 0.80f,
-            accentGlowAlpha        = 0.30f,
-            gradientOverlay        = true,
-            surfaceTreatment       = SurfaceTreatment.NEBULA_GLOW,
-            navigationFloating     = true,
-            navigationCorner       = 26f,
-            navigationElevation    = 2.dp,
-            artworkCorner          = 24f,
         )
     }
 }
@@ -507,7 +483,7 @@ fun AuralisBackground(modifier: Modifier = Modifier, content: @Composable () -> 
     val brush = if (ThemeModeResolver.isAmoled(settings.appearance)) {
         Brush.linearGradient(listOf(Color.Black, Color.Black))
     } else when (settings.style) {
-        ThemeStyle.GLASS, ThemeStyle.DYNAMIC_ART, ThemeStyle.AURORA, ThemeStyle.MIDNIGHT_PURPLE -> Brush.verticalGradient(
+        ThemeStyle.GLASS, ThemeStyle.DYNAMIC_ART, ThemeStyle.AURORA -> Brush.verticalGradient(
             colors = listOf(
                 lerp(base, accent, 0.16f),
                 lerp(base, secondary, 0.08f),
@@ -515,26 +491,30 @@ fun AuralisBackground(modifier: Modifier = Modifier, content: @Composable () -> 
                 lerp(base, accent, 0.06f),
             ),
         )
-        ThemeStyle.RETRO_VINYL -> Brush.verticalGradient(
+        ThemeStyle.SKY_BREEZE -> Brush.verticalGradient(
             colors = listOf(
-                lerp(base, accent, 0.12f),
+                lerp(base, Color(0xFF38BDF8), 0.22f),
+                lerp(base, Color(0xFF0284C7), 0.10f),
                 base,
-                lerp(base, secondary, 0.08f),
+            ),
+        )
+        ThemeStyle.RETRO_SYNTH -> Brush.verticalGradient(
+            colors = listOf(
+                lerp(base, Color(0xFFEC4899), 0.16f),
+                base,
+                lerp(base, Color(0xFF06B6D4), 0.14f),
             ),
         )
         ThemeStyle.NEON -> Brush.verticalGradient(
             colors = listOf(
-                base,
-                lerp(base, accent, 0.12f),
-                base,
-                lerp(base, secondary, 0.07f),
-                base,
+                Color(0xFF030308),
+                lerp(Color(0xFF030308), accent, 0.14f),
+                Color(0xFF030308),
+                lerp(Color(0xFF030308), secondary, 0.08f),
+                Color(0xFF030308),
             ),
         )
         ThemeStyle.MINIMAL, ThemeStyle.MATERIAL -> Brush.linearGradient(listOf(base, base))
-        ThemeStyle.CLASSIC -> Brush.verticalGradient(
-            listOf(base, lerp(base, accent, 0.04f), base),
-        )
     }
     Box(modifier.background(brush)) { content() }
 }

@@ -81,24 +81,36 @@ fun MiniPlayer(
                     .padding(start = 10.dp, top = 8.dp, bottom = 8.dp, end = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TrackArtwork(track, Modifier.size(46.dp))
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        track.title,
-                        maxLines   = 1,
-                        overflow   = TextOverflow.Ellipsis,
-                        style      = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color      = colors.onSurface,
-                    )
-                    Text(
-                        track.artist.ifBlank { track.album }.ifBlank { stringResource(R.string.unknown_artist) },
-                        maxLines   = 1,
-                        overflow   = TextOverflow.Ellipsis,
-                        style      = MaterialTheme.typography.bodySmall,
-                        color      = colors.onSurfaceVariant,
-                    )
+                AnimatedContent(
+                    targetState = track.id to track.uri,
+                    transitionSpec = {
+                        (fadeIn(tween(220)) + scaleIn(initialScale = 0.96f, animationSpec = tween(220)))
+                            .togetherWith(fadeOut(tween(160)))
+                    },
+                    modifier = Modifier.weight(1f),
+                    label = "mini_track_info",
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TrackArtwork(track, Modifier.size(46.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                track.title,
+                                maxLines   = 1,
+                                overflow   = TextOverflow.Ellipsis,
+                                style      = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color      = colors.onSurface,
+                            )
+                            Text(
+                                track.artist.ifBlank { track.album }.ifBlank { stringResource(R.string.unknown_artist) },
+                                maxLines   = 1,
+                                overflow   = TextOverflow.Ellipsis,
+                                style      = MaterialTheme.typography.bodySmall,
+                                color      = colors.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
                 // Previous button
                 IconButton(onClick = onPrevious, modifier = Modifier.size(36.dp)) {

@@ -312,21 +312,37 @@ class LrclibClient {
     ): LrclibTrack? {
         val scored = scoreCandidates(candidates, title, artist, album, durationMs)
         val best = scored.firstOrNull() ?: return null
-        val threshold = if (artist.isBlank() || durationMs <= 0) 0.45 else 0.38
+        val threshold = if (artist.isBlank() || durationMs <= 0) 0.35 else 0.28
         if (best.score < threshold) {
             return null
         }
         return best.track
     }
 
-    /** Trigram-based string similarity in [0,1]. */
+    /** Trigram and token-based string similarity in [0,1], normalized for Arabic and Latin. */
     internal fun similarity(a: String, b: String): Double {
-        if (a == b) return 1.0
-        if (a.length < 3 || b.length < 3) return if (a == b) 1.0 else 0.0
-        val trigramsA = trigrams(a)
-        val trigramsB = trigrams(b)
-        val intersection = (trigramsA intersect trigramsB).size
-        return 2.0 * intersection / (trigramsA.size + trigramsB.size)
+        val normA = dev.auralis.studio.online.SearchNormalization.normalize(a)
+        val normB = dev.auralis.studio.online.SearchNormalization.normalize(b)
+        if (normA == normB) return 1.0
+        if (normA.isBlank() || normB.isBlank()) return 0.0
+        if (normA.contains(normB) || normB.contains(normA)) return 0.90
+
+        val wordsA = normA.split(" ").filter { it.isNotBlank() }.toSet()
+        val wordsB = normB.split(" ").filter { it.isNotBlank() }.toSet()
+        val wordOverlap = if (wordsA.isNotEmpty() && wordsB.isNotEmpty()) {
+            val intersection = (wordsA intersect wordsB).size
+            val union = (wordsA union wordsB).size
+            if (union > 0) intersection.toDouble() / union.toDouble() else 0.0
+        } else 0.0
+
+        val trigramsA = trigrams(normA)
+        val trigramsB = trigrams(normB)
+        val trigramSim = if (trigramsA.isNotEmpty() && trigramsB.isNotEmpty()) {
+            val intersection = (trigramsA intersect trigramsB).size
+            2.0 * intersection / (trigramsA.size + trigramsB.size)
+        } else 0.0
+
+        return maxOf(wordOverlap, trigramSim)
     }
 
     internal fun versionMismatchPenalty(queryTitle: String, candidateTitle: String): Double {
@@ -368,7 +384,7 @@ class LrclibClient {
         (0..s.length - 3).map { s.substring(it, it + 3) }.toSet()
 
     private suspend fun throttle() {
-        val waitMs = 650L - (System.currentTimeMillis() - lastRequestAtMs)
+        val waitMs = 250L - (System.currentTimeMillis() - lastRequestAtMs)
         if (waitMs > 0) delay(waitMs)
         lastRequestAtMs = System.currentTimeMillis()
     }

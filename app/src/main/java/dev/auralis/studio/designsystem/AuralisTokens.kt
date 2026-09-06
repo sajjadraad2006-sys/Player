@@ -67,6 +67,7 @@ enum class SurfaceTreatment {
     AURORA_FROST,
     RETRO_ANALOG,
     NEBULA_GLOW,
+    SKY_BREEZE,
 }
 
 /** Semantic interactive colours shared by every control in the app. */
@@ -123,7 +124,9 @@ object AccentPalette {
     val GOLD    = Color(0xFFF59E0B)    // Rich gold
     val CORAL   = Color(0xFFFB7185)    // Soft coral
     val LIME    = Color(0xFF84CC16)    // Fresh lime
+    val RED     = Color(0xFFEF4444)    // Radiant red
+    val CRIMSON = Color(0xFFDC2626)    // Deep crimson
 
-    val PRESETS = listOf(MINT, PURPLE, PINK, BLUE, ORANGE, TEAL, GOLD, CORAL, LIME)
+    val PRESETS = listOf(RED, MINT, PURPLE, PINK, BLUE, ORANGE, TEAL, GOLD, CORAL, LIME)
 }
 

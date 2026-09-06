@@ -16,6 +16,7 @@ import dev.auralis.studio.core.database.DownloadStatus
 import dev.auralis.studio.core.database.PlaylistEntity
 import dev.auralis.studio.core.database.PlaylistTrackEntity
 import dev.auralis.studio.core.model.AudioConfig
+import dev.auralis.studio.core.model.HomeLayoutSettings
 import dev.auralis.studio.core.model.ThemeSettings
 import dev.auralis.studio.core.model.Track
 import dev.auralis.studio.core.model.LyricsUiState
@@ -133,6 +134,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val audioConfig = MutableStateFlow(AudioConfig())
     val themeSettings = MutableStateFlow(ThemeSettings())
+    val homeLayoutSettings = MutableStateFlow(HomeLayoutSettings())
     val musicFolders = container.settings.musicFolderUris
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
     val minimumTrackDuration = container.settings.minimumTrackDurationMs
@@ -199,6 +201,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    val recommendationEngine = dev.auralis.studio.library.SmartRecommendationEngine(container.unifiedSearch)
+    private val _offlineRecommendations = MutableStateFlow<List<Track>>(emptyList())
+    val offlineRecommendations: StateFlow<List<Track>> = _offlineRecommendations.asStateFlow()
+    private val _onlineRecommendations = MutableStateFlow<List<UnifiedTrack>>(emptyList())
+    val onlineRecommendations: StateFlow<List<UnifiedTrack>> = _onlineRecommendations.asStateFlow()
+
+    private val _isSearchingRecommendations = MutableStateFlow(false)
+    val isSearchingRecommendations: StateFlow<Boolean> = _isSearchingRecommendations.asStateFlow()
+
+    fun refreshRecommendations(track: Track?) {
+        viewModelScope.launch {
+            val offline = recommendationEngine.getOfflineRecommendations(
+                currentTrack = track,
+                allTracks = tracks.value,
+                historyUris = historyUris.value,
+                favorites = favorites.value,
+                limit = 15,
+            )
+            _offlineRecommendations.value = offline
+            if (track != null) {
+                _isSearchingRecommendations.value = true
+                try {
+                    val online = recommendationEngine.getOnlineRecommendations(track, limit = 12)
+                    _onlineRecommendations.value = online
+                } finally {
+                    _isSearchingRecommendations.value = false
+                }
+            } else {
+                _onlineRecommendations.value = emptyList()
+            }
+        }
+    }
+
     val searchResults: StateFlow<List<Track>> = combine(
         searchQuery.debounce(180),
         tracks,
@@ -222,6 +257,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 themeSettings.value = settings
             }
         }
+        viewModelScope.launch {
+            container.settings.homeLayoutSettings.collect { settings ->
+                homeLayoutSettings.value = settings
+            }
+        }
 
         viewModelScope.launch {
             playback.appliedAudioConfig.collect { applied ->
@@ -238,7 +278,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     currentLyricsTrack = track
                     if (track == null) _lyricsState.value = LyricsUiState.NotFound
                     else resolveLyrics(track)
+                    refreshRecommendations(track)
                 }
+        }
+        viewModelScope.launch {
+            tracks.collect { allTracks ->
+                if (_offlineRecommendations.value.isEmpty() && allTracks.isNotEmpty()) {
+                    refreshRecommendations(currentLyricsTrack)
+                }
+            }
         }
         viewModelScope.launch {
             playbackState.collect { state ->
@@ -874,6 +922,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateHomeLayout(settings: HomeLayoutSettings) {
+        homeLayoutSettings.value = settings
+        viewModelScope.launch {
+            container.settings.setHomeLayoutSettings(settings)
+        }
+    }
+
     fun setVisualizerActive(active: Boolean) {
         if (active) visualizerAnalyzer.start(themeSettings.value.visualQuality)
         else visualizerAnalyzer.stop()
@@ -886,7 +941,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateLyricsOffset(offsetMs: Long) {
         val track = currentLyricsTrack ?: return
         val found = _lyricsState.value as? LyricsUiState.Found ?: return
-        val safeOffset = offsetMs.coerceIn(-5_000L, 5_000L)
+        val safeOffset = offsetMs.coerceIn(-30_000L, 30_000L)
         _lyricsState.value = LyricsUiState.Found(found.lyrics.copy(offsetMs = safeOffset))
         viewModelScope.launch { container.lyrics.updateOffset(track, safeOffset) }
     }
@@ -1003,6 +1058,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playlistTrackUris(playlistId: Long): Flow<List<String>> = dao.observePlaylistTracks(playlistId)
+
+    fun removePlaylistTrack(playlistId: Long, trackUri: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            dao.removePlaylistTrack(playlistId, trackUri)
+        }
+    }
 
     fun deletePlaylist(playlist: PlaylistEntity) {
         viewModelScope.launch(Dispatchers.IO) { dao.deletePlaylist(playlist) }
