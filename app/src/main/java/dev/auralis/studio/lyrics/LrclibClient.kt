@@ -284,14 +284,13 @@ class LrclibClient {
             val durDiff   = abs(durationSec - track.duration)
             val durScore  = when {
                 durationMs <= 0 -> 0.0
-                durDiff < 1.0   -> 0.25 // Excellent match
-                durDiff < 2.0   -> 0.18 // Strong match
-                durDiff < 4.0   -> 0.10
-                durDiff < 8.0   -> 0.04
-                durDiff < 20.0  -> 0.01
-                else            -> -0.15 // Duration mismatch penalty
+                durDiff < 1.0   -> 0.20 // Excellent match — audio lengths match precisely
+                durDiff < 2.5   -> 0.14 // Strong match
+                durDiff < 5.0   -> 0.04 // Acceptable variance (intro/outro silence)
+                durDiff < 10.0  -> -0.25 // Major duration discrepancy
+                else            -> -0.55 // Severe mismatch (different cut or album with intro)
             }
-            val syncBonus = if (!track.syncedLyrics.isNullOrBlank()) 0.06 else 0.0
+            val syncBonus = if (!track.syncedLyrics.isNullOrBlank()) 0.08 else 0.0
             val versionPenalty = versionMismatchPenalty(queryTitle, candidateTitle)
             val total = titleSim + artistSim + albumBonus + durScore + syncBonus - versionPenalty
             ScoredTrack(track, total)
@@ -301,7 +300,7 @@ class LrclibClient {
     /**
      * Scoring: picks the candidate that best matches title, artist, and duration.
      * Rejects candidates whose synced and plain lyrics are both absent.
-     * Threshold: minimum score of 0.38 required to accept an automatic match.
+     * Threshold: minimum score of 0.35 required to accept an automatic match.
      */
     internal fun pickBestCandidate(
         candidates: List<LrclibTrack>,
@@ -312,7 +311,7 @@ class LrclibClient {
     ): LrclibTrack? {
         val scored = scoreCandidates(candidates, title, artist, album, durationMs)
         val best = scored.firstOrNull() ?: return null
-        val threshold = if (artist.isBlank() || durationMs <= 0) 0.35 else 0.28
+        val threshold = 0.35
         if (best.score < threshold) {
             return null
         }

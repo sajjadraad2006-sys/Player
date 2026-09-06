@@ -1,13 +1,18 @@
 package dev.auralis.studio
 
 import android.app.Application
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import dev.auralis.studio.core.AppContainer
 import dev.auralis.studio.core.ProcessRole
 import dev.auralis.studio.core.ProcessUtils
 
-class AuralisApplication : Application() {
+class AuralisApplication : Application(), ImageLoaderFactory {
 
     private var _container: AppContainer? = null
+    private var _imageLoader: ImageLoader? = null
 
     /**
      * Whether the main [AppContainer] has been instantiated in this process.
@@ -30,6 +35,40 @@ class AuralisApplication : Application() {
      */
     val container: AppContainer
         get() = mainContainer
+
+    override fun newImageLoader(): ImageLoader {
+        return _imageLoader ?: synchronized(this) {
+            _imageLoader ?: ImageLoader.Builder(this)
+                .memoryCache {
+                    MemoryCache.Builder(this)
+                        .maxSizePercent(0.20) // Limit in-memory image cache to 20% of app RAM
+                        .build()
+                }
+                .diskCache {
+                    DiskCache.Builder()
+                        .directory(cacheDir.resolve("image_cache"))
+                        .maxSizeBytes(100L * 1024L * 1024L) // 100 MB disk cache cap
+                        .build()
+                }
+                .crossfade(true)
+                .respectCacheHeaders(false)
+                .build()
+                .also { _imageLoader = it }
+        }
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // Clear in-memory bitmap cache when the system signals memory pressure
+        if (level >= TRIM_MEMORY_BACKGROUND || level >= TRIM_MEMORY_RUNNING_LOW) {
+            _imageLoader?.memoryCache?.clear()
+        }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        _imageLoader?.memoryCache?.clear()
+    }
 
     override fun onCreate() {
         super.onCreate()

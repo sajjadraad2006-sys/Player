@@ -144,20 +144,29 @@ class SmartRecommendationEngine(
             if (cached.isNotEmpty()) return@withContext cached.take(limit)
         }
 
-        val artist = currentTrack.artist.trim()
-        val title = currentTrack.title.trim()
+        val rawArtist = currentTrack.artist.trim()
+        val rawTitle = currentTrack.title.trim()
 
-        val cleanArtist = artist.takeUnless {
+        val cleanTitle = SearchEngine.normalize(rawTitle)
+        var detectedArtist = rawArtist.takeUnless {
             it.equals("unknown", ignoreCase = true) ||
             it.equals("<unknown>", ignoreCase = true) ||
             it.equals("unknown artist", ignoreCase = true)
         }
 
-        // Generate a clean, natural search query that works across Arabic and English
+        // If artist is blank or unknown but title contains "Artist - Title", extract them
+        val coreTitle = if (detectedArtist.isNullOrBlank() && rawTitle.contains(" - ")) {
+            val parts = rawTitle.split(" - ", limit = 2)
+            detectedArtist = parts[0].trim()
+            SearchEngine.normalize(parts[1])
+        } else {
+            cleanTitle
+        }
+
+        // Generate recommendations query: search for artist's top tracks or related music
         val searchQuery = when {
-            !cleanArtist.isNullOrBlank() && title.isNotBlank() -> "$cleanArtist $title"
-            !cleanArtist.isNullOrBlank() -> cleanArtist
-            title.isNotBlank() -> title
+            !detectedArtist.isNullOrBlank() -> "$detectedArtist songs"
+            coreTitle.isNotBlank() -> "$coreTitle mix"
             else -> return@withContext emptyList()
         }
 
@@ -166,11 +175,15 @@ class SmartRecommendationEngine(
                 unifiedSearch.search(searchQuery).firstOrNull { it.isComplete || it.recordings.size >= limit }
             } ?: unifiedSearch.search(searchQuery).firstOrNull()
 
-            val normCurrentTitle = SearchNormalization.normalize(title)
+            val normCurrentTitle = SearchNormalization.normalize(rawTitle)
+            val normCoreTitle = SearchNormalization.normalize(coreTitle)
+
             val filtered = snapshot?.recordings.orEmpty()
                 .filter { onlineTrack ->
                     val normOnlineTitle = SearchNormalization.normalize(onlineTrack.title)
-                    normOnlineTitle.isNotBlank() && normOnlineTitle != normCurrentTitle
+                    normOnlineTitle.isNotBlank() &&
+                        normOnlineTitle != normCurrentTitle &&
+                        (normCoreTitle.isBlank() || normOnlineTitle != normCoreTitle)
                 }
                 .distinctBy { it.uiKey }
                 .take(limit)

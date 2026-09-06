@@ -78,6 +78,9 @@ object SearchEngine {
     private val trackNormCache = java.util.concurrent.ConcurrentHashMap<String, NormalizedTrack>()
 
     fun getNormalized(track: Track): NormalizedTrack {
+        if (trackNormCache.size > 600) {
+            trackNormCache.clear()
+        }
         val cacheKey = "${track.uri}#${track.title}#${track.artist}#${track.displayName}"
         return trackNormCache.computeIfAbsent(cacheKey) {
             NormalizedTrack(
@@ -147,7 +150,18 @@ object SearchEngine {
             }
         }
 
-        // 4. Filename & path fallback match
+        // 4. Cross-Field Multi-Token Matching (e.g. "Artist Title" or "Title Artist" search queries)
+        val queryWords = normQuery.split(' ').filter { it.isNotBlank() }
+        if (queryWords.size > 1) {
+            val combinedArtistTitle = "$normArtist $normTitle"
+            val combinedTitleArtist = "$normTitle $normArtist"
+
+            if (combinedArtistTitle.contains(normQuery) || combinedTitleArtist.contains(normQuery)) {
+                totalScore += 7_000 // Exact multi-field phrase match (Artist + Title or Title + Artist)
+            }
+        }
+
+        // 5. Filename & path fallback match
         if (totalScore == 0) {
             if (normFile.isNotEmpty() && normFile.contains(normQuery)) {
                 totalScore += 150
@@ -156,7 +170,7 @@ object SearchEngine {
             }
         }
 
-        // 5. Fuzzy / typo matching (Only if no exact/substring matches were found and query length >= 4)
+        // 6. Fuzzy / typo matching (Only if no exact/substring matches were found and query length >= 4)
         if (totalScore == 0 && normQuery.length >= 4) {
             val fuzzyScore = computeFuzzyScore(normQuery, normTitle, normArtist)
             if (fuzzyScore > 0) {

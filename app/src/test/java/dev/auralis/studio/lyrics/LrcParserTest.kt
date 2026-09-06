@@ -98,4 +98,20 @@ class LrcParserTest {
         assertEquals(parsed.lines[1].timeMs, reparsed.lines[1].timeMs)
         assertEquals(parsed.lines[1].text, reparsed.lines[1].text)
     }
+
+    @Test
+    fun parse_extractsOffsetTag() {
+        val lrc = """
+            [ti:Test Title]
+            [ar:Test Artist]
+            [offset:+1500]
+            [00:05.00]First line
+            [00:15.50]Second line
+        """.trimIndent()
+
+        val parsed = LrcParser.parse(lrc)
+        assertTrue(parsed.synced)
+        assertEquals(1500L, parsed.offsetMs)
+        assertEquals(2, parsed.lines.size)
+    }
 }

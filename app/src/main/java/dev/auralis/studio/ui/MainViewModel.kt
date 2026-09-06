@@ -209,9 +209,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isSearchingRecommendations = MutableStateFlow(false)
     val isSearchingRecommendations: StateFlow<Boolean> = _isSearchingRecommendations.asStateFlow()
+    private var recommendationJob: Job? = null
 
     fun refreshRecommendations(track: Track?) {
-        viewModelScope.launch {
+        recommendationJob?.cancel()
+        recommendationJob = viewModelScope.launch {
             val offline = recommendationEngine.getOfflineRecommendations(
                 currentTrack = track,
                 allTracks = tracks.value,
@@ -1113,6 +1115,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        recommendationJob?.cancel()
+        recommendationJob = null
         visualizerAnalyzer.stop()
         playback.release()
         super.onCleared()

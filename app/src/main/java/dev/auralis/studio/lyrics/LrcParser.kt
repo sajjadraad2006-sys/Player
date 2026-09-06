@@ -12,6 +12,7 @@ import dev.auralis.studio.core.model.LyricsSource
 object LrcParser {
 
     private val TIMESTAMP_RE = Regex("""^\[(\d{1,3}):(\d{2})[.:](\d{2,3})\](.*)$""")
+    private val OFFSET_RE    = Regex("""^\[offset:\s*([+-]?\d+)\s*\]$""", RegexOption.IGNORE_CASE)
     private val META_RE      = Regex("""^\[(?:ti|ar|al|by|length|offset):[^\]]*\]$""", RegexOption.IGNORE_CASE)
     private val WORD_TAG_RE  = Regex("""<(\d{1,3}):(\d{2})[.:](\d{2,3})>([^<]*)""")
 
@@ -22,10 +23,19 @@ object LrcParser {
     fun parse(lrc: String, source: LyricsSource = LyricsSource.LOCAL_LRC): SyncedLyrics {
         val lines = mutableListOf<LyricsLine>()
         var hasTimestamps = false
+        var parsedOffsetMs = 0L
 
         for (rawLine in lrc.lines()) {
             val line = rawLine.trim()
-            if (line.isEmpty() || META_RE.matches(line)) continue
+            if (line.isEmpty()) continue
+
+            // Check for standard LRC offset tag: [offset:+/-ms]
+            val offsetMatch = OFFSET_RE.matchEntire(line)
+            if (offsetMatch != null) {
+                parsedOffsetMs += offsetMatch.groupValues[1].toLongOrNull() ?: 0L
+                continue
+            }
+            if (META_RE.matches(line)) continue
 
             // Handle multiple line timestamps: [00:01.23][00:03.45]text
             val allTimestamps = mutableListOf<Long>()
@@ -98,7 +108,7 @@ object LrcParser {
             .filter { it.timeMs >= 0 }
             .sortedBy { it.timeMs }
 
-        return SyncedLyrics(sorted, synced = true, source = source)
+        return SyncedLyrics(sorted, synced = true, source = source, offsetMs = parsedOffsetMs)
     }
 
     /** Converts a [SyncedLyrics] back to LRC string format for storage. */

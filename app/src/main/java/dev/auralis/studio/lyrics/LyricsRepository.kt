@@ -311,13 +311,13 @@ class LyricsRepository(
 
     /** Persists playback correction separately from downloaded/embedded source text. */
     suspend fun updateOffset(track: Track, offsetMs: Long) {
-        val safeOffset = offsetMs.coerceIn(-5_000L, 5_000L)
+        val safeOffset = offsetMs.coerceIn(-30_000L, 30_000L)
         offsetStore.edit().putLong(offsetKey(track), safeOffset).apply()
         dao.getLyrics(track.uri)?.let { dao.updateOffset(it.id, safeOffset) }
     }
 
     private fun applyStoredOffset(track: Track, lyrics: SyncedLyrics): SyncedLyrics =
-        lyrics.copy(offsetMs = offsetStore.getLong(offsetKey(track), lyrics.offsetMs).coerceIn(-5_000L, 5_000L))
+        lyrics.copy(offsetMs = offsetStore.getLong(offsetKey(track), lyrics.offsetMs).coerceIn(-30_000L, 30_000L))
 
     private fun offsetKey(track: Track): String = track.uri.ifBlank {
         "${track.title}|${track.artist}|${track.durationMs}"

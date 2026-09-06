@@ -40,9 +40,13 @@ fun rememberArtworkPalette(artworkUri: String?): ArtworkPalette? {
                 } else {
                     artworkUri
                 }
-                val drawable = ImageLoader(context).execute(
-                    ImageRequest.Builder(context).data(model).allowHardware(false).build(),
-                ).drawable ?: return@runCatching null
+                val appContext = context.applicationContext
+                val request = ImageRequest.Builder(appContext)
+                    .data(model)
+                    .size(128, 128) // Downsample to 128x128 for palette analysis, saving 99% RAM
+                    .allowHardware(false)
+                    .build()
+                val drawable = coil.Coil.imageLoader(appContext).execute(request).drawable ?: return@runCatching null
                 val generated = Palette.from(drawable.toBitmap()).maximumColorCount(24).generate()
                 val dominant = generated.dominantSwatch?.rgb ?: generated.vibrantSwatch?.rgb ?: return@runCatching null
                 ArtworkPalette(

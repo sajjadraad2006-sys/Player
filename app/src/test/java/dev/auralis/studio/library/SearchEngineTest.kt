@@ -132,4 +132,26 @@ class SearchEngineTest {
         assertTrue("Should find matching tracks by artist", byArtist.isNotEmpty())
         assertTrue(byArtist.all { it.artist == "Famous Artist 42" })
     }
+
+    @Test
+    fun crossFieldMultiTokenSearch_matchesArtistAndTitleCombined() {
+        val tracks = listOf(
+            track(1, "Shape of You", "Ed Sheeran"),
+            track(2, "Hello", "Adele"),
+            track(3, "تملي معاك", "عمرو دياب"),
+            track(4, "Perfect", "Ed Sheeran"),
+        )
+
+        val edShape = SearchEngine.search(tracks, "Ed Sheeran Shape")
+        assertEquals(1, edShape.size)
+        assertEquals("Shape of You", edShape[0].title)
+
+        val adeleHello = SearchEngine.search(tracks, "Adele Hello")
+        assertEquals(1, adeleHello.size)
+        assertEquals("Hello", adeleHello[0].title)
+
+        val amrTamally = SearchEngine.search(tracks, "عمرو دياب تملي")
+        assertEquals(1, amrTamally.size)
+        assertEquals("تملي معاك", amrTamally[0].title)
+    }
 }
