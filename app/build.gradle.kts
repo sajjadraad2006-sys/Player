@@ -5,11 +5,12 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
-    id("org.jetbrains.kotlin.plugin.serialization") version "2.1.0"
+    id("org.jetbrains.kotlin.plugin.serialization")
     id("com.chaquo.python")
 }
 
 android {
+    sourceSets.getByName("main").java.srcDir("../shared/src/portableMain/kotlin")
     namespace = "dev.auralis.studio"
     compileSdk = 36
 
@@ -147,7 +148,12 @@ ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 chaquopy {
     defaultConfig {
         version = "3.14"
-        buildPython("/home/sajjad/.local/bin/python3.14")
+        val customBuildPython = (rootProject.file("local.properties").takeIf { it.exists() }?.let { file ->
+            Properties().apply { file.inputStream().use { load(it) } }.getProperty("buildPython")
+        }) ?: System.getenv("BUILD_PYTHON")
+        if (!customBuildPython.isNullOrBlank()) {
+            buildPython(customBuildPython)
+        }
         pip {
             install("yt-dlp==2026.8.19")
             install("yt-dlp-ejs==0.8.0")

@@ -10,3 +10,10 @@ captures/
 __pycache__/
 *.pyc
 *.pyo
+
+# Local Windows development artifacts
+.kotlin/
+scratch/
+msi_*.log
+*.msi
+*.exe

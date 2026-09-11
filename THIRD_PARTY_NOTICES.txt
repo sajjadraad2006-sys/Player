@@ -1,0 +1,227 @@
+================================================================================
+THIRD-PARTY SOFTWARE NOTICES AND LICENSES
+================================================================================
+
+Lyrune Windows Desktop incorporates or redistributes the third-party software 
+components and libraries described below. Each component is licensed under the 
+terms of its respective license agreement.
+
+--------------------------------------------------------------------------------
+TABLE OF CONTENTS
+--------------------------------------------------------------------------------
+1. Audio Format & Patent Disclosures
+2. libFLAC (v1.5.0)
+3. JLayer (v1.0.1)
+4. Java Native Access (JNA) & JNA Platform (v5.14.0)
+5. Kotlin Standard Library, Coroutines & Serialization (v2.0.21 / v1.9.0 / v1.7.3)
+6. JetBrains Compose Multiplatform & Skiko (v1.7.0)
+7. Ktor HTTP Client (v3.0.3)
+8. CPython Embeddable Runtime (v3.12.10)
+9. yt-dlp (v2026.07.04+)
+10. OpenJDK Bundled Modular JRE Runtime (v21.0.x)
+11. SMTCAdapter Native Bridge
+
+================================================================================
+1. AUDIO FORMAT & PATENT DISCLOSURES
+================================================================================
+- FLAC (Free Lossless Audio Codec):
+  An open, royalty-free lossless audio compression format developed by the
+  Xiph.Org Foundation. The FLAC format specification itself is unencumbered by 
+  patents or royalty requirements.
+
+- MP3 (MPEG-1 Audio Layer III):
+  All patents associated with the MPEG-1 Audio Layer III format expired 
+  worldwide by April 23, 2017 (official termination of the Technicolor and 
+  Fraunhofer IIS MP3 licensing program). No patent royalties apply to playback.
+
+- WAV (Waveform Audio File Format):
+  Standard RIFF audio container format developed by Microsoft and IBM.
+  Fully unencumbered and open.
+
+================================================================================
+2. libFLAC (v1.5.0)
+================================================================================
+Copyright (C) 2000-2009 Josh Coalson
+Copyright (C) 2011-2025 Xiph.Org Foundation
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+- Redistributions of source code must retain the above copyright
+  notice, this list of conditions and the following disclaimer.
+
+- Redistributions in binary form must reproduce the above copyright
+  notice, this list of conditions and the following disclaimer in the
+  documentation and/or other materials provided with the distribution.
+
+- Neither the name of the Xiph.org Foundation nor the names of its
+  contributors may be used to endorse or promote products derived from
+  this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+================================================================================
+3. JLayer (v1.0.1)
+================================================================================
+Copyright (C) 1999-2008 JavaZoom (http://www.javazoom.net)
+
+Licensed under the GNU Lesser General Public License (LGPL), Version 2.1 or 
+any later version.
+
+A copy of the GNU Lesser General Public License Version 2.1 is available at:
+https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+
+As required by the LGPL v2.1, dynamically linked JLayer bytecode may be replaced 
+by end users in the application distribution classpath.
+
+================================================================================
+4. Java Native Access (JNA) & JNA Platform (v5.14.0)
+================================================================================
+Copyright (c) 2007-2024 Timothy Wall / Wayne Meissner / JNA Contributors
+
+Dual-licensed under the Apache License, Version 2.0, and the GNU Lesser General 
+Public License (LGPL), Version 2.1 or later. Lyrune redistributes JNA under the 
+terms of the Apache License, Version 2.0:
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at:
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+================================================================================
+5. Kotlin Standard Library, Coroutines & Serialization
+================================================================================
+Copyright 2010-2025 JetBrains s.r.o. and Kotlin Programming Language contributors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at:
+    http://www.apache.org/licenses/LICENSE-2.0
+
+================================================================================
+6. JetBrains Compose Multiplatform & Skiko (v1.7.0)
+================================================================================
+Copyright 2020-2025 JetBrains s.r.o. and Compose Multiplatform contributors.
+Copyright (C) 2005-2025 Google Inc. (Skia graphics engine)
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at:
+    http://www.apache.org/licenses/LICENSE-2.0
+
+================================================================================
+7. Ktor HTTP Client (v3.0.3)
+================================================================================
+Copyright 2014-2025 JetBrains s.r.o and contributors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at:
+    http://www.apache.org/licenses/LICENSE-2.0
+
+================================================================================
+8. CPython Embeddable Runtime (v3.12.10)
+================================================================================
+PYTHON SOFTWARE FOUNDATION LICENSE VERSION 2
+--------------------------------------------
+1. This LICENSE AGREEMENT is between the Python Software Foundation ("PSF"), and
+the Individual or Organization ("Licensee") accessing and otherwise using this
+software ("Python") in source or binary form and its associated documentation.
+
+2. Subject to the terms and conditions of this License Agreement, PSF hereby
+grants Licensee a nonexclusive, royalty-free, world-wide license to reproduce,
+analyze, test, perform and/or display publicly, prepare derivative works,
+distribute, and otherwise use Python alone or in any derivative version,
+provided, however, that PSF's License Agreement and PSF's notice of copyright,
+i.e., "Copyright (c) 2001-2025 Python Software Foundation; All Rights Reserved"
+are retained in Python alone or in any derivative version prepared by Licensee.
+
+3. In the event Licensee prepares a derivative work that is based on or
+incorporates Python or any part thereof, and wants to make the derivative work
+available to others as provided herein, then Licensee hereby agrees to include in
+any such work a brief summary of the changes made to Python.
+
+4. PSF is making Python available to Licensee on an "AS IS" basis. PSF MAKES NO
+REPRESENTATIONS OR WARRANTIES, EXPRESS OR IMPLIED. BY WAY OF EXAMPLE, BUT NOT
+LIMITATION, PSF MAKES NO AND DISCLAIMS ANY REPRESENTATION OR WARRANTY OF
+MERCHANTABILITY OR FITNESS FOR ANY PARTICULAR PURPOSE OR THAT THE USE OF PYTHON
+WILL NOT INFRINGE ANY THIRD PARTY RIGHTS.
+
+5. PSF SHALL NOT BE LIABLE TO LICENSEE OR ANY OTHER USERS OF PYTHON FOR ANY
+INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES OR LOSS AS A RESULT OF MODIFYING,
+DISTRIBUTING, OR OTHERWISE USING PYTHON, OR ANY DERIVATIVE THEREOF, EVEN IF
+ADVISED OF THE POSSIBILITY THEREOF.
+
+6. This License Agreement will automatically terminate upon a material breach of
+its terms and conditions.
+
+7. Nothing in this License Agreement shall be deemed to create any relationship
+of agency, partnership, or joint venture between PSF and Licensee.
+
+8. By copying, installing or otherwise using Python, Licensee agrees to be bound
+by the terms and conditions of this License Agreement.
+
+================================================================================
+9. yt-dlp
+================================================================================
+This is free and unencumbered software released into the public domain under The 
+Unlicense.
+
+Anyone is free to copy, modify, publish, use, compile, sell, or
+distribute this software, either in source code form or as a compiled
+binary, for any purpose, commercial or non-commercial, and by any
+means.
+
+In jurisdictions that recognize copyright laws, the author or authors
+of this software dedicate any and all copyright interest in the
+software to the public domain. We make this dedication for the benefit
+of the public at large and to the detriment of our heirs and
+successors. We intend this dedication to be an overt act of
+relinquishment in perpetuity of all present and future rights to this
+software under copyright law.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+For more information, please refer to <http://unlicense.org/>
+
+================================================================================
+10. OpenJDK Bundled Modular JRE Runtime (v21.0.x)
+================================================================================
+The bundled Java Runtime Environment is generated using `jlink` from OpenJDK 21.
+Licensed under the GNU General Public License, Version 2, with the Classpath 
+Exception (GPLv2+CE):
+    https://openjdk.org/legal/gplv2+ce.html
+
+================================================================================
+11. SMTCAdapter Native Bridge
+================================================================================
+Copyright (C) 2026 Lyrune Project Contributors.
+Native Windows C++/WinRT System Media Transport Controls bridge.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at:
+    http://www.apache.org/licenses/LICENSE-2.0

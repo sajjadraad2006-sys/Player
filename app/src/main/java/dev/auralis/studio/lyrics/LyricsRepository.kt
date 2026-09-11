@@ -66,93 +66,40 @@ class LyricsRepository(
      * Returns [SyncedLyrics.EMPTY] if nothing is available.
      */
     suspend fun resolve(track: Track, forceRefresh: Boolean = false): SyncedLyrics = withContext(Dispatchers.IO) {
-        // ── Step 1: Embedded metadata ──────────────────────────────────────
-        val embedded = readEmbeddedLyrics(track)
-        if (embedded != null) {
-            Log.d(TAG, "Using embedded lyrics for ${track.title}")
-            return@withContext applyStoredOffset(track, embedded)
-        }
+        pipeline.resolve(LyricsTrack(track.uri, track.title, track.artist, track.album, track.durationMs), forceRefresh)
+    }
 
-        // ── Step 2 & 3: Local .lrc — manual first, then auto ──────────────
-        val cachedManual = dao.getLyrics(track.uri)?.takeIf { it.manualSelection }
-        if (cachedManual != null) {
-            Log.d(TAG, "Using manually selected local/cache lyrics for ${track.title}")
-            return@withContext applyStoredOffset(track, parseCachedEntity(cachedManual))
-        }
-
-        val localLrc = findLocalLrc(track)
-        if (localLrc != null) {
-            Log.d(TAG, "Using local .lrc file for ${track.title}")
-            return@withContext applyStoredOffset(track, localLrc)
-        }
-
-        // ── Step 4: Valid online cache ─────────────────────────────────────
-        // Cache entries fetched under an older matching algorithm (or against
-        // preview-duration metadata) are treated as stale and re-evaluated.
-        // Manual selections and imports never reach this branch (returned above).
-        val cached = dao.getLyrics(track.uri)
-        if (cached != null && isCacheValid(cached)) {
-            val staleFromOldMatcher = cached.lastValidatedAt < MATCHER_EPOCH_MS ||
-                (cached.trackDurationMs > 0 && cached.trackDurationMs < MIN_FULL_TRACK_MS_FOR_MATCHING)
-            if (!staleFromOldMatcher) {
-                Log.d(TAG, "Using cached LRCLIB lyrics for ${track.title}")
-                return@withContext applyStoredOffset(track, parseCachedEntity(cached))
+    private val pipeline by lazy {
+        LyricsResolutionPipeline(object : LyricsStorage {
+            override suspend fun embedded(track: LyricsTrack): String? {
+                val uri = Uri.parse(track.key)
+                if (uri.scheme !in setOf("content", "file")) return null
+                return try { EmbeddedLyricsReader.read(context, uri) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
             }
-            Log.d(TAG, "Discarding stale low-confidence lyrics cache for ${track.title}")
-            dao.clearAutoCache(track.uri)
-        }
-
-        val missKey = track.uri.ifBlank { "${track.title}|${track.artist}|${track.durationMs}" }
-        val lastMiss = negativeCache.getLong(missKey, 0L)
-        if (!forceRefresh && System.currentTimeMillis() - lastMiss < NEGATIVE_CACHE_MS) {
-            return@withContext SyncedLyrics.EMPTY
-        }
-
-        // Local/cache resolution is complete. Do not touch the network while offline.
-        if (!isNetworkAvailable()) return@withContext SyncedLyrics.EMPTY
-
-        // ── Step 5: Network lookup via LRCLIB ─────────────────────────────
-        // Metadata confidence hierarchy: a preview-length duration (<45 s) or
-        // placeholder artist ("Music", "Lyrune", "Unknown") must never reach
-        // LRCLIB as high-confidence metadata — it poisons exact lookups.
-        val lookupDurationMs = if (track.durationMs in 1 until MIN_FULL_TRACK_MS_FOR_MATCHING) 0L else track.durationMs
-        val lookupArtist = LyricsMetadataNormalizer.artist(track.artist)
-            .takeUnless { it.isBlank() || it.equals("Music", true) || it.equals("Lyrune", true) }
-            .orEmpty()
-        try {
-            val result = lrclib.resolve(
-                title     = track.title,
-                artist    = lookupArtist,
-                album     = track.album,
-                durationMs = lookupDurationMs,
-            )
-            if (result != null) {
-                val entity = LyricsCacheEntity(
-                    trackUri       = track.uri,
-                    source         = LyricsSource.LRCLIB.name,
-                    providerItemId = result.id.toString(),
-                    plainLyrics    = result.plainLyrics.orEmpty(),
-                    syncedLyrics   = result.syncedLyrics.orEmpty(),
-                    lyricsfile     = result.lyricsfile.orEmpty(),
-                    trackDurationMs = track.durationMs,
-                    fetchedAt      = System.currentTimeMillis(),
-                    lastValidatedAt = System.currentTimeMillis(),
-                )
-                dao.clearAutoCache(track.uri)
-                dao.upsertLyrics(entity)
-                negativeCache.edit().remove(missKey).apply()
-                return@withContext applyStoredOffset(track, parseCachedEntity(entity))
+            override suspend fun sidecar(track: LyricsTrack): String? {
+                val uri = Uri.parse(track.key)
+                val name = uri.lastPathSegment.orEmpty().substringBeforeLast('.')
+                return try { when(uri.scheme) {
+                    "file" -> readFileSidecar(File(uri.path ?: return null), name)
+                    "content" -> readMediaStoreSidecar(uri, name) ?: readDocumentSidecar(uri, name)
+                    else -> null
+                } } catch (_: Exception) { null }
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Log.e(TAG, "LRCLIB lookup failed: ${e.message}")
-        }
-
-        if (!lrclib.lastLookupWasRateLimited && lrclib.lastLookupError == null) {
-            negativeCache.edit().putLong(missKey, System.currentTimeMillis()).apply()
-        }
-        SyncedLyrics.EMPTY
+            override suspend fun read(key: String) = dao.getLyrics(key)?.let {
+                LyricsRecord(it.plainLyrics, it.syncedLyrics, it.lyricsfile, it.source, it.manualSelection, it.fetchedAt, it.trackDurationMs)
+            }
+            override suspend fun write(key: String, record: LyricsRecord) {
+                dao.clearAutoCache(key)
+                dao.upsertLyrics(LyricsCacheEntity(trackUri = key, plainLyrics = record.plain, syncedLyrics = record.lrc,
+                    lyricsfile = record.lyricsfile, source = record.source, manualSelection = record.manual,
+                    fetchedAt = record.fetchedAt, lastValidatedAt = record.fetchedAt, trackDurationMs = record.durationMs))
+            }
+            override suspend fun lastMiss(key: String) = negativeCache.getLong(key, 0)
+            override suspend fun setMiss(key: String, at: Long) { negativeCache.edit().putLong(key, at).apply() }
+            override suspend fun offset(key: String) = if(offsetStore.contains(key)) offsetStore.getLong(key, 0) else null
+            override suspend fun setOffset(key: String, offset: Long) { offsetStore.edit().putLong(key, offset).apply() }
+            override fun online() = isNetworkAvailable()
+        }, lrclib)
     }
 
     /**

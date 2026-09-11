@@ -4,7 +4,7 @@
 
 # Lyrune
 
-**A modern Android music player and audio laboratory built around real-time DSP, adaptive visual design, synchronized lyrics, truthful audio visualization, and optional on-device source separation.**
+**Lyrune music player — Android and Windows, with real-time audio effects, synchronized lyrics, and an artwork-driven interface.**
 
 [![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android)](https://developer.android.com/)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-7F52FF?logo=kotlin)](https://kotlinlang.org/)
@@ -12,6 +12,21 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 </div>
+
+## Windows development branch
+
+This branch (`codex/windows-product-rebuild`) contains the Windows app and the portable search/lyrics code it shares with Android. The repository's `main` branch remains the Android baseline.
+
+The Windows app includes YouTube-only search with automatic playback, synchronized and imported lyrics, a desktop player and optional Now Playing panel, library collections and playlists, Audio Lab, themes, and English/Arabic presentation. Local playback includes MP3, WAV, FLAC, AAC/M4A, Opus/WebM, and OGG/Vorbis.
+
+On Windows x64, use JDK 21 and configure the Android SDK through `ANDROID_HOME` or the untracked `local.properties` file, since the project also includes the Android module:
+
+```powershell
+.\gradlew.bat :desktopApp:run
+.\gradlew.bat :desktopApp:test
+```
+
+The Python resolver runtime and native playback dependencies are bundled or fetched by Gradle; no system FFmpeg installation is required. Local paths, build output, and installer logs are excluded from Git. Android unit tests remain available with `:app:testDebugUnitTest` (the Android Python build requires Python 3.14 via `BUILD_PYTHON` or `local.properties`).
 
 ## What Lyrune does
 
@@ -24,26 +39,11 @@
 - Supports in-app System Default, English, and Arabic locale selection with RTL resources.
 - Searches and downloads optional online music sources without making network access a playback requirement.
 
-## Online music sources
+## Online search
 
-Online search combines Audius, Jamendo, iTunes, and Deezer results, then merges matching recordings while keeping provider capabilities separate. Audius and Jamendo expose Download only after their current metadata explicitly permits a full-file download. iTunes and Deezer remain catalog/preview-only sources; their short preview URLs never enter the download pipeline.
+The primary online search experience uses YouTube. Selecting a result resolves supported audio internally and starts playback, with artwork and lyrics loaded automatically. The portable YouTube provider and lyrics lookup logic are shared with Android. Provider/runtime details are not part of the normal Windows search interface.
 
-Provider credentials are optional and belong in the untracked root `local.properties` file:
-
-```properties
-# Optional: public/client-side key for higher Audius catalog read rate limits.
-AUDIUS_API_KEY=your_api_key
-
-# Optional: enables Jamendo catalog, streaming, and permitted downloads.
-JAMENDO_CLIENT_ID=your_client_id
-
-# Optional and currently reserved for future Watch/discovery support only.
-YOUTUBE_API_KEY=your_api_key
-```
-
-Never add bearer tokens, API secrets, or user OAuth tokens to an Android build. Audius public read access continues without a key, Jamendo is simply omitted when its client ID is absent, and all local/offline features remain available.
-
-The optional link-import boundary is documented in [External media resolver decision](docs/EXTERNAL_MEDIA_RESOLVER_DECISION.md). No yt-dlp dependency or YouTube download action is included.
+Optional development configuration belongs in the untracked `local.properties` file. Do not commit credentials or machine-specific SDK and Python paths.
 
 ## Audio Lab
 

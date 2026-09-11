@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "Lyrune"
 include(":app")
+include(":shared")
+include(":desktopApp")
