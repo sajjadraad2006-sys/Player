@@ -9,7 +9,9 @@ import androidx.core.app.NotificationManagerCompat
 import dev.auralis.studio.R
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import android.annotation.SuppressLint
 
+@SuppressLint("MissingPermission")
 object DownloadNotificationHelper {
 
     const val CHANNEL_ID = "downloads_channel"

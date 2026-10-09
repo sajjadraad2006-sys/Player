@@ -147,7 +147,12 @@ ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 chaquopy {
     defaultConfig {
         version = "3.14"
-        buildPython("/home/sajjad/.local/bin/python3.14")
+        val customPython = (project.findProperty("PYTHON_PATH") as? String)
+            ?: System.getenv("PYTHON_PATH")
+            ?: if (file("/home/sajjad/.local/bin/python3.14").exists()) "/home/sajjad/.local/bin/python3.14" else null
+        if (!customPython.isNullOrBlank()) {
+            buildPython(customPython)
+        }
         pip {
             install("yt-dlp==2026.8.19")
             install("yt-dlp-ejs==0.8.0")

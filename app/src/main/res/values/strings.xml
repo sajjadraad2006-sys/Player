@@ -394,7 +394,7 @@
     <string name="import_link_unknown_permission">Download status unverified</string>
     <string name="import_link_inspecting">Inspecting link…</string>
     <string name="yt_api_guide_title">YouTube API &amp; Guide</string>
-    <string name="yt_api_guide_no_key_needed">Search and downloads work 100% automatically without requiring any API key.</string>
+    <string name="yt_api_guide_no_key_needed" formatted="false">Search and downloads work 100% automatically without requiring any API key.</string>
     <string name="yt_api_guide_steps_header">Steps to get your own YouTube Data API key (Optional):</string>
     <string name="yt_api_guide_steps_content">1. Open Google Cloud Console using the button below.\n2. Create a new project (e.g. LyruneMusic).\n3. Go to APIs &amp; Services &gt; Library, find YouTube Data API v3, and click Enable.\n4. Go to Credentials &gt; Create Credentials &gt; API Key.\n5. Copy the key and paste it below.</string>
     <string name="yt_api_guide_open_console">Google Cloud Console</string>

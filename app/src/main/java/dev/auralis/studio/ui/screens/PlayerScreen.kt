@@ -496,15 +496,15 @@ private fun PlayerPage(
                 contentAlignment = Alignment.Center,
             ) {
                 AnimatedContent(
-                    targetState = track?.id to (track?.uri ?: ""),
+                    targetState = track,
                     transitionSpec = {
                         (fadeIn(tween(260)) + scaleIn(initialScale = 0.94f, animationSpec = tween(260)))
                             .togetherWith(fadeOut(tween(180)))
                     },
                     label = "player_art_change",
-                ) {
+                ) { currentTrack ->
                     TrackArtwork(
-                        track,
+                        currentTrack,
                         Modifier
                             .fillMaxWidth(0.82f)
                             .aspectRatio(1f),
@@ -516,20 +516,20 @@ private fun PlayerPage(
         // Track info
         item {
             AnimatedContent(
-                targetState = track?.id to (track?.uri ?: ""),
+                targetState = track,
                 transitionSpec = {
                     (fadeIn(tween(240)) + slideInVertically(animationSpec = tween(240)) { it / 4 })
                         .togetherWith(fadeOut(tween(160)))
                 },
                 modifier = Modifier.fillMaxWidth(),
                 label = "player_title_change",
-            ) {
+            ) { currentTrack ->
                 Column(
                     Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        track?.title ?: stringResource(R.string.nothing_playing),
+                        currentTrack?.title ?: stringResource(R.string.nothing_playing),
                         style    = MaterialTheme.typography.headlineMedium,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -540,8 +540,8 @@ private fun PlayerPage(
                     Spacer(Modifier.height(4.dp))
                     Text(
                         listOfNotNull(
-                            track?.artist?.ifBlank { null },
-                            track?.album?.ifBlank { null },
+                            currentTrack?.artist?.ifBlank { null },
+                            currentTrack?.album?.ifBlank { null },
                         ).joinToString(" · "),
                         style   = MaterialTheme.typography.bodyLarge,
                         color   = colors.onBackground.copy(alpha = 0.65f),
