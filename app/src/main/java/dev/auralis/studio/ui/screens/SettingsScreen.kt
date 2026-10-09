@@ -85,7 +85,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings as AndroidSettings
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Dashboard
 import dev.auralis.studio.ui.components.ColorPickerDialog
 
@@ -210,7 +210,7 @@ private fun SettingsRoot(
             ) {
                 IconButton(onClick = onBack) {
                     Icon(
-                        Icons.Default.ArrowBack,
+                        Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = stringResource(R.string.back),
                         tint = MaterialTheme.colorScheme.onBackground,
                     )
@@ -1206,7 +1206,7 @@ private fun HomeLayoutSection(
             ) {
                 IconButton(onClick = onBack) {
                     Icon(
-                        Icons.Default.ArrowBack,
+                        Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = stringResource(R.string.back),
                         tint = colors.onBackground,
                     )

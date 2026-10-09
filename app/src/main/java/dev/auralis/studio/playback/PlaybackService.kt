@@ -100,6 +100,13 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession = librarySession
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        val sessionPlayer = if (::librarySession.isInitialized) librarySession.player else null
+        if (sessionPlayer == null || !sessionPlayer.playWhenReady || sessionPlayer.mediaItemCount == 0 || sessionPlayer.playbackState == Player.STATE_ENDED) {
+            stopSelf()
+        }
+    }
+
     override fun onDestroy() {
         librarySession.release()
         player.removeListener(historyListener)

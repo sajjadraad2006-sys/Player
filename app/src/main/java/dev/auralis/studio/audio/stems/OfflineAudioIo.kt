@@ -20,6 +20,7 @@ data class DecodedPcmFile(val file: File, val frames: Long, val sampleRateHz: In
 
 /** MediaCodec decode followed by deterministic stereo conversion and linear 44.1 kHz resampling. */
 class OfflineAudioDecoder {
+    @Suppress("DEPRECATION")
     suspend fun decode(source: File, workDirectory: File, onProgress: (Int) -> Unit): DecodedPcmFile =
         withContext(Dispatchers.IO) {
             workDirectory.mkdirs()

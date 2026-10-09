@@ -57,10 +57,11 @@ class AuralisApplication : Application(), ImageLoaderFactory {
         }
     }
 
+    @Suppress("DEPRECATION")
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         // Clear in-memory bitmap cache when the system signals memory pressure
-        if (level >= TRIM_MEMORY_BACKGROUND || level >= TRIM_MEMORY_RUNNING_LOW) {
+        if (level >= TRIM_MEMORY_BACKGROUND || level >= TRIM_MEMORY_RUNNING_CRITICAL) {
             _imageLoader?.memoryCache?.clear()
         }
     }

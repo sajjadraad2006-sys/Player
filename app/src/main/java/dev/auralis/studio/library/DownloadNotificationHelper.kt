@@ -2,10 +2,13 @@ package dev.auralis.studio.library
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import dev.auralis.studio.MainActivity
 import dev.auralis.studio.R
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -16,6 +19,18 @@ object DownloadNotificationHelper {
 
     const val CHANNEL_ID = "downloads_channel"
     private val lastUpdateTimes = ConcurrentHashMap<Int, Long>()
+
+    private fun getAppPendingIntent(context: Context, notificationId: Int): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        return PendingIntent.getActivity(
+            context,
+            notificationId,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+    }
 
     fun init(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -41,6 +56,7 @@ object DownloadNotificationHelper {
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(context.getString(R.string.downloading))
             .setContentText(text)
+            .setContentIntent(getAppPendingIntent(context, notificationId))
             .setProgress(100, 0, true)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -82,6 +98,7 @@ object DownloadNotificationHelper {
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(trackText)
             .setContentText(progressText)
+            .setContentIntent(getAppPendingIntent(context, notificationId))
             .setProgress(100, percent, bytesTotal <= 0)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -101,6 +118,7 @@ object DownloadNotificationHelper {
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle(context.getString(R.string.downloaded))
             .setContentText(trackText)
+            .setContentIntent(getAppPendingIntent(context, notificationId))
             .setOngoing(false)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
