@@ -151,6 +151,7 @@ chaquopy {
         val customPython = (project.findProperty("PYTHON_PATH") as? String)
             ?: System.getenv("PYTHON_PATH")
             ?: if (file("/home/sajjad/.local/bin/python3.14").exists()) "/home/sajjad/.local/bin/python3.14" else null
+            ?: if (System.getProperty("os.name").lowercase().contains("windows")) "python" else "python3"
         if (!customPython.isNullOrBlank()) {
             buildPython(customPython)
         }

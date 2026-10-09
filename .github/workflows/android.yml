@@ -32,6 +32,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Set PYTHON_PATH for Chaquopy
+        run: echo "PYTHON_PATH=$(which python)" >> $GITHUB_ENV
+
       - name: Install Android 36 SDK and Build Tools
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
@@ -45,7 +48,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Run Tests, Lint and Assemble
-        run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease --stacktrace
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease -PPYTHON_PATH="$(which python)" --stacktrace
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
