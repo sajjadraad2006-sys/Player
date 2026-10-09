@@ -35,6 +35,7 @@ class LyricsRepository(
     private val context: Context,
     private val dao: LyricsDao,
     private val lrclib: LrclibClient,
+    private val youtubeCaptions: YouTubeCaptionsClient = YouTubeCaptionsClient(),
 ) {
     private val negativeCache = context.getSharedPreferences("lyrics_negative_cache", Context.MODE_PRIVATE)
     private val offsetStore = context.getSharedPreferences("lyrics_timing_offsets", Context.MODE_PRIVATE)
@@ -147,6 +148,32 @@ class LyricsRepository(
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "LRCLIB lookup failed: ${e.message}")
+        }
+
+        // ── Step 6: Synced Captions fallback (YouTube timed text) ─────────
+        try {
+            val ytCaptions = youtubeCaptions.resolve(track)
+            if (ytCaptions != null) {
+                val entity = LyricsCacheEntity(
+                    trackUri       = track.uri,
+                    source         = LyricsSource.YOUTUBE_CAPTIONS.name,
+                    providerItemId = ytCaptions.videoId,
+                    plainLyrics    = ytCaptions.plainText,
+                    syncedLyrics   = ytCaptions.lrcText,
+                    lyricsfile     = "",
+                    trackDurationMs = track.durationMs,
+                    fetchedAt      = System.currentTimeMillis(),
+                    lastValidatedAt = System.currentTimeMillis(),
+                )
+                dao.clearAutoCache(track.uri)
+                dao.upsertLyrics(entity)
+                negativeCache.edit().remove(missKey).apply()
+                return@withContext applyStoredOffset(track, ytCaptions.lyrics)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "YouTube captions fallback failed: ${e.message}")
         }
 
         if (!lrclib.lastLookupWasRateLimited && lrclib.lastLookupError == null) {
@@ -285,14 +312,37 @@ class LyricsRepository(
         if (!isNetworkAvailable()) return@withContext emptyList()
         val cleanTitle = LyricsMetadataNormalizer.title(track.title)
         val cleanArtist = LyricsMetadataNormalizer.artist(track.artist)
-        lrclib.searchCandidates(cleanTitle, cleanArtist, track.album, track.durationMs)
+        val lrclibList = lrclib.searchCandidates(cleanTitle, cleanArtist, track.album, track.durationMs)
+        val resultList = mutableListOf<LrclibTrack>()
+        resultList.addAll(lrclibList)
+
+        // If candidates are sparse or track is in Arabic, add YouTube Captions candidate
+        if (resultList.size < 5 || LyricsMetadataNormalizer.isArabic(track.title)) {
+            try {
+                val yt = youtubeCaptions.resolve(track)
+                if (yt != null) {
+                    val candidate = LrclibTrack(
+                        id = -999L,
+                        trackName = track.title,
+                        artistName = if (track.artist.isNotBlank()) "${track.artist} (YouTube Captions)" else "YouTube Captions",
+                        albumName = "Auto-Synced",
+                        duration = track.durationMs / 1000.0,
+                        syncedLyrics = yt.lrcText,
+                        plainLyrics = yt.plainText,
+                    )
+                    resultList.add(0, candidate)
+                }
+            } catch (_: Exception) {}
+        }
+        resultList
     }
 
     /** User-initiated: manually select a candidate version from the candidates list. */
     suspend fun selectCandidate(track: Track, candidate: LrclibTrack): SyncedLyrics = withContext(Dispatchers.IO) {
+        val sourceName = if (candidate.id < 0) LyricsSource.YOUTUBE_CAPTIONS.name else LyricsSource.LRCLIB.name
         val entity = LyricsCacheEntity(
             trackUri        = track.uri,
-            source          = LyricsSource.LRCLIB.name,
+            source          = sourceName,
             providerItemId  = candidate.id.toString(),
             plainLyrics     = candidate.plainLyrics.orEmpty(),
             syncedLyrics    = candidate.syncedLyrics.orEmpty(),

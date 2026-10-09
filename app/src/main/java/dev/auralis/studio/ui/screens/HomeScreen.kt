@@ -130,6 +130,7 @@ fun HomeScreen(
     playlistTrackUris: (Long) -> Flow<List<String>> = { flowOf(emptyList()) },
     onNavigateToSearch: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
+    onNavigateToLibrary: () -> Unit = {},
     layoutSettings: HomeLayoutSettings = HomeLayoutSettings(),
     onUpdateLayoutSettings: (HomeLayoutSettings) -> Unit = {},
     recommendations: List<Track> = emptyList(),
@@ -212,7 +213,7 @@ fun HomeScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = { selectedCategory = null }) {
                             Icon(
-                                Icons.Default.ArrowBack,
+                                Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = stringResource(R.string.back),
                                 tint = colors.onBackground,
                             )
@@ -265,6 +266,13 @@ fun HomeScreen(
                             Icon(
                                 Icons.Default.Search,
                                 contentDescription = stringResource(R.string.search),
+                                tint = colors.onBackground,
+                            )
+                        }
+                        IconButton(onClick = onNavigateToLibrary) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.QueueMusic,
+                                contentDescription = stringResource(R.string.library),
                                 tint = colors.onBackground,
                             )
                         }

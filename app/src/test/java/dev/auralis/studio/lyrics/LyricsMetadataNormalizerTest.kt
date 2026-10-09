@@ -1,6 +1,7 @@
 package dev.auralis.studio.lyrics
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LyricsMetadataNormalizerTest {
@@ -28,5 +29,22 @@ class LyricsMetadataNormalizerTest {
         assertEquals("Love You Like A Love Song", norm.title)
         assertEquals("Selena Gomez", norm.artist)
         assertEquals("Selena Gomez Love You Like A Love Song", norm.query)
+    }
+
+    @Test fun normalizesArabicNoiseAndAliases() {
+        assertEquals("تملي معاك", LyricsMetadataNormalizer.title("تملي معاك (فيديو كليب حصريا)"))
+        val norm = LyricsMetadataNormalizer.normalize("عمرو دياب - تملي معاك (فيديو كليب حصريا)", "")
+        assertEquals("تملي معاك", norm.title)
+        assertEquals("عمرو دياب", norm.artist)
+        assertTrue(LyricsMetadataNormalizer.areArtistsEquivalent("عمرو دياب", "Amr Diab"))
+        assertTrue(LyricsMetadataNormalizer.areArtistsEquivalent("فيروز", "Fairouz"))
+        assertTrue(LyricsMetadataNormalizer.areArtistsEquivalent("كاظم الساهر", "Kadim Al Sahir"))
+        assertTrue(LyricsMetadataNormalizer.areArtistsEquivalent("تامر حسني", "Tamer Hosny"))
+    }
+
+    @Test fun generatesArabicSearchVariations() {
+        val variations = LyricsMetadataNormalizer.searchVariations("تملي معاك", "عمرو دياب")
+        assertTrue(variations.isNotEmpty())
+        assertTrue(variations.any { it.first == "تملي معاك" && it.second == "Amr Diab" })
     }
 }

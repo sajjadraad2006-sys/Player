@@ -29,7 +29,7 @@ class SmartRecommendationEngine(
         allTracks: List<Track>,
         historyUris: List<String> = emptyList(),
         favorites: Set<String> = emptySet(),
-        limit: Int = 15,
+        limit: Int = 35,
     ): List<Track> = withContext(Dispatchers.Default) {
         if (allTracks.isEmpty()) return@withContext emptyList()
         if (currentTrack == null) {
@@ -135,7 +135,7 @@ class SmartRecommendationEngine(
      */
     suspend fun getOnlineRecommendations(
         currentTrack: Track?,
-        limit: Int = 12,
+        limit: Int = 30,
     ): List<UnifiedTrack> = withContext(Dispatchers.IO) {
         if (currentTrack == null || unifiedSearch == null) return@withContext emptyList()
         val cacheKey = currentTrack.uri.ifBlank { "${currentTrack.artist}#${currentTrack.title}" }
@@ -163,35 +163,59 @@ class SmartRecommendationEngine(
             cleanTitle
         }
 
-        // Generate recommendations query: search for artist's top tracks or related music
-        val searchQuery = when {
-            !detectedArtist.isNullOrBlank() -> "$detectedArtist songs"
-            coreTitle.isNotBlank() -> "$coreTitle mix"
-            else -> return@withContext emptyList()
+        // Generate prioritized complementary recommendation queries
+        val queries = mutableListOf<String>()
+        val hasArabic = (detectedArtist ?: "").any { it in '\u0600'..'\u06FF' } || coreTitle.any { it in '\u0600'..'\u06FF' }
+
+        if (!detectedArtist.isNullOrBlank()) {
+            queries.add("$detectedArtist songs")
+            if (hasArabic) {
+                queries.add("$detectedArtist اغاني")
+                queries.add("$detectedArtist اجمل ما غنى")
+            } else {
+                queries.add("$detectedArtist top tracks")
+            }
+        }
+        if (coreTitle.isNotBlank()) {
+            queries.add(if (hasArabic) "$coreTitle مكس" else "$coreTitle mix")
+            if (!detectedArtist.isNullOrBlank()) {
+                queries.add("$detectedArtist $coreTitle")
+            }
         }
 
-        return@withContext try {
-            val snapshot = withTimeoutOrNull(4_500L) {
-                unifiedSearch.search(searchQuery).firstOrNull { it.isComplete || it.recordings.size >= limit }
-            } ?: unifiedSearch.search(searchQuery).firstOrNull()
+        if (queries.isEmpty()) return@withContext emptyList()
 
+        return@withContext try {
+            val aggregated = mutableListOf<UnifiedTrack>()
+            val seenKeys = mutableSetOf<String>()
             val normCurrentTitle = SearchNormalization.normalize(rawTitle)
             val normCoreTitle = SearchNormalization.normalize(coreTitle)
 
-            val filtered = snapshot?.recordings.orEmpty()
-                .filter { onlineTrack ->
-                    val normOnlineTitle = SearchNormalization.normalize(onlineTrack.title)
-                    normOnlineTitle.isNotBlank() &&
-                        normOnlineTitle != normCurrentTitle &&
-                        (normCoreTitle.isBlank() || normOnlineTitle != normCoreTitle)
-                }
-                .distinctBy { it.uiKey }
-                .take(limit)
+            for (query in queries) {
+                if (aggregated.size >= limit) break
+                val snapshot = withTimeoutOrNull(4_000L) {
+                    unifiedSearch.search(query).firstOrNull { it.isComplete || it.recordings.size >= (limit - aggregated.size) }
+                } ?: unifiedSearch.search(query).firstOrNull()
 
-            if (filtered.isNotEmpty()) {
-                onlineCache[cacheKey] = filtered
+                val items = snapshot?.recordings.orEmpty()
+                for (onlineTrack in items) {
+                    val normOnlineTitle = SearchNormalization.normalize(onlineTrack.title)
+                    if (normOnlineTitle.isNotBlank() &&
+                        normOnlineTitle != normCurrentTitle &&
+                        (normCoreTitle.isBlank() || normOnlineTitle != normCoreTitle) &&
+                        seenKeys.add(onlineTrack.recordingIdentity)
+                    ) {
+                        aggregated.add(onlineTrack)
+                        if (aggregated.size >= limit) break
+                    }
+                }
             }
-            filtered
+
+            val finalResult = aggregated.take(limit)
+            if (finalResult.isNotEmpty()) {
+                onlineCache[cacheKey] = finalResult
+            }
+            finalResult
         } catch (_: Exception) {
             emptyList()
         }
@@ -203,7 +227,8 @@ class SmartRecommendationEngine(
         val vibeTags = listOf(
             "remix", "acoustic", "live", "slowed", "reverb", "sped up", "instrumental",
             "lo-fi", "lofi", "chill", "ambient", "club", "mix", "extended", "cover", "edit",
-            "ريمكس", "مباشر", "حفلة", "جلسة", "عود", "طرب", "مكس", "روقان", "هادئ", "مسرع", "مبطأ"
+            "ريمكس", "مباشر", "حفلة", "جلسة", "عود", "طرب", "مكس", "روقان", "هادئ", "مسرع", "مبطأ",
+            "عراقي", "خليجي", "مصري", "شامي", "مغربي", "دبكة", "راب", "راب عربي", "شعبي", "حزين"
         )
         for (tag in vibeTags) {
             if (normalized.contains(tag)) keywords.add(tag)

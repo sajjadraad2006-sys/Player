@@ -66,5 +66,17 @@ class LrclibMatchingTest {
             client.close()
         }
     }
+
+    @Test fun arabicQueryMatchesLatinCandidateWithEquivalentArtist() {
+        val client = LrclibClient()
+        try {
+            val latinTrack = LrclibTrack(1, "Tamally Maak", "Amr Diab", "Tamally Maak", 269.0, syncedLyrics = "[00:01.00]Tamally maak")
+            val candidate = client.pickBestCandidate(listOf(latinTrack), "تملي معاك", "عمرو دياب", "", 269_000)
+            assertEquals(latinTrack, candidate)
+        } finally {
+            client.close()
+        }
+    }
 }
+
 

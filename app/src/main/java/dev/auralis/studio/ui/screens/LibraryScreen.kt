@@ -17,7 +17,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Delete
@@ -78,6 +80,7 @@ fun LibraryScreen(
     onPlayNext: (Track) -> Unit,
     onAddToQueue: (Track) -> Unit,
     onAddToPlaylist: (Long, String) -> Unit,
+    onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -95,13 +98,34 @@ fun LibraryScreen(
     }
     val selectedPlaylistUris by selectedUrisFlow.collectAsState(initial = emptyList())
 
+    BackHandler(enabled = selectedGroup != null || selectedPlaylist != null) {
+        selectedGroup = null
+        selectedGroupName = null
+        selectedPlaylist = null
+    }
+
     Column(modifier.fillMaxSize()) {
-        Text(
-            stringResource(R.string.library),
-            style = MaterialTheme.typography.headlineLarge,
-            color = colors.onBackground,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = if (onBack != null) 4.dp else 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (onBack != null) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.back),
+                        tint = colors.onBackground,
+                    )
+                }
+            }
+            Text(
+                stringResource(R.string.library),
+                style = MaterialTheme.typography.headlineLarge,
+                color = colors.onBackground,
+            )
+        }
 
         // High-Contrast Segmented Tab Pills
         androidx.compose.foundation.lazy.LazyRow(

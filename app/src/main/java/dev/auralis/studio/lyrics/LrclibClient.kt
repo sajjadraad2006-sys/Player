@@ -90,37 +90,45 @@ class LrclibClient {
             lastLookupWasRateLimited = true
             return null
         }
-        // 1. Try exact endpoint
-        if (cleanArtist.isNotBlank() && durationMs > 0) try {
-            throttle()
-            val resp = client.get("$BASE/get") {
-                parameter("track_name", cleanTitle)
-                parameter("artist_name", cleanArtist)
-                if (album.isNotBlank()) parameter("album_name", album)
-                parameter("duration", (durationMs / 1000).toInt())
-            }
-            when (resp.status) {
-                HttpStatusCode.OK -> {
-                    val track = resp.body<LrclibTrack>()
-                    if (!track.syncedLyrics.isNullOrBlank() || !track.plainLyrics.isNullOrBlank() || !track.lyricsfile.isNullOrBlank()) {
-                        return track
+
+        val variations = LyricsMetadataNormalizer.searchVariations(title, artist)
+
+        // 1. Try exact endpoint with variations (e.g. Arabic title + Latin artist alias)
+        if (durationMs > 0) {
+            for ((vTitle, vArtist) in variations) {
+                if (vArtist.isBlank() || vTitle.isBlank()) continue
+                try {
+                    throttle()
+                    val resp = client.get("$BASE/get") {
+                        parameter("track_name", vTitle)
+                        parameter("artist_name", vArtist)
+                        if (album.isNotBlank()) parameter("album_name", album)
+                        parameter("duration", (durationMs / 1000).toInt())
                     }
+                    when (resp.status) {
+                        HttpStatusCode.OK -> {
+                            val track = resp.body<LrclibTrack>()
+                            if (!track.syncedLyrics.isNullOrBlank() || !track.plainLyrics.isNullOrBlank() || !track.lyricsfile.isNullOrBlank()) {
+                                return track
+                            }
+                        }
+                        HttpStatusCode.TooManyRequests -> {
+                            val retryAfter = resp.headers["Retry-After"]?.toLongOrNull() ?: 5L
+                            rateLimitedUntilMs = System.currentTimeMillis() + retryAfter.coerceIn(1L, 300L) * 1_000L
+                            lastLookupWasRateLimited = true
+                            Log.w(TAG, "Rate limited; Retry-After=${retryAfter}s")
+                            return null
+                        }
+                        HttpStatusCode.NotFound -> { /* try next variation */ }
+                        else -> Log.w(TAG, "Unexpected status from /get: ${resp.status}")
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    lastLookupError = e.localizedMessage ?: "Network request failed"
+                    Log.e(TAG, "LRCLIB /get error: ${e.message}")
                 }
-                HttpStatusCode.TooManyRequests -> {
-                    val retryAfter = resp.headers["Retry-After"]?.toLongOrNull() ?: 5L
-                    rateLimitedUntilMs = System.currentTimeMillis() + retryAfter.coerceIn(1L, 300L) * 1_000L
-                    lastLookupWasRateLimited = true
-                    Log.w(TAG, "Rate limited; Retry-After=${retryAfter}s")
-                    return null // caller will retry after caching the 429 state
-                }
-                HttpStatusCode.NotFound -> { /* fall through to search */ }
-                else -> Log.w(TAG, "Unexpected status from /get: ${resp.status}")
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            lastLookupError = e.localizedMessage ?: "Network request failed"
-            Log.e(TAG, "LRCLIB /get error: ${e.message}")
         }
 
         // 2. Fall back to search
@@ -142,44 +150,54 @@ class LrclibClient {
         return try {
             if (System.currentTimeMillis() < rateLimitedUntilMs) return null
             lastLookupError = null
-            throttle()
-            val resp = client.get("$BASE/search") {
-                parameter("track_name", title)
-                if (artist.isNotBlank()) parameter("artist_name", artist)
-            }
-            if (resp.status == HttpStatusCode.TooManyRequests) {
-                val retryAfter = resp.headers["Retry-After"]?.toLongOrNull() ?: 5L
-                rateLimitedUntilMs = System.currentTimeMillis() + retryAfter.coerceIn(1L, 300L) * 1_000L
-                lastLookupWasRateLimited = true
-                Log.w(TAG, "Rate limited on /search")
-                return null
-            }
 
-            var candidates = if (resp.status.isSuccess()) resp.body<List<LrclibTrack>>() else emptyList()
-            var best = pickBestCandidate(candidates, title, artist, album, durationMs)
-
-            // Fallback: try search with general query parameter `q` and variations
-            if (best == null) {
-                val queries = listOfNotNull(
-                    searchQuery.takeIf { it.isNotBlank() },
-                    if (artist.isNotBlank() && !title.contains(artist, ignoreCase = true)) "$artist $title" else null,
-                    title.takeIf { it.isNotBlank() },
-                ).distinct()
-
-                for (q in queries) {
-                    throttle()
-                    val qResp = client.get("$BASE/search") {
-                        parameter("q", q)
-                    }
-                    if (qResp.status.isSuccess()) {
-                        val qCandidates = qResp.body<List<LrclibTrack>>()
-                        best = pickBestCandidate(qCandidates, title, artist, album, durationMs)
-                        if (best != null) break
-                    }
+            val variations = LyricsMetadataNormalizer.searchVariations(title, artist)
+            for ((vTitle, vArtist) in variations) {
+                throttle()
+                val resp = client.get("$BASE/search") {
+                    parameter("track_name", vTitle)
+                    if (vArtist.isNotBlank()) parameter("artist_name", vArtist)
+                }
+                if (resp.status == HttpStatusCode.TooManyRequests) {
+                    val retryAfter = resp.headers["Retry-After"]?.toLongOrNull() ?: 5L
+                    rateLimitedUntilMs = System.currentTimeMillis() + retryAfter.coerceIn(1L, 300L) * 1_000L
+                    lastLookupWasRateLimited = true
+                    Log.w(TAG, "Rate limited on /search")
+                    return null
+                }
+                if (resp.status.isSuccess()) {
+                    val candidates = resp.body<List<LrclibTrack>>()
+                    val best = pickBestCandidate(candidates, title, artist, album, durationMs)
+                    if (best != null) return best
                 }
             }
 
-            best
+            // Fallback: try search with general query parameter `q` and variations
+            val queries = mutableListOf<String>()
+            if (searchQuery.isNotBlank()) queries.add(searchQuery)
+            if (artist.isNotBlank() && !title.contains(artist, ignoreCase = true)) {
+                queries.add("$artist $title")
+            }
+            queries.add(title)
+            for ((vTitle, vArtist) in variations) {
+                if (vArtist.isNotBlank() && vTitle.isNotBlank()) {
+                    queries.add("$vArtist $vTitle")
+                }
+            }
+
+            for (q in queries.distinct()) {
+                throttle()
+                val qResp = client.get("$BASE/search") {
+                    parameter("q", q)
+                }
+                if (qResp.status.isSuccess()) {
+                    val qCandidates = qResp.body<List<LrclibTrack>>()
+                    val best = pickBestCandidate(qCandidates, title, artist, album, durationMs)
+                    if (best != null) return best
+                }
+            }
+
+            null
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -206,21 +224,28 @@ class LrclibClient {
             val cleanArtist = norm.artist
             val searchQuery = norm.query
 
-            throttle()
-            val resp = client.get("$BASE/search") {
-                parameter("track_name", cleanTitle)
-                if (cleanArtist.isNotBlank()) parameter("artist_name", cleanArtist)
-            }
-            if (resp.status == HttpStatusCode.TooManyRequests) {
-                val retryAfter = resp.headers["Retry-After"]?.toLongOrNull() ?: 5L
-                rateLimitedUntilMs = System.currentTimeMillis() + retryAfter.coerceIn(1L, 300L) * 1_000L
-                lastLookupWasRateLimited = true
-                return emptyList()
-            }
-
-            val candidates = if (resp.status.isSuccess()) resp.body<List<LrclibTrack>>() else emptyList()
+            val variations = LyricsMetadataNormalizer.searchVariations(title, artist)
             val allCandidates = mutableListOf<LrclibTrack>()
-            allCandidates.addAll(candidates)
+
+            for ((vTitle, vArtist) in variations) {
+                throttle()
+                val resp = client.get("$BASE/search") {
+                    parameter("track_name", vTitle)
+                    if (vArtist.isNotBlank()) parameter("artist_name", vArtist)
+                }
+                if (resp.status == HttpStatusCode.TooManyRequests) {
+                    val retryAfter = resp.headers["Retry-After"]?.toLongOrNull() ?: 5L
+                    rateLimitedUntilMs = System.currentTimeMillis() + retryAfter.coerceIn(1L, 300L) * 1_000L
+                    lastLookupWasRateLimited = true
+                    return emptyList()
+                }
+                if (resp.status.isSuccess()) {
+                    val list = resp.body<List<LrclibTrack>>()
+                    for (c in list) {
+                        if (allCandidates.none { it.id == c.id }) allCandidates.add(c)
+                    }
+                }
+            }
 
             // Gather candidates from q parameter as well
             val q = searchQuery.ifBlank { if (cleanArtist.isNotBlank()) "$cleanArtist $cleanTitle" else cleanTitle }.trim()
@@ -279,7 +304,12 @@ class LrclibClient {
             val queryTitle = title.lowercase()
             val candidateTitle = track.trackName.lowercase()
             val titleSim  = similarity(queryTitle, candidateTitle) * titleWeight
-            val artistSim = similarity(artist.lowercase(), track.artistName.lowercase()) * artistWeight
+            val isArtistEquiv = LyricsMetadataNormalizer.areArtistsEquivalent(artist, track.artistName)
+            val artistSim = if (isArtistEquiv) {
+                1.0 * artistWeight
+            } else {
+                similarity(artist.lowercase(), track.artistName.lowercase()) * artistWeight
+            }
             val albumBonus = if (album.isBlank()) 0.0 else similarity(album.lowercase(), track.albumName.lowercase()) * 0.08
             val durDiff   = abs(durationSec - track.duration)
             val durScore  = when {
@@ -325,6 +355,17 @@ class LrclibClient {
         if (normA == normB) return 1.0
         if (normA.isBlank() || normB.isBlank()) return 0.0
         if (normA.contains(normB) || normB.contains(normA)) return 0.90
+
+        if (LyricsMetadataNormalizer.areArtistsEquivalent(a, b)) return 0.95
+
+        val aIsAr = LyricsMetadataNormalizer.isArabic(normA)
+        val bIsAr = LyricsMetadataNormalizer.isArabic(normB)
+        if (aIsAr != bIsAr) {
+            val transA = if (aIsAr) LyricsMetadataNormalizer.transliterateArabicToLatin(normA) else normA
+            val transB = if (bIsAr) LyricsMetadataNormalizer.transliterateArabicToLatin(normB) else normB
+            if (transA == transB) return 0.92
+            if (transA.contains(transB) || transB.contains(transA)) return 0.88
+        }
 
         val wordsA = normA.split(" ").filter { it.isNotBlank() }.toSet()
         val wordsB = normB.split(" ").filter { it.isNotBlank() }.toSet()

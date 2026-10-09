@@ -113,8 +113,6 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     val sleepRemaining by viewModel.sleepTimerRemainingMs.collectAsStateWithLifecycle()
     val libraryError by viewModel.libraryError.collectAsStateWithLifecycle()
     val downloadLocation by viewModel.downloadFolderLocation.collectAsStateWithLifecycle()
-    val visualizerBands by viewModel.visualizerBands.collectAsStateWithLifecycle()
-    val visualizerWaveform by viewModel.visualizerWaveform.collectAsStateWithLifecycle()
     val lyricsState by viewModel.lyricsState.collectAsStateWithLifecycle()
     val stemState by viewModel.stemState.collectAsStateWithLifecycle()
     val stemGains by viewModel.stemGains.collectAsStateWithLifecycle()
@@ -236,6 +234,12 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                 BackHandler(enabled = destination == MainDestination.SEARCH) {
                     destinationName = MainDestination.HOME.name
                 }
+                BackHandler(enabled = destination == MainDestination.LIBRARY) {
+                    destinationName = MainDestination.HOME.name
+                }
+                BackHandler(enabled = destination == MainDestination.AUDIO_LAB) {
+                    destinationName = MainDestination.HOME.name
+                }
 
                 Scaffold(
                     containerColor      = Color.Transparent,
@@ -310,7 +314,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                         label = "screen_destination",
                     ) { targetDestination ->
                         when (targetDestination) {
-                            MainDestination.HOME, MainDestination.LIBRARY -> HomeScreen(
+                            MainDestination.HOME -> HomeScreen(
                                 tracks = tracks,
                                 favorites = favorites,
                                 historyUris = history,
@@ -333,9 +337,25 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                                 playlistTrackUris = viewModel::playlistTrackUris,
                                 onNavigateToSearch = { destinationName = MainDestination.SEARCH.name },
                                 onNavigateToSettings = { destinationName = MainDestination.SETTINGS.name },
+                                onNavigateToLibrary = { destinationName = MainDestination.LIBRARY.name },
                                 layoutSettings = homeLayout,
                                 onUpdateLayoutSettings = viewModel::updateHomeLayout,
                                 recommendations = offlineRecommendations,
+                            )
+                            MainDestination.LIBRARY -> LibraryScreen(
+                                tracks = tracks,
+                                favorites = favorites,
+                                playlists = playlists,
+                                playlistTrackUris = viewModel::playlistTrackUris,
+                                onCreatePlaylist = viewModel::createPlaylist,
+                                onDeletePlaylist = viewModel::deletePlaylist,
+                                onPlay = viewModel.playback::play,
+                                onToggleFavorite = viewModel::toggleFavorite,
+                                onPlayNext = viewModel::playNext,
+                                onAddToQueue = viewModel::addToQueue,
+                                onAddToPlaylist = viewModel::addToPlaylist,
+                                onBack = { destinationName = MainDestination.HOME.name },
+                                modifier = commonModifier,
                             )
                             MainDestination.SEARCH -> SearchScreen(
                                 query                 = query,
@@ -410,6 +430,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                                 onInstrumentalGainChange = viewModel::setInstrumentalGain,
                                 onBassGainChange = viewModel::setBassGain,
                                 onPlayStemMix = viewModel::playStemMix,
+                                onBack = { destinationName = MainDestination.HOME.name },
                                 modifier = commonModifier,
                             )
                         }
@@ -440,6 +461,9 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                 ) {
                     BackHandler { playerVisible = false }
 
+                    val visualizerBands by viewModel.visualizerBands.collectAsStateWithLifecycle()
+                    val visualizerWaveform by viewModel.visualizerWaveform.collectAsStateWithLifecycle()
+
                     PlayerScreen(
                         state               = playback,
                         track               = currentTrack,
@@ -460,7 +484,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                         onQueueIndex        = viewModel.playback::playQueueIndex,
                         onRemoveQueue       = viewModel.playback::removeQueueItem,
                         onClearQueue        = viewModel.playback::clearQueue,
-                        onOpenAudioLab      = { quickAudioVisible = true },
+                        onOpenAudioLab      = { playerVisible = false; destinationName = MainDestination.AUDIO_LAB.name },
                         onOpenQuickAudio    = { quickAudioVisible = true },
                         onSleepTimer        = viewModel::startSleepTimer,
                         onCancelSleepTimer  = viewModel::cancelSleepTimer,

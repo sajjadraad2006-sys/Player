@@ -219,13 +219,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 allTracks = tracks.value,
                 historyUris = historyUris.value,
                 favorites = favorites.value,
-                limit = 15,
+                limit = 35,
             )
             _offlineRecommendations.value = offline
             if (track != null) {
                 _isSearchingRecommendations.value = true
                 try {
-                    val online = recommendationEngine.getOnlineRecommendations(track, limit = 12)
+                    val online = recommendationEngine.getOnlineRecommendations(track, limit = 30)
                     _onlineRecommendations.value = online
                 } finally {
                     _isSearchingRecommendations.value = false

@@ -36,6 +36,7 @@ enum class LyricsSource {
     LOCAL_LRC,      // matched from a local .lrc file alongside the audio
     CACHE,          // fetched from a provider and cached
     LRCLIB,         // live result from LRCLIB API
+    YOUTUBE_CAPTIONS, // synced captions extracted from YouTube video
 }
 
 /**
