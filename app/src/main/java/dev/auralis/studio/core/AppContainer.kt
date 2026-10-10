@@ -26,11 +26,12 @@ class AppContainer(context: Context) {
         .addMigrations(*AppDatabase.ALL_MIGRATIONS)
         .build()
 
+    val networkMonitor = NetworkMonitor(context)
     val settings    = SettingsRepository(context)
     val library     = MediaStoreMusicRepository(context)
     val safLibrary  = SafMusicRepository(context)
     val pcmAudioTap = PcmAudioTap()
-    val lyrics = LyricsRepository(context, database.lyricsDao(), LrclibClient())
+    val lyrics = LyricsRepository(context, database.lyricsDao(), LrclibClient(), networkMonitor)
     val audiusProvider = AudiusClient(BuildConfig.AUDIUS_API_KEY)
     val jamendoProvider = JamendoClient(BuildConfig.JAMENDO_CLIENT_ID)
     val itunesProvider = ITunesCatalogProvider()

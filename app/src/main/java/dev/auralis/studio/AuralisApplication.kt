@@ -38,22 +38,34 @@ class AuralisApplication : Application(), ImageLoaderFactory {
 
     override fun newImageLoader(): ImageLoader {
         return _imageLoader ?: synchronized(this) {
-            _imageLoader ?: ImageLoader.Builder(this)
-                .memoryCache {
-                    MemoryCache.Builder(this)
-                        .maxSizePercent(0.20) // Limit in-memory image cache to 20% of app RAM
-                        .build()
-                }
-                .diskCache {
-                    DiskCache.Builder()
-                        .directory(cacheDir.resolve("image_cache"))
-                        .maxSizeBytes(100L * 1024L * 1024L) // 100 MB disk cache cap
-                        .build()
-                }
-                .crossfade(true)
-                .respectCacheHeaders(false)
-                .build()
-                .also { _imageLoader = it }
+            _imageLoader ?: run {
+                val monitor = _container?.networkMonitor ?: dev.auralis.studio.core.NetworkMonitor(this)
+                val okHttpClient = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                    .callTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+                    .addInterceptor(monitor.offlineCacheInterceptor)
+                    .build()
+
+                ImageLoader.Builder(this)
+                    .okHttpClient(okHttpClient)
+                    .memoryCache {
+                        MemoryCache.Builder(this)
+                            .maxSizePercent(0.25) // 25% of app RAM for smooth scrolling
+                            .build()
+                    }
+                    .diskCache {
+                        DiskCache.Builder()
+                            .directory(cacheDir.resolve("image_cache"))
+                            .maxSizeBytes(150L * 1024L * 1024L) // 150 MB disk cache cap
+                            .build()
+                    }
+                    .bitmapConfig(android.graphics.Bitmap.Config.RGB_565)
+                    .allowRgb565(true)
+                    .crossfade(true)
+                    .respectCacheHeaders(false)
+                    .build()
+            }.also { _imageLoader = it }
         }
     }
 

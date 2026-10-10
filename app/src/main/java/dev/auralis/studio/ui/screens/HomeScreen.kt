@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,6 +14,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material3.Surface
+import androidx.compose.material3.surfaceColorAtElevation
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -186,6 +191,7 @@ fun HomeScreen(
                 tracks = selectedPlaylistTracks,
                 favorites = favorites,
                 playlists = playlists,
+                currentTrack = currentTrack,
                 onBack = { selectedPlaylist = null },
                 onPlay = onPlay,
                 onToggleFavorite = onToggleFavorite,
@@ -201,67 +207,30 @@ fun HomeScreen(
             )
         } else {
             Column(Modifier.fillMaxSize()) {
-                // ── Top Action Bar (Branding + Instant Search + Direct Settings) ──
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                if (selectedCategory != null) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { selectedCategory = null }) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = stringResource(R.string.back),
-                                tint = colors.onBackground,
+                // ── Top Action Bar (Branding + Fast Scan & Layout Options) ──
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    if (selectedCategory != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { selectedCategory = null }) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = stringResource(R.string.back),
+                                    tint = colors.onBackground,
+                                )
+                            }
+                            Text(
+                                text = stringResource(selectedCategory!!.titleRes),
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.onBackground,
                             )
                         }
-                        Text(
-                            text = stringResource(selectedCategory!!.titleRes),
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.onBackground,
-                        )
-                    }
-                    IconButton(onClick = onNavigateToSearch) {
-                        Icon(
-                            Icons.Default.Search,
-                            contentDescription = stringResource(R.string.search),
-                            tint = colors.onBackground,
-                        )
-                    }
-                } else {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    Brush.linearGradient(
-                                        listOf(colors.primary, colors.secondary),
-                                    ),
-                                ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.Default.MusicNote,
-                                contentDescription = null,
-                                tint = colors.onPrimary,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            text = stringResource(R.string.app_name),
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = colors.onBackground,
-                        )
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onNavigateToSearch) {
                             Icon(
                                 Icons.Default.Search,
@@ -269,30 +238,61 @@ fun HomeScreen(
                                 tint = colors.onBackground,
                             )
                         }
-                        IconButton(onClick = onNavigateToLibrary) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.QueueMusic,
-                                contentDescription = stringResource(R.string.library),
-                                tint = colors.onBackground,
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(
+                                        Brush.linearGradient(
+                                            listOf(colors.primary, colors.secondary),
+                                        ),
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.Default.MusicNote,
+                                    contentDescription = null,
+                                    tint = colors.onPrimary,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                text = stringResource(R.string.app_name),
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = colors.onBackground,
                             )
                         }
-                        IconButton(onClick = { showCustomizeDialog = true }) {
-                            Icon(
-                                Icons.Default.Dashboard,
-                                contentDescription = stringResource(R.string.customize_home),
-                                tint = colors.onBackground,
-                            )
-                        }
-                        IconButton(onClick = onNavigateToSettings) {
-                            Icon(
-                                Icons.Default.Settings,
-                                contentDescription = stringResource(R.string.settings),
-                                tint = colors.onBackground,
-                            )
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (isScanning) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = colors.primary,
+                                )
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            IconButton(onClick = onRefresh) {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = stringResource(R.string.scan_again),
+                                    tint = colors.onBackground.copy(alpha = 0.8f),
+                                )
+                            }
+                            IconButton(onClick = { showCustomizeDialog = true }) {
+                                Icon(
+                                    Icons.Default.Dashboard,
+                                    contentDescription = stringResource(R.string.customize_home),
+                                    tint = colors.onBackground.copy(alpha = 0.8f),
+                                )
+                            }
                         }
                     }
                 }
-            }
 
             // ── Fast Navigation Filter Chips ────────────────────────────────
             if (layoutSettings.showFilterChips) {
@@ -388,41 +388,66 @@ fun HomeScreen(
                     // ── Dynamic Greeting Header Banner ──
                     if (layoutSettings.showGreetingHeader) {
                         item(key = "greeting_banner") {
-                            GlassCard(modifier = Modifier.fillMaxWidth()) {
-                                Row(
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(22.dp),
+                                color = colors.surfaceVariant.copy(alpha = 0.5f),
+                                border = BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.3f)),
+                                shadowElevation = 2.dp,
+                            ) {
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(16.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                        .background(
+                                            Brush.horizontalGradient(
+                                                listOf(
+                                                    colors.primary.copy(alpha = 0.16f),
+                                                    colors.secondary.copy(alpha = 0.08f),
+                                                    Color.Transparent,
+                                                )
+                                            )
+                                        )
+                                        .padding(18.dp),
                                 ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(
-                                            text = stringResource(greetingRes),
-                                            style = MaterialTheme.typography.titleLarge,
-                                            fontWeight = FontWeight.Bold,
-                                            color = colors.onSurface,
-                                        )
-                                        Spacer(Modifier.height(2.dp))
-                                        Text(
-                                            text = "${tracks.size} ${stringResource(R.string.all_songs)} · ${favoriteTracks.size} ${stringResource(R.string.favorites)}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = colors.onSurfaceVariant,
-                                        )
-                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                text = stringResource(greetingRes),
+                                                style = MaterialTheme.typography.headlineSmall,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = colors.onSurface,
+                                            )
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(
+                                                text = "${tracks.size} ${stringResource(R.string.all_songs)} · ${favoriteTracks.size} ${stringResource(R.string.favorites)}",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = colors.onSurfaceVariant,
+                                            )
+                                        }
 
-                                    if (tracks.isNotEmpty()) {
-                                        FilledIconButton(
-                                            onClick = {
-                                                val shuffled = tracks.shuffled()
-                                                shuffled.firstOrNull()?.let { onPlay(it, shuffled) }
-                                            },
-                                            colors = IconButtonDefaults.filledIconButtonColors(
-                                                containerColor = colors.primary,
-                                                contentColor = colors.onPrimary,
-                                            ),
-                                        ) {
-                                            Icon(Icons.Default.Shuffle, contentDescription = stringResource(R.string.shuffle_all))
+                                        if (tracks.isNotEmpty()) {
+                                            FilledIconButton(
+                                                onClick = {
+                                                    val shuffled = tracks.shuffled()
+                                                    shuffled.firstOrNull()?.let { onPlay(it, shuffled) }
+                                                },
+                                                modifier = Modifier.size(46.dp),
+                                                shape = RoundedCornerShape(16.dp),
+                                                colors = IconButtonDefaults.filledIconButtonColors(
+                                                    containerColor = colors.primary,
+                                                    contentColor = colors.onPrimary,
+                                                ),
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Shuffle,
+                                                    contentDescription = stringResource(R.string.shuffle_all),
+                                                    modifier = Modifier.size(22.dp),
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -771,6 +796,7 @@ fun HomeScreen(
                             ) { track ->
                                 TrackRow(
                                     track = track,
+                                    isPlaying = currentTrack?.uri == track.uri,
                                     isFavorite = track.uri in favorites,
                                     playlists = playlists,
                                     onPlay = { onPlay(track, displayList) },
@@ -848,6 +874,7 @@ fun HomeScreen(
                         items(categoryTracks, key = { "cat_${it.uri}" }) { track ->
                             TrackRow(
                                 track = track,
+                                isPlaying = currentTrack?.uri == track.uri,
                                 isFavorite = track.uri in favorites,
                                 playlists = playlists,
                                 onPlay = { onPlay(track, categoryTracks) },
@@ -1108,18 +1135,18 @@ private fun ClassicSixCardGrid(
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         // Row 1: Library, Folder, Favorite
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             CategoryTile(
                 title = stringResource(R.string.category_library),
                 count = tracksCount,
                 icon = Icons.Default.MusicNote,
-                backgroundColor = Color(0xFF3B82F6),
+                accentColor = Color(0xFF6366F1),
                 onClick = { onSelectCategory(HomeCategory.SONGS) },
                 modifier = Modifier.weight(1f),
             )
@@ -1127,7 +1154,7 @@ private fun ClassicSixCardGrid(
                 title = stringResource(R.string.category_folder),
                 count = foldersCount,
                 icon = Icons.Default.Folder,
-                backgroundColor = Color(0xFFF97316),
+                accentColor = Color(0xFFF59E0B),
                 onClick = { onSelectCategory(HomeCategory.FOLDERS) },
                 modifier = Modifier.weight(1f),
             )
@@ -1135,7 +1162,7 @@ private fun ClassicSixCardGrid(
                 title = stringResource(R.string.category_favorite),
                 count = favoritesCount,
                 icon = Icons.Default.Favorite,
-                backgroundColor = Color(0xFFEC4899),
+                accentColor = Color(0xFFEC4899),
                 onClick = { onSelectCategory(HomeCategory.FAVORITES) },
                 modifier = Modifier.weight(1f),
             )
@@ -1144,13 +1171,13 @@ private fun ClassicSixCardGrid(
         // Row 2: Recent Play, Recent Add, Most Play
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             CategoryTile(
                 title = stringResource(R.string.category_recent_play),
                 count = recentPlayCount,
                 icon = Icons.Default.Schedule,
-                backgroundColor = Color(0xFF06B6D4),
+                accentColor = Color(0xFF06B6D4),
                 onClick = { onSelectCategory(HomeCategory.RECENT) },
                 modifier = Modifier.weight(1f),
             )
@@ -1158,7 +1185,7 @@ private fun ClassicSixCardGrid(
                 title = stringResource(R.string.category_recent_add),
                 count = recentAddCount,
                 icon = Icons.Default.History,
-                backgroundColor = Color(0xFF10B981),
+                accentColor = Color(0xFF10B981),
                 onClick = { onSelectCategory(HomeCategory.SONGS) },
                 modifier = Modifier.weight(1f),
             )
@@ -1166,7 +1193,7 @@ private fun ClassicSixCardGrid(
                 title = stringResource(R.string.category_most_play),
                 count = mostPlayCount,
                 icon = Icons.Default.Equalizer,
-                backgroundColor = Color(0xFFA855F7),
+                accentColor = Color(0xFFA855F7),
                 onClick = { onSelectCategory(HomeCategory.RECENT) },
                 modifier = Modifier.weight(1f),
             )
@@ -1179,48 +1206,76 @@ private fun CategoryTile(
     title: String,
     count: Int,
     icon: ImageVector,
-    backgroundColor: Color,
+    accentColor: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(
-        modifier = modifier
-            .height(115.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(backgroundColor)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp).copy(alpha = 0.85f),
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.32f)),
+        shadowElevation = 3.dp,
+        modifier = modifier.height(118.dp),
     ) {
-        // Count badge in top right
-        Text(
-            text = "$count",
-            color = Color.White.copy(alpha = 0.85f),
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.align(Alignment.TopEnd),
-        )
-
-        // Centered large icon
-        Icon(
-            imageVector = icon,
-            contentDescription = title,
-            tint = Color.White,
+        Box(
             modifier = Modifier
-                .size(38.dp)
-                .align(Alignment.Center),
-        )
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            accentColor.copy(alpha = 0.18f),
+                            Color.Transparent,
+                            accentColor.copy(alpha = 0.06f),
+                        )
+                    )
+                )
+                .padding(horizontal = 8.dp, vertical = 10.dp),
+        ) {
+            // Count pill badge in top right
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = accentColor.copy(alpha = 0.18f),
+                modifier = Modifier.align(Alignment.TopEnd),
+            ) {
+                Text(
+                    text = "$count",
+                    color = accentColor,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.ExtraBold,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
 
-        // Bottom title uppercase
-        Text(
-            text = title,
-            color = Color.White,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            fontSize = 11.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.align(Alignment.BottomCenter),
-        )
+            // Centered glowing icon in rounded container
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .align(Alignment.Center)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(accentColor.copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = accentColor,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+
+            // Bottom title
+            Text(
+                text = title,
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
     }
 }
 
@@ -1582,6 +1637,7 @@ private fun PlaylistDetailView(
     tracks: List<Track>,
     favorites: Set<String>,
     playlists: List<PlaylistEntity>,
+    currentTrack: Track? = null,
     onBack: () -> Unit,
     onPlay: (Track, List<Track>) -> Unit,
     onToggleFavorite: (String) -> Unit,
@@ -1760,6 +1816,7 @@ private fun PlaylistDetailView(
                 items(tracks, key = { "pl_${playlist.id}_${it.uri}" }) { track ->
                     TrackRow(
                         track = track,
+                        isPlaying = currentTrack?.uri == track.uri,
                         isFavorite = track.uri in favorites,
                         playlists = playlists,
                         onPlay = { onPlay(track, tracks) },

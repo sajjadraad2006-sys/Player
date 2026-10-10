@@ -22,7 +22,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.composed
@@ -249,8 +257,55 @@ fun DefaultArtworkPlaceholder(shape: RoundedCornerShape, modifier: Modifier = Mo
     }
 }
 
+@Composable
+fun MiniEqualizerBars(
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary,
+) {
+    val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "eq_bars")
+    val h1 by infiniteTransition.animateFloat(
+        initialValue = 0.3f, targetValue = 0.95f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(450, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
+        ),
+        label = "h1",
+    )
+    val h2 by infiniteTransition.animateFloat(
+        initialValue = 0.9f, targetValue = 0.25f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(380, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
+        ),
+        label = "h2",
+    )
+    val h3 by infiniteTransition.animateFloat(
+        initialValue = 0.4f, targetValue = 1.0f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(520, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
+        ),
+        label = "h3",
+    )
+
+    Row(
+        modifier = modifier.size(width = 15.dp, height = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        val bar1Height = if (isPlaying) h1 else 0.35f
+        val bar2Height = if (isPlaying) h2 else 0.65f
+        val bar3Height = if (isPlaying) h3 else 0.45f
+
+        Box(Modifier.width(2.5.dp).fillMaxHeight(bar1Height).clip(RoundedCornerShape(1.dp)).background(color))
+        Box(Modifier.width(2.5.dp).fillMaxHeight(bar2Height).clip(RoundedCornerShape(1.dp)).background(color))
+        Box(Modifier.width(2.5.dp).fillMaxHeight(bar3Height).clip(RoundedCornerShape(1.dp)).background(color))
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// TrackRow — compact list item with high performance rendering
+// TrackRow — compact list item with high performance rendering & active playing state
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
 fun TrackRow(
@@ -263,27 +318,48 @@ fun TrackRow(
     onAddToQueue: () -> Unit,
     onAddToPlaylist: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    isPlaying: Boolean = false,
     maxTitleLines: Int = 2,
     onRemove: (() -> Unit)? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
+    val activeBg = if (isPlaying) colors.primary.copy(alpha = 0.08f) else Color.Transparent
+
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(activeBg)
             .clickable(onClick = onPlay)
-            .padding(horizontal = 16.dp, vertical = 9.dp),
+            .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TrackArtwork(track, Modifier.size(52.dp))
+        Box(contentAlignment = Alignment.BottomEnd) {
+            TrackArtwork(track, Modifier.size(52.dp))
+            if (isPlaying) {
+                Box(
+                    modifier = Modifier
+                        .padding(2.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color.Black.copy(alpha = 0.65f))
+                        .padding(horizontal = 3.dp, vertical = 2.dp),
+                ) {
+                    MiniEqualizerBars(isPlaying = true, color = colors.primary)
+                }
+            }
+        }
+
         Spacer(Modifier.width(12.dp))
+
         Column(Modifier.weight(1f)) {
             Text(
                 track.title,
                 maxLines  = maxTitleLines,
                 overflow  = TextOverflow.Ellipsis,
                 style     = MaterialTheme.typography.titleMedium,
-                color     = colors.onSurface,
+                fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.SemiBold,
+                color     = if (isPlaying) colors.primary else colors.onSurface,
             )
             Spacer(Modifier.height(2.dp))
             Text(
@@ -294,24 +370,31 @@ fun TrackRow(
                 color     = colors.onSurfaceVariant,
             )
         }
+
+        Spacer(Modifier.width(6.dp))
+
         Text(
             DateUtils.formatElapsedTime(track.durationMs / 1000),
             style = MaterialTheme.typography.labelSmall,
-            color = colors.onSurfaceVariant,
+            color = colors.onSurfaceVariant.copy(alpha = 0.8f),
         )
-        IconButton(onClick = onToggleFavorite) {
+
+        IconButton(onClick = onToggleFavorite, modifier = Modifier.size(36.dp)) {
             Icon(
                 imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                 contentDescription = stringResource(if (isFavorite) R.string.remove_favorite else R.string.favorite),
-                tint = if (isFavorite) colors.primary else colors.onSurfaceVariant,
+                tint = if (isFavorite) colors.primary else colors.onSurfaceVariant.copy(alpha = 0.7f),
+                modifier = Modifier.size(19.dp),
             )
         }
+
         Box {
-            IconButton(onClick = { menuExpanded = true }) {
+            IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(36.dp)) {
                 Icon(
                     Icons.Default.MoreVert,
                     contentDescription = stringResource(R.string.more_actions),
-                    tint = colors.onSurfaceVariant,
+                    tint = colors.onSurfaceVariant.copy(alpha = 0.7f),
+                    modifier = Modifier.size(19.dp),
                 )
             }
             if (menuExpanded) {

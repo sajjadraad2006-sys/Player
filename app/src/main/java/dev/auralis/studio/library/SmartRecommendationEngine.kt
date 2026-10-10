@@ -18,6 +18,7 @@ import kotlin.math.abs
  */
 class SmartRecommendationEngine(
     private val unifiedSearch: UnifiedSearchAggregator? = null,
+    private val networkMonitor: dev.auralis.studio.core.NetworkMonitor? = null,
 ) {
     private val onlineCache = ConcurrentHashMap<String, List<UnifiedTrack>>()
 
@@ -138,6 +139,7 @@ class SmartRecommendationEngine(
         limit: Int = 30,
     ): List<UnifiedTrack> = withContext(Dispatchers.IO) {
         if (currentTrack == null || unifiedSearch == null) return@withContext emptyList()
+        if (networkMonitor?.currentOnline == false) return@withContext emptyList()
         val cacheKey = currentTrack.uri.ifBlank { "${currentTrack.artist}#${currentTrack.title}" }
 
         onlineCache[cacheKey]?.let { cached ->
@@ -193,9 +195,9 @@ class SmartRecommendationEngine(
 
             for (query in queries) {
                 if (aggregated.size >= limit) break
-                val snapshot = withTimeoutOrNull(4_000L) {
+                val snapshot = withTimeoutOrNull(2_500L) {
                     unifiedSearch.search(query).firstOrNull { it.isComplete || it.recordings.size >= (limit - aggregated.size) }
-                } ?: unifiedSearch.search(query).firstOrNull()
+                }
 
                 val items = snapshot?.recordings.orEmpty()
                 for (onlineTrack in items) {

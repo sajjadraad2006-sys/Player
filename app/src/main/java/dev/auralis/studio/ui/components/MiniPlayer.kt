@@ -31,6 +31,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +45,33 @@ import dev.auralis.studio.R
 import dev.auralis.studio.core.model.Track
 import dev.auralis.studio.designsystem.LocalAuralisTokens
 import dev.auralis.studio.designsystem.LocalAuralisControlColors
+
+@Composable
+fun MiniPlayer(
+    track: Track,
+    playbackStateFlow: kotlinx.coroutines.flow.StateFlow<dev.auralis.studio.playback.PlaybackUiState>,
+    onOpen: () -> Unit,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val playback by playbackStateFlow.collectAsStateWithLifecycle()
+    val progressFraction = if (playback.durationMs > 0)
+        playback.positionMs.toFloat() / playback.durationMs.toFloat()
+    else 0f
+
+    MiniPlayer(
+        track = track,
+        isPlaying = playback.isPlaying,
+        progress = progressFraction,
+        onOpen = onOpen,
+        onPlayPause = onPlayPause,
+        onNext = onNext,
+        onPrevious = onPrevious,
+        modifier = modifier,
+    )
+}
 
 @Composable
 fun MiniPlayer(

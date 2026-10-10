@@ -57,6 +57,13 @@ class LrclibClient {
     @Volatile var lastLookupError: String? = null
         private set
     private val client = HttpClient(OkHttp) {
+        engine {
+            config {
+                connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+                readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                callTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+            }
+        }
         install(ContentNegotiation) {
             json(Json { ignoreUnknownKeys = true; isLenient = true })
         }

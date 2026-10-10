@@ -35,6 +35,7 @@ class LyricsRepository(
     private val context: Context,
     private val dao: LyricsDao,
     private val lrclib: LrclibClient,
+    private val networkMonitor: dev.auralis.studio.core.NetworkMonitor? = null,
     private val youtubeCaptions: YouTubeCaptionsClient = YouTubeCaptionsClient(),
 ) {
     private val negativeCache = context.getSharedPreferences("lyrics_negative_cache", Context.MODE_PRIVATE)
@@ -383,11 +384,11 @@ class LyricsRepository(
     }
 
     fun isNetworkAvailable(): Boolean {
-        val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        if (networkMonitor != null) return networkMonitor.currentOnline
+        val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
         val network = manager.activeNetwork ?: return false
         val capabilities = manager.getNetworkCapabilities(network) ?: return false
-        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
     val lastLookupWasRateLimited: Boolean get() = lrclib.lastLookupWasRateLimited

@@ -131,6 +131,7 @@ fun SearchScreen(
     onPlayNext: (Track) -> Unit,
     onAddToQueue: (Track) -> Unit,
     onAddToPlaylist: (Long, String) -> Unit,
+    currentTrack: Track? = null,
     mediaResolver: dev.auralis.studio.resolver.api.MediaResolver? = null,
     onEnqueueResolverDownload: (dev.auralis.studio.resolver.api.ResolverDownloadDescriptor) -> Unit = {},
     youtubeApiKey: String = "",
@@ -569,6 +570,7 @@ fun SearchScreen(
                     items(pagedResults, key = Track::uri) { track ->
                         TrackRow(
                             track = track,
+                            isPlaying = currentTrack?.uri == track.uri,
                             isFavorite = track.uri in favorites,
                             playlists = playlists,
                             onPlay = { onPlay(track, results) },

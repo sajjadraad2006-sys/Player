@@ -80,6 +80,7 @@ fun LibraryScreen(
     onPlayNext: (Track) -> Unit,
     onAddToQueue: (Track) -> Unit,
     onAddToPlaylist: (Long, String) -> Unit,
+    currentTrack: Track? = null,
     onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -175,6 +176,7 @@ fun LibraryScreen(
                 tracks = shownTracks,
                 favorites = favorites,
                 playlists = playlists,
+                currentTrack = currentTrack,
                 onBack = {
                     selectedGroup = null
                     selectedGroupName = null
@@ -192,6 +194,7 @@ fun LibraryScreen(
                 tracks = tracks,
                 favorites = favorites,
                 playlists = playlists,
+                currentTrack = currentTrack,
                 onBack = null,
                 onPlay = onPlay,
                 onToggleFavorite = onToggleFavorite,
@@ -204,6 +207,7 @@ fun LibraryScreen(
                 tracks = tracks.filter { it.uri in favorites },
                 favorites = favorites,
                 playlists = playlists,
+                currentTrack = currentTrack,
                 onBack = null,
                 onPlay = onPlay,
                 onToggleFavorite = onToggleFavorite,
@@ -274,6 +278,7 @@ private fun TrackList(
     onPlayNext: (Track) -> Unit,
     onAddToQueue: (Track) -> Unit,
     onAddToPlaylist: (Long, String) -> Unit,
+    currentTrack: Track? = null,
 ) {
     val colors = MaterialTheme.colorScheme
 
@@ -360,6 +365,7 @@ private fun TrackList(
             items(tracks, key = Track::uri) { track ->
                 TrackRow(
                     track = track,
+                    isPlaying = currentTrack?.uri == track.uri,
                     isFavorite = track.uri in favorites,
                     playlists = playlists,
                     onPlay = { onPlay(track, tracks) },

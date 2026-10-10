@@ -53,6 +53,13 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.Surface
+import androidx.compose.material3.surfaceColorAtElevation
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.size
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -89,6 +96,8 @@ import dev.auralis.studio.ui.screens.SearchScreen
 import dev.auralis.studio.ui.screens.SettingsScreen
 import dev.auralis.studio.ui.sheets.AudioEffectsSheet
 import dev.auralis.studio.ui.sheets.RecommendationsSheet
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 private enum class MainDestination { HOME, LIBRARY, SEARCH, AUDIO_LAB, SETTINGS }
 
@@ -99,7 +108,8 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
     val history by viewModel.historyUris.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
-    val playback by viewModel.playbackState.collectAsStateWithLifecycle()
+    val currentTrack by viewModel.currentPlayingTrack.collectAsStateWithLifecycle()
+    val playbackError by viewModel.playbackState.map { it.error }.distinctUntilChanged().collectAsStateWithLifecycle(null)
     val config by viewModel.audioConfig.collectAsStateWithLifecycle()
     val theme by viewModel.themeSettings.collectAsStateWithLifecycle()
     val results by viewModel.searchResults.collectAsStateWithLifecycle()
@@ -125,7 +135,6 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     val homeLayout by viewModel.homeLayoutSettings.collectAsStateWithLifecycle()
     val offlineRecommendations by viewModel.offlineRecommendations.collectAsStateWithLifecycle()
 
-
     var audioPermissionGranted by remember { mutableStateOf(viewModel.hasAudioPermission) }
     var notificationPermissionGranted by remember {
         mutableStateOf(
@@ -139,27 +148,6 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     var recommendationsVisible by rememberSaveable { mutableStateOf(false) }
     var welcomeDismissed by rememberSaveable { mutableStateOf(false) }
     val destination = runCatching { MainDestination.valueOf(destinationName) }.getOrDefault(MainDestination.HOME)
-    val currentOnlineTrack by viewModel.currentPlayingOnlineTrack.collectAsStateWithLifecycle()
-    val currentMediaMetadata = playback.currentMediaItem?.mediaMetadata
-    val currentTrack = playback.currentMediaItem?.mediaId?.let { uri ->
-        val found = tracks.firstOrNull { it.uri == uri }
-            ?: (if (currentOnlineTrack?.uri == uri) currentOnlineTrack else null)
-            ?: viewModel.generatedTrack(uri)
-        if (found != null && found.artworkUri == null && currentMediaMetadata?.artworkUri != null) {
-            found.copy(customArtworkUri = currentMediaMetadata.artworkUri.toString())
-        } else {
-            found ?: currentMediaMetadata?.let { meta ->
-                Track(
-                    id = -1L,
-                    uri = uri,
-                    title = meta.title?.toString() ?: currentOnlineTrack?.title.orEmpty(),
-                    artist = meta.artist?.toString() ?: currentOnlineTrack?.artist.orEmpty(),
-                    album = meta.albumTitle?.toString() ?: currentOnlineTrack?.album.orEmpty(),
-                    customArtworkUri = meta.artworkUri?.toString() ?: currentOnlineTrack?.customArtworkUri,
-                )
-            }
-        }
-    }
     val artworkPalette = rememberArtworkPalette(currentTrack?.artworkUri)
     val snackbar = remember { SnackbarHostState() }
     val unknownError = stringResource(R.string.unknown_error)
@@ -204,8 +192,8 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     }
     val chooseFolder = { folderLauncher.launch(null) }
 
-    LaunchedEffect(libraryError, playback.error) {
-        (libraryError ?: playback.error)?.let { snackbar.showSnackbar(it.ifBlank { unknownError }) }
+    LaunchedEffect(libraryError, playbackError) {
+        (libraryError ?: playbackError)?.let { snackbar.showSnackbar(it.ifBlank { unknownError }) }
     }
 
     LaunchedEffect(playerVisible, theme.visualQuality) {
@@ -246,21 +234,25 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                     contentWindowInsets = WindowInsets.safeDrawing,
                     snackbarHost        = { SnackbarHost(snackbar) },
                     bottomBar = {
-                        currentTrack?.let {
-                            val progressFraction = if (playback.durationMs > 0)
-                                playback.positionMs.toFloat() / playback.durationMs.toFloat()
-                            else 0f
-                            MiniPlayer(
-                                track       = it,
-                                isPlaying   = playback.isPlaying,
-                                progress    = progressFraction,
-                                onOpen      = { playerVisible = true },
-                                onPlayPause = viewModel.playback::playPause,
-                                onNext      = viewModel.playback::next,
-                                onPrevious  = viewModel.playback::previous,
-                                modifier    = Modifier
-                                    .navigationBarsPadding()
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .navigationBarsPadding(),
+                        ) {
+                            currentTrack?.let {
+                                MiniPlayer(
+                                    track       = it,
+                                    playbackStateFlow = viewModel.playbackState,
+                                    onOpen      = { playerVisible = true },
+                                    onPlayPause = viewModel.playback::playPause,
+                                    onNext      = viewModel.playback::next,
+                                    onPrevious  = viewModel.playback::previous,
+                                    modifier    = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                )
+                            }
+                            AuralisBottomNavBar(
+                                currentDestination = destination,
+                                onNavigate = { destinationName = it.name },
                             )
                         }
                     },
@@ -269,47 +261,11 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                     AnimatedContent(
                         targetState = destination,
                         transitionSpec = {
-                            when (theme.animationStyle) {
-                                AnimationStyle.SMOOTH -> {
-                                    (fadeIn(animationSpec = tween(300, easing = FastOutSlowInEasing)) +
-                                            slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Start, animationSpec = tween(300, easing = FastOutSlowInEasing)))
-                                        .togetherWith(
-                                            fadeOut(animationSpec = tween(180)) +
-                                                    slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Start, animationSpec = tween(180, easing = FastOutSlowInEasing))
-                                        )
-                                }
-                                AnimationStyle.SPRING -> {
-                                    (fadeIn(animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)) +
-                                            scaleIn(initialScale = 0.94f, animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)))
-                                        .togetherWith(
-                                            fadeOut(animationSpec = tween(160)) + scaleOut(targetScale = 1.04f)
-                                        )
-                                }
-                                AnimationStyle.FADE_ZOOM -> {
-                                    (fadeIn(animationSpec = tween(260, easing = FastOutSlowInEasing)) +
-                                            scaleIn(initialScale = 0.88f, animationSpec = tween(260, easing = FastOutSlowInEasing)))
-                                        .togetherWith(
-                                            fadeOut(animationSpec = tween(180)) + scaleOut(targetScale = 1.05f)
-                                        )
-                                }
-                                AnimationStyle.FAST -> {
-                                    (fadeIn(animationSpec = tween(140)) +
-                                            slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Up, animationSpec = tween(150)))
-                                        .togetherWith(
-                                            fadeOut(animationSpec = tween(110))
-                                        )
-                                }
-                                AnimationStyle.EXPRESSIVE -> {
-                                    (fadeIn(animationSpec = tween(340)) +
-                                            slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Start, animationSpec = spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessLow)))
-                                        .togetherWith(
-                                            fadeOut(animationSpec = tween(200))
-                                        )
-                                }
-                                AnimationStyle.REDUCED -> {
-                                    fadeIn(animationSpec = tween(90)).togetherWith(fadeOut(animationSpec = tween(90)))
-                                }
-                            }
+                            (fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing)) +
+                                scaleIn(initialScale = 0.98f, animationSpec = tween(220, easing = FastOutSlowInEasing)))
+                                .togetherWith(
+                                    fadeOut(animationSpec = tween(150))
+                                )
                         },
                         label = "screen_destination",
                     ) { targetDestination ->
@@ -346,6 +302,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                                 tracks = tracks,
                                 favorites = favorites,
                                 playlists = playlists,
+                                currentTrack = currentTrack,
                                 playlistTrackUris = viewModel::playlistTrackUris,
                                 onCreatePlaylist = viewModel::createPlaylist,
                                 onDeletePlaylist = viewModel::deletePlaylist,
@@ -362,6 +319,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                                 results               = results,
                                 favorites             = favorites,
                                 playlists             = playlists,
+                                currentTrack          = currentTrack,
                                 onlineResults         = onlineResults,
                                 isSearchingOnline     = isSearchingOnline,
                                 providerFailures      = onlineProviderFailures,
@@ -461,6 +419,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                 ) {
                     BackHandler { playerVisible = false }
 
+                    val playback by viewModel.playbackState.collectAsStateWithLifecycle()
                     val visualizerBands by viewModel.visualizerBands.collectAsStateWithLifecycle()
                     val visualizerWaveform by viewModel.visualizerWaveform.collectAsStateWithLifecycle()
 
@@ -589,3 +548,76 @@ private fun FirstLaunchWelcomeDialog(
         },
     )
 }
+
+@Composable
+private fun AuralisBottomNavBar(
+    currentDestination: MainDestination,
+    onNavigate: (MainDestination) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val items = listOf(
+        Triple(MainDestination.HOME, Icons.Default.Home, R.string.home),
+        Triple(MainDestination.LIBRARY, Icons.Default.LibraryMusic, R.string.library),
+        Triple(MainDestination.SEARCH, Icons.Default.Search, R.string.search),
+        Triple(MainDestination.AUDIO_LAB, Icons.Default.Tune, R.string.audio_lab),
+        Triple(MainDestination.SETTINGS, Icons.Default.Settings, R.string.settings),
+    )
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp).copy(alpha = 0.95f),
+        tonalElevation = 6.dp,
+        shadowElevation = 8.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            items.forEach { (dest, icon, labelRes) ->
+                val selected = currentDestination == dest
+                val scale by animateFloatAsState(
+                    targetValue = if (selected) 1.05f else 1.0f,
+                    animationSpec = spring(dampingRatio = 0.65f, stiffness = 400f),
+                    label = "nav_item_scale",
+                )
+
+                Surface(
+                    onClick = { onNavigate(dest) },
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f) else Color.Transparent,
+                    modifier = Modifier.scale(scale),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = stringResource(labelRes),
+                            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                            modifier = Modifier.size(22.dp),
+                        )
+                        if (selected) {
+                            Text(
+                                text = stringResource(labelRes),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

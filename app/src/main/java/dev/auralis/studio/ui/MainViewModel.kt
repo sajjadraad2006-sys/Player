@@ -201,7 +201,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    val recommendationEngine = dev.auralis.studio.library.SmartRecommendationEngine(container.unifiedSearch)
+    val recommendationEngine = dev.auralis.studio.library.SmartRecommendationEngine(container.unifiedSearch, container.networkMonitor)
     private val _offlineRecommendations = MutableStateFlow<List<Track>>(emptyList())
     val offlineRecommendations: StateFlow<List<Track>> = _offlineRecommendations.asStateFlow()
     private val _onlineRecommendations = MutableStateFlow<List<UnifiedTrack>>(emptyList())
@@ -210,6 +210,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isSearchingRecommendations = MutableStateFlow(false)
     val isSearchingRecommendations: StateFlow<Boolean> = _isSearchingRecommendations.asStateFlow()
     private var recommendationJob: Job? = null
+
+    val currentPlayingTrack: StateFlow<Track?> = combine(
+        playbackState.map { it.currentMediaItem }.distinctUntilChanged(),
+        tracks,
+        currentPlayingOnlineTrack,
+    ) { mediaItem, allTracks, onlineTrack ->
+        val uri = mediaItem?.mediaId ?: return@combine null
+        val found = allTracks.firstOrNull { it.uri == uri }
+            ?: (if (onlineTrack?.uri == uri) onlineTrack else null)
+            ?: generatedTrack(uri)
+        val meta = mediaItem.mediaMetadata
+        if (found != null && found.artworkUri == null && meta.artworkUri != null) {
+            found.copy(customArtworkUri = meta.artworkUri.toString())
+        } else {
+            found ?: Track(
+                id = -1L,
+                uri = uri,
+                title = meta.title?.toString() ?: onlineTrack?.title.orEmpty(),
+                artist = meta.artist?.toString() ?: onlineTrack?.artist.orEmpty(),
+                album = meta.albumTitle?.toString() ?: onlineTrack?.album.orEmpty(),
+                customArtworkUri = meta.artworkUri?.toString() ?: onlineTrack?.customArtworkUri,
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     fun refreshRecommendations(track: Track?) {
         recommendationJob?.cancel()
@@ -222,7 +246,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 limit = 35,
             )
             _offlineRecommendations.value = offline
-            if (track != null) {
+            if (track != null && container.networkMonitor.currentOnline) {
                 _isSearchingRecommendations.value = true
                 try {
                     val online = recommendationEngine.getOnlineRecommendations(track, limit = 30)
