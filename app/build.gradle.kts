@@ -17,8 +17,8 @@ android {
         applicationId = "dev.auralis.studio"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.0.0"
+        versionCode = 3
+        versionName = "1.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -150,8 +150,10 @@ chaquopy {
         version = "3.14"
         val customPython = (project.findProperty("PYTHON_PATH") as? String)
             ?: System.getenv("PYTHON_PATH")
+            ?: if (file("C:/Users/wwwsa/AppData/Local/Python/pythoncore-3.14-64/python.exe").exists()) "C:/Users/wwwsa/AppData/Local/Python/pythoncore-3.14-64/python.exe" else null
             ?: if (file("/home/sajjad/.local/bin/python3.14").exists()) "/home/sajjad/.local/bin/python3.14" else null
-            ?: if (System.getProperty("os.name").lowercase().contains("windows")) "python" else "python3"
+            ?: if (file("/usr/bin/python3.14").exists()) "/usr/bin/python3.14" else null
+            ?: if (file("/usr/local/bin/python3.14").exists()) "/usr/local/bin/python3.14" else null
         if (!customPython.isNullOrBlank()) {
             buildPython(customPython)
         }

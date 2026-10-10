@@ -77,6 +77,18 @@ class LrclibMatchingTest {
             client.close()
         }
     }
+
+    @Test fun acceptsYouTubeTrackWithVideoIntroVarianceWhenMetadataMatches() {
+        val client = LrclibClient()
+        try {
+            val track = LrclibTrack(1, "In the End", "Linkin Park", "Hybrid Theory", 216.0, syncedLyrics = "[00:01.00]It starts with")
+            // YouTube rip with 12 seconds of intro/outro (228 seconds total)
+            val candidate = client.pickBestCandidate(listOf(track), "In the End", "Linkin Park", "", 228_000)
+            assertEquals(track, candidate)
+        } finally {
+            client.close()
+        }
+    }
 }
 
 

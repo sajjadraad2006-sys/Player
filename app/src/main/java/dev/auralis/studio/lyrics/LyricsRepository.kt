@@ -49,7 +49,7 @@ class LyricsRepository(
      * poisoned LRCLIB exact lookups. Current version requires full-track metadata.
      */
     private companion object {
-        const val NEGATIVE_CACHE_MS = 15L * 60L * 1_000L
+        const val NEGATIVE_CACHE_MS = 90L * 1_000L
         const val MATCHER_VERSION = 2
         /** Local durations below this are previews/incomplete — never used for lyric matching. */
         const val MIN_FULL_TRACK_MS_FOR_MATCHING = 45_000L
@@ -104,9 +104,13 @@ class LyricsRepository(
         }
 
         val missKey = track.uri.ifBlank { "${track.title}|${track.artist}|${track.durationMs}" }
-        val lastMiss = negativeCache.getLong(missKey, 0L)
-        if (!forceRefresh && System.currentTimeMillis() - lastMiss < NEGATIVE_CACHE_MS) {
-            return@withContext SyncedLyrics.EMPTY
+        if (forceRefresh) {
+            negativeCache.edit().remove(missKey).apply()
+        } else {
+            val lastMiss = negativeCache.getLong(missKey, 0L)
+            if (System.currentTimeMillis() - lastMiss < NEGATIVE_CACHE_MS) {
+                return@withContext SyncedLyrics.EMPTY
+            }
         }
 
         // Local/cache resolution is complete. Do not touch the network while offline.

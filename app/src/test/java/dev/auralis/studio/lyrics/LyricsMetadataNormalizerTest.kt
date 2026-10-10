@@ -47,4 +47,10 @@ class LyricsMetadataNormalizerTest {
         assertTrue(variations.isNotEmpty())
         assertTrue(variations.any { it.first == "تملي معاك" && it.second == "Amr Diab" })
     }
+
+    @Test fun preservesRealWordsLikeOudAndTarabInArabicTitles() {
+        assertEquals("عود البطل", LyricsMetadataNormalizer.title("عود البطل (فيديو كليب حصريا)"))
+        assertEquals("سلطان الطرب", LyricsMetadataNormalizer.title("سلطان الطرب (جلسة)"))
+        assertEquals("تقاسيم عود", LyricsMetadataNormalizer.title("تقاسيم عود - كاملة"))
+    }
 }

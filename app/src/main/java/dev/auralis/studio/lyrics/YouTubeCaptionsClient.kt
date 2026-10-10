@@ -212,7 +212,11 @@ class YouTubeCaptionsClient {
     }
 
     private suspend fun fetchAndParseCaptions(captionUrl: String): List<LyricsLine> {
-        val url = if (captionUrl.contains("fmt=")) captionUrl else "$captionUrl&fmt=json3"
+        val url = when {
+            captionUrl.contains("fmt=") -> captionUrl
+            captionUrl.contains("?") -> "$captionUrl&fmt=json3"
+            else -> "$captionUrl?fmt=json3"
+        }
         val resp = client.get(url)
         if (!resp.status.isSuccess()) return emptyList()
 

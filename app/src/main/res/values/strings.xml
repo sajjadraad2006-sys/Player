@@ -77,7 +77,15 @@
     <string name="pure_playback">Pure playback</string>
     <string name="pure_playback_description">Reset pitch and speed, then bypass all effects.</string>
     <string name="eight_d_audio">8D Audio</string>
-    <string name="eight_d_description">Smooth equal-power stereo orbit with gentle crossfeed.</string>
+    <string name="eight_d_description">Multiband 3D spatial orbit with bass separation and binaural immersion.</string>
+    <string name="spatial_mode">Spatial Mode</string>
+    <string name="mode_dynamic_orbit">Dynamic Orbit</string>
+    <string name="mode_bass_separation">Bass Separation</string>
+    <string name="mode_vocal_separation">Dual Voice / Vocal Split</string>
+    <string name="mode_binaural_3d">3D Binaural HRTF</string>
+    <string name="bass_separation_depth">Bass Spatial Separation</string>
+    <string name="vocal_separation_depth">Vocal &amp; Harmony Separation</string>
+    <string name="binaural_depth">Binaural 3D Immersion</string>
     <string name="strength">Strength</string>
     <string name="rotation_speed">Rotation speed</string>
     <string name="clockwise">Clockwise</string>

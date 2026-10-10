@@ -53,6 +53,7 @@ import dev.auralis.studio.R
 import dev.auralis.studio.core.model.AudioConfig
 import dev.auralis.studio.core.model.BuiltInPresets
 import dev.auralis.studio.core.model.ChannelMode
+import dev.auralis.studio.core.model.EightDMode
 import dev.auralis.studio.core.model.OrbitDirection
 import dev.auralis.studio.core.model.PitchTempoMode
 import dev.auralis.studio.core.model.PitchMath
@@ -543,6 +544,92 @@ private fun EightDPanel(config: AudioConfig, onChange: (AudioConfig) -> Unit) {
                 valueRange = 0.02f..0.5f,
             )
 
+            // Spatial Mode Chips
+            Text(
+                stringResource(R.string.spatial_mode),
+                color = colors.onSurface,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(EightDMode.entries) { mode ->
+                    StudioChip(
+                        selected = config.eightDMode == mode,
+                        onClick = { onChange(config.copy(eightDMode = mode, eightDEnabled = true, dspEnabled = true)) },
+                        label = eightDModeLabel(mode),
+                    )
+                }
+            }
+
+            // Mode-specific parameter sliders
+            if (config.eightDMode == EightDMode.BASS_SEPARATION) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(R.string.bass_separation_depth),
+                        color = colors.onSurface,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        stringResource(R.string.percent_value, (config.eightDBassSeparation * 100).roundToInt()),
+                        color = colors.primary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                StudioSlider(
+                    value = config.eightDBassSeparation,
+                    onValueChange = { onChange(config.copy(eightDBassSeparation = it, eightDEnabled = true, dspEnabled = true)) },
+                    valueRange = 0.2f..1f,
+                )
+            } else if (config.eightDMode == EightDMode.VOCAL_SEPARATION) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(R.string.vocal_separation_depth),
+                        color = colors.onSurface,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        stringResource(R.string.percent_value, (config.eightDVocalSeparation * 100).roundToInt()),
+                        color = colors.primary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                StudioSlider(
+                    value = config.eightDVocalSeparation,
+                    onValueChange = { onChange(config.copy(eightDVocalSeparation = it, eightDEnabled = true, dspEnabled = true)) },
+                    valueRange = 0.2f..1f,
+                )
+            } else if (config.eightDMode == EightDMode.BINAURAL_3D) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(R.string.binaural_depth),
+                        color = colors.onSurface,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        stringResource(R.string.percent_value, (config.eightDBinauralDepth * 100).roundToInt()),
+                        color = colors.primary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                StudioSlider(
+                    value = config.eightDBinauralDepth,
+                    onValueChange = { onChange(config.copy(eightDBinauralDepth = it, eightDEnabled = true, dspEnabled = true)) },
+                    valueRange = 0.2f..1f,
+                )
+            }
+
             // Orbit Direction Chips
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(OrbitDirection.entries) { direction ->
@@ -767,6 +854,16 @@ private fun orbitLabel(direction: OrbitDirection): String = stringResource(
         OrbitDirection.CLOCKWISE -> R.string.clockwise
         OrbitDirection.COUNTER_CLOCKWISE -> R.string.counter_clockwise
         OrbitDirection.PING_PONG -> R.string.ping_pong
+    },
+)
+
+@Composable
+private fun eightDModeLabel(mode: EightDMode): String = stringResource(
+    when (mode) {
+        EightDMode.DYNAMIC_ORBIT -> R.string.mode_dynamic_orbit
+        EightDMode.BASS_SEPARATION -> R.string.mode_bass_separation
+        EightDMode.VOCAL_SEPARATION -> R.string.mode_vocal_separation
+        EightDMode.BINAURAL_3D -> R.string.mode_binaural_3d
     },
 )
 

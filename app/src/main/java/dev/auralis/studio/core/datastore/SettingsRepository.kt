@@ -45,6 +45,10 @@ class SettingsRepository(private val context: Context) {
         val eightDStrength = floatPreferencesKey("eight_d_strength")
         val eightDRate = floatPreferencesKey("eight_d_rate")
         val orbit = stringPreferencesKey("orbit")
+        val eightDMode = stringPreferencesKey("eight_d_mode")
+        val eightDBassSep = floatPreferencesKey("eight_d_bass_sep")
+        val eightDVocalSep = floatPreferencesKey("eight_d_vocal_sep")
+        val eightDBinauralDepth = floatPreferencesKey("eight_d_binaural_depth")
         val reverb = floatPreferencesKey("reverb")
         val limiter = booleanPreferencesKey("limiter")
         val eqBands = stringPreferencesKey("eq_bands")
@@ -187,6 +191,10 @@ class SettingsRepository(private val context: Context) {
             p[Keys.eightDStrength] = config.eightDStrength
             p[Keys.eightDRate] = config.eightDRateHz
             p[Keys.orbit] = config.orbitDirection.name
+            p[Keys.eightDMode] = config.eightDMode.name
+            p[Keys.eightDBassSep] = config.eightDBassSeparation
+            p[Keys.eightDVocalSep] = config.eightDVocalSeparation
+            p[Keys.eightDBinauralDepth] = config.eightDBinauralDepth
             p[Keys.reverb] = config.reverbMix
             p[Keys.limiter] = config.limiterEnabled
             p[Keys.eqBands] = config.eqBandsDb.joinToString(",")
@@ -253,6 +261,10 @@ class SettingsRepository(private val context: Context) {
         eightDStrength = this[Keys.eightDStrength] ?: 0.55f,
         eightDRateHz = this[Keys.eightDRate] ?: 0.09f,
         orbitDirection = enumValue(this[Keys.orbit], OrbitDirection.CLOCKWISE),
+        eightDMode = enumValue(this[Keys.eightDMode], dev.auralis.studio.core.model.EightDMode.DYNAMIC_ORBIT),
+        eightDBassSeparation = this[Keys.eightDBassSep] ?: 0.75f,
+        eightDVocalSeparation = this[Keys.eightDVocalSep] ?: 0.70f,
+        eightDBinauralDepth = this[Keys.eightDBinauralDepth] ?: 0.80f,
         reverbMix = this[Keys.reverb] ?: 0f,
         limiterEnabled = this[Keys.limiter] ?: true,
     )

@@ -78,6 +78,7 @@ import dev.auralis.studio.core.model.AudioConfig
 import dev.auralis.studio.core.model.AudioPreset
 import dev.auralis.studio.core.model.BuiltInPresets
 import dev.auralis.studio.core.model.ChannelMode
+import dev.auralis.studio.core.model.EightDMode
 import dev.auralis.studio.core.model.OrbitDirection
 import dev.auralis.studio.core.model.PitchMath
 import dev.auralis.studio.core.model.PitchTempoMode
@@ -576,12 +577,66 @@ fun AudioEffectsSheet(
                             colors = colors,
                         )
 
+                        // Spatial Mode
+                        Text(
+                            stringResource(R.string.spatial_mode),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.onSurfaceVariant,
+                        )
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(EightDMode.entries) { mode ->
+                                FilterChip(
+                                    selected = config.eightDMode == mode,
+                                    onClick = { onConfigChange(config.copy(eightDMode = mode, eightDEnabled = true, dspEnabled = true)) },
+                                    label = {
+                                        Text(when (mode) {
+                                            EightDMode.DYNAMIC_ORBIT -> stringResource(R.string.mode_dynamic_orbit)
+                                            EightDMode.BASS_SEPARATION -> stringResource(R.string.mode_bass_separation)
+                                            EightDMode.VOCAL_SEPARATION -> stringResource(R.string.mode_vocal_separation)
+                                            EightDMode.BINAURAL_3D -> stringResource(R.string.mode_binaural_3d)
+                                        })
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                )
+                            }
+                        }
+
+                        if (config.eightDMode == EightDMode.BASS_SEPARATION) {
+                            NumericSliderRow(
+                                label = stringResource(R.string.bass_separation_depth),
+                                formattedValue = "${(config.eightDBassSeparation * 100).roundToInt()}%",
+                                value = config.eightDBassSeparation,
+                                valueRange = 0.2f..1.0f,
+                                onValueChange = { onConfigChange(config.copy(eightDBassSeparation = it, dspEnabled = true)) },
+                                colors = colors,
+                            )
+                        } else if (config.eightDMode == EightDMode.VOCAL_SEPARATION) {
+                            NumericSliderRow(
+                                label = stringResource(R.string.vocal_separation_depth),
+                                formattedValue = "${(config.eightDVocalSeparation * 100).roundToInt()}%",
+                                value = config.eightDVocalSeparation,
+                                valueRange = 0.2f..1.0f,
+                                onValueChange = { onConfigChange(config.copy(eightDVocalSeparation = it, dspEnabled = true)) },
+                                colors = colors,
+                            )
+                        } else if (config.eightDMode == EightDMode.BINAURAL_3D) {
+                            NumericSliderRow(
+                                label = stringResource(R.string.binaural_depth),
+                                formattedValue = "${(config.eightDBinauralDepth * 100).roundToInt()}%",
+                                value = config.eightDBinauralDepth,
+                                valueRange = 0.2f..1.0f,
+                                onValueChange = { onConfigChange(config.copy(eightDBinauralDepth = it, dspEnabled = true)) },
+                                colors = colors,
+                            )
+                        }
+
                         // Orbit Direction
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             items(OrbitDirection.entries) { direction ->
                                 FilterChip(
                                     selected = config.orbitDirection == direction,
-                                    onClick = { onConfigChange(config.copy(orbitDirection = direction, dspEnabled = true)) },
+                                    onClick = { onConfigChange(config.copy(orbitDirection = direction, eightDEnabled = true, dspEnabled = true)) },
                                     label = { Text(direction.name.replace('_', ' ')) },
                                     shape = RoundedCornerShape(12.dp),
                                 )

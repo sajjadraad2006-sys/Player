@@ -29,6 +29,10 @@ object PlaybackCommands {
         "eightDStrength" to eightDStrength,
         "eightDRate" to eightDRateHz,
         "orbit" to orbitDirection.name,
+        "eightDMode" to eightDMode.name,
+        "eightDBassSep" to eightDBassSeparation,
+        "eightDVocalSep" to eightDVocalSeparation,
+        "eightDBinauralDepth" to eightDBinauralDepth,
         "reverb" to reverbMix,
         "limiter" to limiterEnabled,
     )
@@ -50,6 +54,10 @@ object PlaybackCommands {
         eightDStrength = bundle.getFloat("eightDStrength", 0.55f).coerceIn(0f, 1f),
         eightDRateHz = bundle.getFloat("eightDRate", 0.09f).coerceIn(0.02f, 0.5f),
         orbitDirection = enumValue(bundle.getString("orbit"), OrbitDirection.CLOCKWISE),
+        eightDMode = enumValue(bundle.getString("eightDMode"), dev.auralis.studio.core.model.EightDMode.DYNAMIC_ORBIT),
+        eightDBassSeparation = bundle.getFloat("eightDBassSep", 0.75f).coerceIn(0f, 1f),
+        eightDVocalSeparation = bundle.getFloat("eightDVocalSep", 0.70f).coerceIn(0f, 1f),
+        eightDBinauralDepth = bundle.getFloat("eightDBinauralDepth", 0.80f).coerceIn(0f, 1f),
         reverbMix = bundle.getFloat("reverb", 0f).coerceIn(0f, 0.6f),
         limiterEnabled = bundle.getBoolean("limiter", true),
     )

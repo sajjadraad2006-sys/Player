@@ -91,7 +91,7 @@ class LrclibClient {
             return null
         }
 
-        val variations = LyricsMetadataNormalizer.searchVariations(title, artist)
+        val variations = LyricsMetadataNormalizer.searchVariations(cleanTitle, cleanArtist)
 
         // 1. Try exact endpoint with variations (e.g. Arabic title + Latin artist alias)
         if (durationMs > 0) {
@@ -312,13 +312,15 @@ class LrclibClient {
             }
             val albumBonus = if (album.isBlank()) 0.0 else similarity(album.lowercase(), track.albumName.lowercase()) * 0.08
             val durDiff   = abs(durationSec - track.duration)
+            val textMatchConfidence = titleSim + artistSim
             val durScore  = when {
                 durationMs <= 0 -> 0.0
-                durDiff < 1.0   -> 0.20 // Excellent match — audio lengths match precisely
-                durDiff < 2.5   -> 0.14 // Strong match
-                durDiff < 5.0   -> 0.04 // Acceptable variance (intro/outro silence)
-                durDiff < 10.0  -> -0.25 // Major duration discrepancy
-                else            -> -0.55 // Severe mismatch (different cut or album with intro)
+                durDiff < 1.5   -> 0.20 // Excellent match — audio lengths match precisely
+                durDiff < 4.0   -> 0.12 // Strong match
+                durDiff < 15.0  -> if (textMatchConfidence >= 0.50) 0.04 else -0.20 // Acceptable video intro/outro variance
+                durDiff < 30.0  -> if (textMatchConfidence >= 0.60) -0.06 else -0.40 // Longer video intro/outro or credits
+                durDiff < 50.0  -> if (textMatchConfidence >= 0.70) -0.18 else -0.55 // Extended music video cut
+                else            -> -0.60 // Severe mismatch
             }
             val syncBonus = if (!track.syncedLyrics.isNullOrBlank()) 0.08 else 0.0
             val versionPenalty = versionMismatchPenalty(queryTitle, candidateTitle)

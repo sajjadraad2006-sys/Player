@@ -20,15 +20,25 @@ object LyricsMetadataNormalizer {
         """^(?:TikTok(?:\s+Music)?|Status|BGM|Reels|Trending|Shorts|Full\s+Song|Remix|Slowed(?:\s+\+?\s*Reverb)?)\s*[-–—:]\s*""",
         RegexOption.IGNORE_CASE,
     )
-    private val arabicNoiseWords = listOf(
+    private val arabicBracketNoiseWords = listOf(
         "فيديو كليب", "فيديو", "كليب", "حصريا", "حصرياً", "أغنية", "اغنية", "كاملة", "مترجمة", "كلمات",
-        "ريمكس", "أوديو", "اوديو", "المطرب", "الفنان", "الرسمي", "الرسمية",
-        "جلسة", "حفلة", "عود", "طرب", "مكس", "روقان", "هادئ", "مسرع", "مبطأ", "بطيء",
-        "تراك", "كلبس"
+        "مع الكلمات", "ريمكس", "أوديو", "اوديو", "المطرب", "الفنان", "الرسمي", "الرسمية",
+        "جلسة", "حفلة", "طرب", "مكس", "روقان", "هادئ", "مسرع", "مبطأ", "بطيء", "بطيئ",
+        "تراك", "كلبس", "بدون نت", "بدون موسيقى"
+    )
+
+    private val arabicPromotionalNoise = Regex(
+        """(?<=^|[\s_—–\-|:])(?:فيديو\s+كليب|فيديو|كليب|حصريا|حصرياً|الرسمي|الرسمية|مترجمة|أوديو|اوديو|المطرب|الفنان)(?=$|[\s_—–\-|:])""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private val arabicTrailingNoise = Regex(
+        """\s*[-–—|:]\s*(?:فيديو\s+كليب|فيديو|كليب|حصريا|حصرياً|الرسمي|الرسمية|مترجمة|أوديو|اوديو|كلمات|مع\s+الكلمات|كاملة|روقان|مسرع|مبطأ|بدون\s+موسيقى)\s*$""",
+        RegexOption.IGNORE_CASE,
     )
 
     private fun containsArabicNoise(text: String): Boolean {
-        return arabicNoiseWords.any { text.contains(it) }
+        return arabicBracketNoiseWords.any { text.contains(it) }
     }
 
     // Curated bidirectional aliases for popular Arabic & regional artists in LRCLIB / Spotify / Apple
@@ -90,6 +100,22 @@ object LyricsMetadataNormalizer {
         "ناصيف زيتون" to listOf("Nassif Zeytoun"),
         "حاتم العراقي" to listOf("Hatim Al Iraqi", "Hatem Al Iraqi"),
         "وليد الشامي" to listOf("Waleed Al Shami"),
+        "حسن شاكوش" to listOf("Hassan Shakosh", "Hassan Shakoush"),
+        "عمر كمال" to listOf("Omar Kamal"),
+        "حمو بيكا" to listOf("Hamo Bika"),
+        "رضا البحراوي" to listOf("Reda El Bahrawy"),
+        "عبد المجيد عبد الله" to listOf("Abdul Majeed Abdullah", "Abdulmajeed Abdullah"),
+        "عبدالمجيد عبدالله" to listOf("Abdul Majeed Abdullah", "Abdulmajeed Abdullah"),
+        "راشد الماجد" to listOf("Rashed Al Majed", "Rashed Almajid"),
+        "محمد رمضان" to listOf("Mohamed Ramadan"),
+        "مسلم" to listOf("Muslim"),
+        "نوال الزغبي" to listOf("Nawal El Zoghbi"),
+        "سلطان العماني" to listOf("Sultan Al Omani"),
+        "علي صابر" to listOf("Ali Saber"),
+        "اوراس ستار" to listOf("Auras Star"),
+        "حسام الرسام" to listOf("Hussam Al Rassam"),
+        "جعفر الغزال" to listOf("Jaafar Al Ghazal"),
+        "سارية السواس" to listOf("Saria Al Sawas"),
     )
 
     fun isArabic(text: String): Boolean = text.any { it in '\u0600'..'\u06FF' }
@@ -233,31 +259,36 @@ object LyricsMetadataNormalizer {
      */
     fun searchVariations(title: String, artist: String): List<Pair<String, String>> {
         val list = mutableListOf<Pair<String, String>>()
-        val cleanT = title(title)
-        val cleanA = artist(artist)
+        val norm = normalize(title, artist)
+        val cleanT = norm.title
+        val cleanA = norm.artist
 
-        if (cleanT.isNotBlank()) {
-            // 1. Clean original pair
-            list.add(cleanT to cleanA)
-
-            // 2. Arabic artist mapped to Latin aliases
-            if (isArabic(cleanA)) {
-                val aliases = getArtistLatinAliases(cleanA)
+        fun addVariationsFor(t: String, a: String) {
+            if (t.isBlank()) return
+            list.add(t to a)
+            if (isArabic(a) && a.isNotBlank()) {
+                val aliases = getArtistLatinAliases(a)
                 for (alias in aliases) {
-                    list.add(cleanT to alias)
+                    list.add(t to alias)
                 }
             }
-
-            // 3. Transliterated title with Latin artist
-            if (isArabic(cleanT)) {
-                val transTitle = transliterateArabicToLatin(cleanT)
+            if (isArabic(t)) {
+                val transTitle = transliterateArabicToLatin(t)
                 if (transTitle.isNotBlank()) {
-                    val targetArtist = if (isArabic(cleanA)) {
-                        getArtistLatinAliases(cleanA).firstOrNull() ?: cleanA
-                    } else cleanA
+                    val targetArtist = if (isArabic(a) && a.isNotBlank()) {
+                        getArtistLatinAliases(a).firstOrNull() ?: a
+                    } else a
                     list.add(transTitle to targetArtist)
                 }
             }
+        }
+
+        addVariationsFor(cleanT, cleanA)
+
+        val rawCleanT = title(title)
+        val rawCleanA = artist(artist)
+        if (rawCleanT.isNotBlank() && (rawCleanT != cleanT || rawCleanA != cleanA)) {
+            addVariationsFor(rawCleanT, rawCleanA)
         }
 
         return list.distinct()
@@ -271,9 +302,8 @@ object LyricsMetadataNormalizer {
             if (noise.containsMatchIn(match.groupValues[1]) || containsArabicNoise(match.groupValues[1])) "" else match.value
         }
         value = noise.replace(value, "")
-        for (w in arabicNoiseWords) {
-            value = value.replace(w, "")
-        }
+        value = arabicTrailingNoise.replace(value, "")
+        value = arabicPromotionalNoise.replace(value, "")
         value = emptyBrackets.replace(value, "")
         return value.replace(Regex("\\s{2,}"), " ").trim(' ', '-', '–', '—', '|', ':')
     }
