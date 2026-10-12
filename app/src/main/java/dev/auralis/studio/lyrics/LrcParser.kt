@@ -15,6 +15,14 @@ object LrcParser {
     private val OFFSET_RE    = Regex("""^\[offset:\s*([+-]?\d+)\s*\]$""", RegexOption.IGNORE_CASE)
     private val META_RE      = Regex("""^\[(?:ti|ar|al|by|length|offset):[^\]]*\]$""", RegexOption.IGNORE_CASE)
     private val WORD_TAG_RE  = Regex("""<(\d{1,3}):(\d{2})[.:](\d{2,3})>([^<]*)""")
+    private val AUDIO_DESCRIPTION_RE = Regex(
+        """^\[(?:music|applause|intro|instrumental|outro|solo|cheering|laughter|guitar solo|drum solo|piano solo|vocalizing|beatboxing|موسيقى|تصفيق|عزف|لحن)[^\]]*\]$""",
+        RegexOption.IGNORE_CASE
+    )
+    private val PAREN_DESCRIPTION_RE = Regex(
+        """^\((?:music|applause|intro|instrumental|outro|solo|cheering|laughter|guitar solo|drum solo|piano solo|موسيقى|تصفيق|عزف)[^)]*\)$""",
+        RegexOption.IGNORE_CASE
+    )
 
     /**
      * Parses a raw LRC string and returns a [SyncedLyrics].
@@ -81,10 +89,16 @@ object LrcParser {
                 null
             }
 
-            val cleanText = if (words != null) {
+            val rawExtracted = if (words != null) {
                 words.joinToString("") { it.text }.trim()
             } else {
                 rest.replace(Regex("""<[^>]+>"""), "").trim()
+            }
+
+            // Normalize non-vocal audio descriptions to clean instrumental tag
+            val cleanText = when {
+                AUDIO_DESCRIPTION_RE.matches(rawExtracted) || PAREN_DESCRIPTION_RE.matches(rawExtracted) -> "[Instrumental]"
+                else -> rawExtracted
             }
 
             if (allTimestamps.isEmpty()) {
@@ -103,12 +117,21 @@ object LrcParser {
             return SyncedLyrics(plainText, synced = false, source = source)
         }
 
-        // Sort by timestamp, remove blanks at t=0 (often metadata artifacts)
+        // Sort by timestamp and deduplicate identical consecutive lines
         val sorted = lines
             .filter { it.timeMs >= 0 }
-            .sortedBy { it.timeMs }
+            .sortedWith(compareBy({ it.timeMs }, { it.text.isBlank() }))
 
-        return SyncedLyrics(sorted, synced = true, source = source, offsetMs = parsedOffsetMs)
+        val deduplicated = mutableListOf<LyricsLine>()
+        for (l in sorted) {
+            val last = deduplicated.lastOrNull()
+            if (last != null && last.timeMs == l.timeMs && last.text == l.text) {
+                continue
+            }
+            deduplicated.add(l)
+        }
+
+        return SyncedLyrics(deduplicated, synced = true, source = source, offsetMs = parsedOffsetMs)
     }
 
     /** Converts a [SyncedLyrics] back to LRC string format for storage. */

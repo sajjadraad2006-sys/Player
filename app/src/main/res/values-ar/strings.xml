@@ -87,6 +87,11 @@
     <string name="mode_bass_separation">فصل البيس ثلاثي الأبعاد</string>
     <string name="mode_vocal_separation">فصل الأصوات المزدوجة</string>
     <string name="mode_binaural_3d">صوت محيطي واقعي HRTF</string>
+    <string name="mode_spherical_3d">كروي ثلاثي الأبعاد 360°</string>
+    <string name="soundstage_expansion">توسيع المسرح الصوتي (Concert 3D)</string>
+    <string name="analog_warmth">دفء التيوب التناظري (Analog Warmth)</string>
+    <string name="clarity_exciter">مثير نقاء ولمعان الصوت (Crystal Clarity)</string>
+    <string name="instrumental_break">موسيقى</string>
     <string name="bass_separation_depth">عمق وفصل ترددات البيس</string>
     <string name="vocal_separation_depth">فصل صوت الغناء والكورال</string>
     <string name="binaural_depth">عمق المحاكاة المحيطية</string>

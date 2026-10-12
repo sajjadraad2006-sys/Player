@@ -46,6 +46,11 @@ class StudioAudioProcessor(
     private val itdBufferL = FloatArray(64)
     private val itdBufferR = FloatArray(64)
     private var itdIndex = 0
+    private val haasBufferL = FloatArray(64)
+    private val haasBufferR = FloatArray(64)
+    private var haasIndex = 0
+    private val exciterFilterL = Biquad()
+    private val exciterFilterR = Biquad()
     private var smoothedWet = 0f
     private var leftFilters = emptyList<Biquad>()
     private var rightFilters = emptyList<Biquad>()
@@ -69,6 +74,8 @@ class StudioAudioProcessor(
         crossoverLowR.setLowPass(sampleRate, 220f, 0.7071f)
         crossoverHighL.setHighPass(sampleRate, 3400f, 0.7071f)
         crossoverHighR.setHighPass(sampleRate, 3400f, 0.7071f)
+        exciterFilterL.setHighPass(sampleRate, 4800f, 0.7071f)
+        exciterFilterR.setHighPass(sampleRate, 4800f, 0.7071f)
         rebuildDelays()
         rebuildFilters(requestedConfig.get(), force = true)
         return inputAudioFormat
@@ -110,6 +117,24 @@ class StudioAudioProcessor(
                 rightFilters.forEach { right = it.process(right) }
             }
 
+            // Analog Tube Warmth (even-order soft saturation for analog punch)
+            if (config.analogWarmth > 0.001f) {
+                val drive = 1f + config.analogWarmth * 0.70f
+                val xL = (left * drive).coerceIn(-2.2f, 2.2f)
+                val xR = (right * drive).coerceIn(-2.2f, 2.2f)
+                left = (xL - (xL * xL * xL * 0.14f) + (xL * kotlin.math.abs(xL) * 0.08f * config.analogWarmth)) / drive
+                right = (xR - (xR * xR * xR * 0.14f) + (xR * kotlin.math.abs(xR) * 0.08f * config.analogWarmth)) / drive
+            }
+
+            // Vocal Clarity & Air Exciter (harmonic sparkle in 4.8kHz+ band)
+            if (config.clarityExciter > 0.001f) {
+                val exAmt = config.clarityExciter.coerceIn(0f, 1f)
+                val highL = exciterFilterL.process(left)
+                val highR = exciterFilterR.process(right)
+                left += (highL * kotlin.math.abs(highL)) * 0.38f * exAmt
+                right += (highR * kotlin.math.abs(highR)) * 0.38f * exAmt
+            }
+
             val channelPair = applyChannelMode(left, right, config.channelMode)
             left = channelPair.first
             right = channelPair.second
@@ -119,6 +144,19 @@ class StudioAudioProcessor(
             val side = (left - right) * 0.5f * config.stereoWidth
             left = mid + side
             right = mid - side
+
+            // Concert Soundstage Expansion (Haas psychoacoustic decorrelation)
+            if (config.soundstageExpansion > 0.001f && channelCount > 1) {
+                val width = config.soundstageExpansion.coerceIn(0f, 1f)
+                haasBufferL[haasIndex] = left
+                haasBufferR[haasIndex] = right
+                val delayedIdx = (haasIndex - 28 + 64) % 64
+                val delayedR = haasBufferR[delayedIdx]
+                val delayedL = haasBufferL[delayedIdx]
+                left += (left - delayedR) * 0.25f * width
+                right += (right - delayedL) * 0.25f * width
+                haasIndex = (haasIndex + 1) % 64
+            }
 
             // Balance
             val balanceLeft = if (config.balance > 0f) 1f - config.balance else 1f
@@ -133,21 +171,25 @@ class StudioAudioProcessor(
                 val targetPan = OrbitMath.pan(phase, config.orbitDirection) * strength
                 smoothedPan += (targetPan - smoothedPan) * 0.002f
 
+                val isSpherical = config.eightDMode == dev.auralis.studio.core.model.EightDMode.SPHERICAL_3D
+                val isBassSep = config.eightDMode == dev.auralis.studio.core.model.EightDMode.BASS_SEPARATION
+                val isVocalSep = config.eightDMode == dev.auralis.studio.core.model.EightDMode.VOCAL_SEPARATION
+
                 // Dynamic trajectories per mode
-                val targetBassPan = when (config.eightDMode) {
-                    dev.auralis.studio.core.model.EightDMode.BASS_SEPARATION ->
+                val targetBassPan = when {
+                    isBassSep || isSpherical ->
                         OrbitMath.bassPan(phase, config.orbitDirection, config.eightDBassSeparation) * strength
-                    dev.auralis.studio.core.model.EightDMode.DYNAMIC_ORBIT ->
+                    config.eightDMode == dev.auralis.studio.core.model.EightDMode.DYNAMIC_ORBIT ->
                         OrbitMath.bassPan(phase, config.orbitDirection, 0.22f) * strength
                     else -> targetPan
                 }
                 smoothedBassPan += (targetBassPan - smoothedBassPan) * 0.002f
 
-                val targetSidePan = when (config.eightDMode) {
-                    dev.auralis.studio.core.model.EightDMode.VOCAL_SEPARATION ->
+                val targetSidePan = when {
+                    isVocalSep ->
                         OrbitMath.sidePan(phase, config.orbitDirection, config.eightDVocalSeparation) * strength
-                    dev.auralis.studio.core.model.EightDMode.BASS_SEPARATION ->
-                        OrbitMath.sidePan(phase, config.orbitDirection, 0.35f) * strength
+                    isBassSep || isSpherical ->
+                        OrbitMath.sidePan(phase, config.orbitDirection, 0.38f) * strength
                     else -> targetPan
                 }
                 smoothedSidePan += (targetSidePan - smoothedSidePan) * 0.002f
@@ -170,25 +212,34 @@ class StudioAudioProcessor(
                 val vMidL = midCenter * leftMidPan
                 val vMidR = midCenter * rightMidPan
 
-                // 2. Side Harmonies / Backing / Second Voice Panning
-                val isVocalSep = config.eightDMode == dev.auralis.studio.core.model.EightDMode.VOCAL_SEPARATION
+                // 2. Side Harmonies / Backing / Second Voice Panning (Rotates opposingly)
                 val leftSidePan = sqrt(((1f - smoothedSidePan) * 0.5f).coerceIn(0f, 1f)) * 1.4142f
                 val rightSidePan = sqrt(((1f + smoothedSidePan) * 0.5f).coerceIn(0f, 1f)) * 1.4142f
-                val sepMult = if (isVocalSep) 1f + 0.22f * config.eightDVocalSeparation else 1f
+                val sepMult = if (isVocalSep || isSpherical) 1f + 0.28f * config.eightDVocalSeparation else 1f
                 val vSideL = midSide * leftSidePan * sepMult
                 val vSideR = -midSide * rightSidePan * sepMult
 
-                // 3. Bass Panning with Asymmetric Right-Ear Weighting
-                val isBassSep = config.eightDMode == dev.auralis.studio.core.model.EightDMode.BASS_SEPARATION
+                // 3. Bass Panning with Asymmetric Right-Ear Weighting (Thrilling visceral sub-bass punch)
                 val leftBassPan = sqrt(((1f - smoothedBassPan) * 0.5f).coerceIn(0f, 1f)) * 1.4142f
-                val rightBassWeight = if (isBassSep) 1f + 0.16f * config.eightDBassSeparation else 1f
+                val rightBassWeight = if (isBassSep || isSpherical) 1f + 0.22f * config.eightDBassSeparation else 1f
                 val rightBassPan = sqrt(((1f + smoothedBassPan) * 0.5f).coerceIn(0f, 1f)) * 1.4142f * rightBassWeight
                 val bL = lowL * leftBassPan
                 val bR = lowR * rightBassPan
 
-                // 4. Treble Panning
-                val leftHighPan = sqrt(((1f - smoothedPan) * 0.5f).coerceIn(0f, 1f)) * 1.4142f
-                val rightHighPan = sqrt(((1f + smoothedPan) * 0.5f).coerceIn(0f, 1f)) * 1.4142f
+                // 4. Treble Panning with Outer-Ear Rear Shadowing for 3D Spherical Orbit
+                var leftHighPan = sqrt(((1f - smoothedPan) * 0.5f).coerceIn(0f, 1f)) * 1.4142f
+                var rightHighPan = sqrt(((1f + smoothedPan) * 0.5f).coerceIn(0f, 1f)) * 1.4142f
+
+                if (isSpherical) {
+                    val frontBack = OrbitMath.frontBack(phase) * strength
+                    if (frontBack < -0.05f) {
+                        // Pinna damping when audio passes behind listener's head
+                        val pinnaDamp = (1f + frontBack * 0.32f).coerceIn(0.68f, 1f)
+                        leftHighPan *= pinnaDamp
+                        rightHighPan *= pinnaDamp
+                    }
+                }
+
                 val hL = highL * leftHighPan
                 val hR = highR * rightHighPan
 

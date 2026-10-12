@@ -153,15 +153,26 @@ class VisualizerAnalyzer(
             val binLo  = (freqLo / binToHz).toInt().coerceIn(1, fftSize / 2 - 1)
             val binHi  = (freqHi / binToHz).toInt().coerceIn(binLo + 1, fftSize / 2)
             var peak = 0f
+            var sum = 0f
+            val count = maxOf(1, binHi - binLo)
             for (b in binLo until binHi) {
                 val amplitude = 2f * sqrt(real[b] * real[b] + imag[b] * imag[b]) / WINDOW_SUM
                 if (amplitude > peak) peak = amplitude
+                sum += amplitude
             }
-            // dBFS mapping keeps low-level musical detail without manufacturing a floor.
-            val db = 20f * log10(max(peak, 0.00000025f))
-            val norm = ((db + 78f) / 78f).coerceIn(0f, 1f)
-            // A gentle perceptual curve expands genuine low-level detail. Zero stays zero.
-            bandMags[band] = if (norm <= 0f) 0f else norm.pow(0.82f)
+            val avg = sum / count
+            // Combine peak transient with sustained spectral energy for rich responsiveness
+            val energy = max(peak, avg * 1.6f)
+
+            // Equal-loudness / pink noise tilt compensation: music rolls off at ~3-4dB per octave,
+            // so we progressively boost high bands so Treble and Air dance dynamically alongside Bass.
+            val bandFraction = band.toFloat() / (bandCount - 1).coerceAtLeast(1)
+            val tiltDb = bandFraction * 22.0f
+
+            val db = 20f * log10(max(energy, 0.00000005f)) + tiltDb
+            val norm = if (energy < 0.0000002f) 0f else ((db + 72f) / 72f).coerceIn(0f, 1f)
+            // A gentle perceptual curve expands low-level musical detail. Zero stays zero.
+            bandMags[band] = if (norm <= 0f) 0f else norm.pow(0.80f)
         }
 
         // Time-correct analysis smoothing: fast transient attack, musical release.

@@ -83,6 +83,11 @@
     <string name="mode_bass_separation">Bass Separation</string>
     <string name="mode_vocal_separation">Dual Voice / Vocal Split</string>
     <string name="mode_binaural_3d">3D Binaural HRTF</string>
+    <string name="mode_spherical_3d">360° Spherical 3D</string>
+    <string name="soundstage_expansion">Soundstage Expansion</string>
+    <string name="analog_warmth">Analog Tube Warmth</string>
+    <string name="clarity_exciter">Crystal Vocal Exciter</string>
+    <string name="instrumental_break">Instrumental</string>
     <string name="bass_separation_depth">Bass Spatial Separation</string>
     <string name="vocal_separation_depth">Vocal &amp; Harmony Separation</string>
     <string name="binaural_depth">Binaural 3D Immersion</string>

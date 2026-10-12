@@ -1291,7 +1291,7 @@ private fun VisualizerPage(
         else (bands.take(5).average().toFloat() * 1.5f).coerceIn(0f, 1f)
     }
 
-    val spectrumRenderer = remember { SpectrumRenderer(44) }
+    val spectrumRenderer = remember { SpectrumRenderer(48) }
 
     Column(
         modifier = Modifier
@@ -1395,6 +1395,13 @@ private fun VisualizerPage(
 
             // Frosted Glass Synced Lyrics Bubble
             lyricWindow?.current?.text?.takeIf(String::isNotBlank)?.let { currentLine ->
+                val trimmed = currentLine.trim()
+                val instrumentalText = stringResource(R.string.instrumental_break)
+                val isInstrumentalTag = trimmed.equals("[Instrumental]", ignoreCase = true) ||
+                        trimmed.matches(Regex("""^\[(?:music|applause|intro|instrumental|outro|solo|cheering|laughter|guitar solo|drum solo|[\u0600-\u06FF\s]+)[^\]]*\]$""", RegexOption.IGNORE_CASE)) ||
+                        trimmed.matches(Regex("""^\((?:music|applause|intro|instrumental|outro|solo|[\u0600-\u06FF\s]+)[^)]*\)$""", RegexOption.IGNORE_CASE))
+
+                val displayLine = if (isInstrumentalTag) "• $instrumentalText •" else trimmed
                 Spacer(Modifier.height(8.dp))
                 Box(
                     modifier = Modifier
@@ -1406,19 +1413,23 @@ private fun VisualizerPage(
                     contentAlignment = Alignment.Center,
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        AnimatedContent(currentLine, label = "visualizer_lyric") { line ->
+                        AnimatedContent(displayLine, label = "visualizer_lyric") { line ->
                             Text(
                                 line,
                                 style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content),
-                                color = colors.primary,
+                                color = if (isInstrumentalTag) colors.primary.copy(alpha = 0.85f) else colors.primary,
                                 textAlign = TextAlign.Center,
                                 maxLines = 2,
-                                fontWeight = FontWeight.SemiBold,
+                                fontWeight = if (isInstrumentalTag) FontWeight.Medium else FontWeight.SemiBold,
                             )
                         }
                         lyricWindow.next?.text?.takeIf(String::isNotBlank)?.let { nextLine ->
+                            val nextTrimmed = nextLine.trim()
+                            val nextIsTag = nextTrimmed.equals("[Instrumental]", ignoreCase = true) ||
+                                    nextTrimmed.matches(Regex("""^\[(?:music|applause|intro|instrumental|outro|solo|cheering|laughter|guitar solo|drum solo|[\u0600-\u06FF\s]+)[^\]]*\]$""", RegexOption.IGNORE_CASE))
+                            val nextDisplay = if (nextIsTag) "• $instrumentalText •" else nextTrimmed
                             Text(
-                                nextLine,
+                                nextDisplay,
                                 style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Content),
                                 color = colors.onSurfaceVariant.copy(alpha = 0.65f),
                                 textAlign = TextAlign.Center,
@@ -1430,7 +1441,7 @@ private fun VisualizerPage(
             }
         }
 
-        // ── 44-Band Studio Spectrum Visualizer with Falling Peak Caps ─────────
+        // ── 48-Band Studio Spectrum Visualizer with Dynamic Neon & Mirror Reflection ─────────
         val spectrumShape = RoundedCornerShape(tokens.cardCorner.dp)
         val spectrumContainer = when (theme.style) {
             dev.auralis.studio.core.model.ThemeStyle.MINIMAL -> Color.Transparent
@@ -1458,65 +1469,104 @@ private fun VisualizerPage(
             androidx.compose.foundation.Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(145.dp),
+                    .height(148.dp),
             ) {
                 spectrumRenderer.update(bands, System.nanoTime())
                 val count = spectrumRenderer.count
-                val barWidth = (size.width / (count * 1.35f)).coerceAtLeast(4f)
-                val gap = barWidth * 0.35f
-                val totalWidth = count * (barWidth + gap)
+                val barWidth = (size.width / (count * 1.32f)).coerceAtLeast(3.5f)
+                val gap = barWidth * 0.32f
+                val totalWidth = count * (barWidth + gap) - gap
                 val startX = (size.width - totalWidth) / 2f
-                val maxHeight = size.height - 14f
+                val baseLineY = size.height - 18f
+                val maxHeight = baseLineY - 10f
 
                 val gradientColors = when (theme.style) {
-                    dev.auralis.studio.core.model.ThemeStyle.MATERIAL -> listOf(colors.primary, colors.primary.copy(alpha = 0.65f))
-                    dev.auralis.studio.core.model.ThemeStyle.NEON -> listOf(Color(0xFF38BDF8), colors.secondary, colors.primary)
-                    dev.auralis.studio.core.model.ThemeStyle.RETRO_SYNTH -> listOf(Color(0xFFEC4899), Color(0xFF06B6D4), colors.primary)
+                    dev.auralis.studio.core.model.ThemeStyle.MATERIAL -> listOf(colors.primary, colors.tertiary, colors.secondary)
+                    dev.auralis.studio.core.model.ThemeStyle.NEON -> listOf(Color(0xFF00F0FF), Color(0xFFBD00FF), Color(0xFFFF007A))
+                    dev.auralis.studio.core.model.ThemeStyle.RETRO_SYNTH -> listOf(Color(0xFFFF007A), Color(0xFF7928CA), Color(0xFFFF7A00))
                     dev.auralis.studio.core.model.ThemeStyle.SKY_BREEZE -> listOf(Color(0xFF38BDF8), Color(0xFF06B6D4), colors.primary)
-                    dev.auralis.studio.core.model.ThemeStyle.DYNAMIC_ART -> listOf(semantic.artworkAccent, colors.primary, semantic.visualizerBass.copy(alpha = 0.75f))
-                    else -> listOf(semantic.visualizerTreble, colors.primary, semantic.visualizerBass.copy(alpha = 0.75f))
+                    dev.auralis.studio.core.model.ThemeStyle.DYNAMIC_ART -> listOf(semantic.artworkAccent, colors.primary, semantic.visualizerBass)
+                    else -> listOf(semantic.visualizerTreble, colors.primary, semantic.visualizerBass)
                 }
+
+                // Ambient glow aura underneath the active frequency spectrum
+                val avgEnergy = spectrumRenderer.currentMagnitudes.average().toFloat()
+                if (avgEnergy > 0.04f) {
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            listOf(Color.Transparent, gradientColors[1].copy(alpha = (avgEnergy * 0.22f).coerceIn(0f, 0.26f))),
+                            startY = baseLineY - maxHeight * 0.6f,
+                            endY = baseLineY,
+                        ),
+                        topLeft = androidx.compose.ui.geometry.Offset(startX, baseLineY - maxHeight * 0.6f),
+                        size = androidx.compose.ui.geometry.Size(totalWidth, maxHeight * 0.6f),
+                    )
+                }
+
+                // Baseline separator line
+                drawLine(
+                    color = colors.primary.copy(alpha = 0.25f),
+                    start = androidx.compose.ui.geometry.Offset(startX, baseLineY),
+                    end = androidx.compose.ui.geometry.Offset(startX + totalWidth, baseLineY),
+                    strokeWidth = 1f,
+                )
 
                 for (i in 0 until count) {
                     val x = startX + i * (barWidth + gap)
                     val mag = spectrumRenderer.currentMagnitudes[i]
                     val peak = spectrumRenderer.peakCaps[i]
 
-                    val barHeight = if (mag < 0.005f) 0f else (mag * maxHeight).coerceAtLeast(3f)
-                    val y = size.height - barHeight
+                    val barHeight = if (mag < 0.005f) 0f else (mag * maxHeight).coerceAtLeast(2.5f)
+                    val y = baseLineY - barHeight
 
-                    // Subtle neon glow under active bars
-                    if (barHeight > 0f && tokens.accentGlowAlpha > 0f) {
+                    // Subtle neon bloom aura for active bars
+                    if (barHeight > 0f) {
                         drawRoundRect(
-                            color = colors.primary.copy(alpha = (tokens.accentGlowAlpha * mag * 0.45f).coerceIn(0f, 0.45f)),
-                            topLeft = androidx.compose.ui.geometry.Offset(x - barWidth * 0.3f, y - 2f),
-                            size = androidx.compose.ui.geometry.Size(barWidth * 1.6f, barHeight + 4f),
+                            color = gradientColors[0].copy(alpha = (0.28f * mag).coerceIn(0f, 0.35f)),
+                            topLeft = androidx.compose.ui.geometry.Offset(x - barWidth * 0.25f, y - 2f),
+                            size = androidx.compose.ui.geometry.Size(barWidth * 1.5f, barHeight + 4f),
                             cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth, barWidth),
                         )
                     }
 
-                    // Main Spectrum Frequency Bar
+                    // Main Frequency Bar
                     if (barHeight > 0f) {
                         drawRoundRect(
                             brush = Brush.verticalGradient(
                                 colors = gradientColors,
                                 startY = y,
-                                endY = size.height,
+                                endY = baseLineY,
                             ),
                             topLeft = androidx.compose.ui.geometry.Offset(x, y),
                             size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
                             cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f, barWidth / 2f),
                         )
+
+                        // 3D Glass Mirror Floor Reflection below baseline
+                        val reflectionHeight = (barHeight * 0.36f).coerceIn(2f, 15f)
+                        drawRoundRect(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    gradientColors.last().copy(alpha = (0.35f * mag).coerceIn(0f, 0.38f)),
+                                    Color.Transparent,
+                                ),
+                                startY = baseLineY,
+                                endY = baseLineY + reflectionHeight,
+                            ),
+                            topLeft = androidx.compose.ui.geometry.Offset(x, baseLineY + 2f),
+                            size = androidx.compose.ui.geometry.Size(barWidth, reflectionHeight),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f, barWidth / 2f),
+                        )
                     }
 
-                    // Floating Peak Cap Marker (Hi-Fi studio equipment feel)
+                    // Floating Peak Cap Marker (Hi-Fi studio physics)
                     if (peak > 0.02f) {
-                        val peakY = (size.height - (peak * maxHeight) - 3f).coerceAtLeast(0f)
+                        val peakY = (baseLineY - (peak * maxHeight) - 3f).coerceAtLeast(0f)
                         drawRoundRect(
-                            color = Color.White.copy(alpha = 0.92f),
+                            color = Color.White.copy(alpha = 0.95f),
                             topLeft = androidx.compose.ui.geometry.Offset(x, peakY),
                             size = androidx.compose.ui.geometry.Size(barWidth, 2.5f),
-                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.5f, 1.5f),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.25f, 1.25f),
                         )
                     }
                 }
@@ -1524,9 +1574,9 @@ private fun VisualizerPage(
 
             // Smooth Audio Waveform Line
             if (waveform.isNotEmpty()) {
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(4.dp))
                 androidx.compose.foundation.Canvas(
-                    modifier = Modifier.fillMaxWidth().height(28.dp),
+                    modifier = Modifier.fillMaxWidth().height(26.dp),
                 ) {
                     val path = androidx.compose.ui.graphics.Path()
                     waveform.forEachIndexed { index, sample ->
@@ -1534,10 +1584,17 @@ private fun VisualizerPage(
                         val y = size.height * (0.5f - sample.coerceIn(-1f, 1f) * 0.44f)
                         if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
                     }
+                    // Outer subtle glow stroke
                     drawPath(
                         path = path,
-                        color = colors.primary.copy(alpha = 0.85f),
-                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.2f),
+                        color = colors.primary.copy(alpha = 0.35f),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 4f),
+                    )
+                    // Inner crisp stroke
+                    drawPath(
+                        path = path,
+                        color = colors.primary.copy(alpha = 0.90f),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.8f),
                     )
                 }
             }
@@ -1563,7 +1620,7 @@ private fun VisualizerPage(
  * 120Hz Hardware-accelerated spectrum renderer with realistic physics
  * and peak-hold gravity falloff for studio-grade audio visualization.
  */
-private class SpectrumRenderer(val count: Int = 44) {
+private class SpectrumRenderer(val count: Int = 48) {
     val currentMagnitudes = FloatArray(count)
     val peakCaps = FloatArray(count)
     val peakVelocities = FloatArray(count)

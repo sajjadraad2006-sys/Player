@@ -864,6 +864,7 @@ private fun eightDModeLabel(mode: EightDMode): String = stringResource(
         EightDMode.BASS_SEPARATION -> R.string.mode_bass_separation
         EightDMode.VOCAL_SEPARATION -> R.string.mode_vocal_separation
         EightDMode.BINAURAL_3D -> R.string.mode_binaural_3d
+        EightDMode.SPHERICAL_3D -> R.string.mode_spherical_3d
     },
 )
 

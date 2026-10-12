@@ -595,6 +595,7 @@ fun AudioEffectsSheet(
                                             EightDMode.BASS_SEPARATION -> stringResource(R.string.mode_bass_separation)
                                             EightDMode.VOCAL_SEPARATION -> stringResource(R.string.mode_vocal_separation)
                                             EightDMode.BINAURAL_3D -> stringResource(R.string.mode_binaural_3d)
+                                            EightDMode.SPHERICAL_3D -> stringResource(R.string.mode_spherical_3d)
                                         })
                                     },
                                     shape = RoundedCornerShape(12.dp),
@@ -602,7 +603,7 @@ fun AudioEffectsSheet(
                             }
                         }
 
-                        if (config.eightDMode == EightDMode.BASS_SEPARATION) {
+                        if (config.eightDMode == EightDMode.BASS_SEPARATION || config.eightDMode == EightDMode.SPHERICAL_3D) {
                             NumericSliderRow(
                                 label = stringResource(R.string.bass_separation_depth),
                                 formattedValue = "${(config.eightDBassSeparation * 100).roundToInt()}%",
@@ -611,7 +612,8 @@ fun AudioEffectsSheet(
                                 onValueChange = { onConfigChange(config.copy(eightDBassSeparation = it, dspEnabled = true)) },
                                 colors = colors,
                             )
-                        } else if (config.eightDMode == EightDMode.VOCAL_SEPARATION) {
+                        }
+                        if (config.eightDMode == EightDMode.VOCAL_SEPARATION || config.eightDMode == EightDMode.SPHERICAL_3D) {
                             NumericSliderRow(
                                 label = stringResource(R.string.vocal_separation_depth),
                                 formattedValue = "${(config.eightDVocalSeparation * 100).roundToInt()}%",
@@ -620,7 +622,8 @@ fun AudioEffectsSheet(
                                 onValueChange = { onConfigChange(config.copy(eightDVocalSeparation = it, dspEnabled = true)) },
                                 colors = colors,
                             )
-                        } else if (config.eightDMode == EightDMode.BINAURAL_3D) {
+                        }
+                        if (config.eightDMode == EightDMode.BINAURAL_3D || config.eightDMode == EightDMode.SPHERICAL_3D) {
                             NumericSliderRow(
                                 label = stringResource(R.string.binaural_depth),
                                 formattedValue = "${(config.eightDBinauralDepth * 100).roundToInt()}%",
@@ -644,6 +647,40 @@ fun AudioEffectsSheet(
                         }
                     }
                 }
+            }
+
+            // ── Section 3b: Studio Mastering & Audio Exciter ────────────────
+            SectionCard(
+                icon = Icons.Default.GraphicEq,
+                title = stringResource(R.string.soundstage_expansion),
+                onReset = {
+                    onConfigChange(config.copy(soundstageExpansion = 0f, analogWarmth = 0f, clarityExciter = 0f))
+                },
+            ) {
+                NumericSliderRow(
+                    label = stringResource(R.string.soundstage_expansion),
+                    formattedValue = "${(config.soundstageExpansion * 100).roundToInt()}%",
+                    value = config.soundstageExpansion,
+                    valueRange = 0f..1.0f,
+                    onValueChange = { onConfigChange(config.copy(soundstageExpansion = it, dspEnabled = true)) },
+                    colors = colors,
+                )
+                NumericSliderRow(
+                    label = stringResource(R.string.analog_warmth),
+                    formattedValue = "${(config.analogWarmth * 100).roundToInt()}%",
+                    value = config.analogWarmth,
+                    valueRange = 0f..1.0f,
+                    onValueChange = { onConfigChange(config.copy(analogWarmth = it, dspEnabled = true)) },
+                    colors = colors,
+                )
+                NumericSliderRow(
+                    label = stringResource(R.string.clarity_exciter),
+                    formattedValue = "${(config.clarityExciter * 100).roundToInt()}%",
+                    value = config.clarityExciter,
+                    valueRange = 0f..1.0f,
+                    onValueChange = { onConfigChange(config.copy(clarityExciter = it, dspEnabled = true)) },
+                    colors = colors,
+                )
             }
 
             // ── Section 4: Reverb & Safe Limiter ─────────────────────────────

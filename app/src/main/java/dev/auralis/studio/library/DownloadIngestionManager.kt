@@ -517,14 +517,16 @@ class DownloadIngestionManager(
         onProgress: (downloaded: Long) -> Unit,
         onDbProgress: (downloaded: Long) -> Unit,
     ) {
-        val buffer = ByteArray(65536)
+        val bufferedIn = if (input is java.io.BufferedInputStream) input else java.io.BufferedInputStream(input, 131072)
+        val bufferedOut = if (output is java.io.BufferedOutputStream) output else java.io.BufferedOutputStream(output, 131072)
+        val buffer = ByteArray(131072)
         var bytesRead: Int
         var totalRead = 0L
         var lastReportTime = 0L
         var lastDbReportTime = 0L
 
-        while (input.read(buffer).also { bytesRead = it } != -1) {
-            output.write(buffer, 0, bytesRead)
+        while (bufferedIn.read(buffer).also { bytesRead = it } != -1) {
+            bufferedOut.write(buffer, 0, bytesRead)
             totalRead += bytesRead
             val now = System.currentTimeMillis()
             if (now - lastReportTime > 250L || totalRead == totalBytes) {
@@ -536,7 +538,7 @@ class DownloadIngestionManager(
                 onDbProgress(totalRead)
             }
         }
-        output.flush()
+        bufferedOut.flush()
     }
 
     companion object {
@@ -610,6 +612,10 @@ class DownloadIngestionManager(
 
 fun createSafeDownloadClient(allowLocalhostForTesting: Boolean = false): OkHttpClient {
     return OkHttpClient.Builder()
+        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(35, java.util.concurrent.TimeUnit.SECONDS)
+        .connectionPool(okhttp3.ConnectionPool(8, 5, java.util.concurrent.TimeUnit.MINUTES))
+        .retryOnConnectionFailure(true)
         .followRedirects(false)
         .followSslRedirects(false)
         .addInterceptor(SafeRedirectInterceptor(maxRedirects = 5, allowLocalhostForTesting = allowLocalhostForTesting))

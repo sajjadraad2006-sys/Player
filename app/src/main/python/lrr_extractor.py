@@ -772,11 +772,12 @@ def _execute_extraction(request_json: str, is_resolve: bool) -> str:
             "no_color": True,
             "socket_timeout": 15,
             "noplaylist": True,
+            "format": "bestaudio/best",
             "youtube_include_dash_manifest": False,
             "youtube_include_hls_manifest": False,
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["android", "visionos", "mweb"],
+                    "player_client": ["android_music", "android", "ios", "mweb"],
                 }
             },
         }
@@ -802,7 +803,7 @@ def _execute_extraction(request_json: str, is_resolve: bool) -> str:
                 fallback_opts = dict(ydl_opts)
                 fallback_opts["extractor_args"] = {
                     "youtube": {
-                        "player_client": ["visionos", "tv_downgraded"],
+                        "player_client": ["ios", "visionos", "mweb"],
                     }
                 }
                 with yt_dlp.YoutubeDL(fallback_opts) as ydl_fb:
