@@ -109,7 +109,9 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     val history by viewModel.historyUris.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val currentTrack by viewModel.currentPlayingTrack.collectAsStateWithLifecycle()
-    val playbackError by viewModel.playbackState.map { it.error }.distinctUntilChanged().collectAsStateWithLifecycle(null)
+    val playbackError by remember(viewModel.playbackState) {
+        viewModel.playbackState.map { it.error }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(null)
     val config by viewModel.audioConfig.collectAsStateWithLifecycle()
     val theme by viewModel.themeSettings.collectAsStateWithLifecycle()
     val results by viewModel.searchResults.collectAsStateWithLifecycle()
