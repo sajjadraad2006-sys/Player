@@ -777,7 +777,7 @@ def _execute_extraction(request_json: str, is_resolve: bool) -> str:
             "youtube_include_hls_manifest": False,
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["android_music", "android", "ios", "mweb"],
+                    "player_client": ["android_music", "android"],
                 }
             },
         }

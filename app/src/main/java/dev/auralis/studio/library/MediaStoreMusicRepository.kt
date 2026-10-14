@@ -96,7 +96,16 @@ class MediaStoreMusicRepository(private val context: Context) {
         }
     }
 
-    fun track(uri: String): Track? = _tracks.value.firstOrNull { it.uri == uri }
+    fun track(uri: String): Track? {
+        val direct = _tracks.value.firstOrNull { it.uri == uri }
+        if (direct != null) return direct
+        val id = uri.substringAfterLast('/')
+        return if (id.isNotEmpty() && id.all { it.isDigit() }) {
+            _tracks.value.firstOrNull { it.uri.substringAfterLast('/') == id }
+        } else {
+            null
+        }
+    }
 
     fun updateSafTracks(tracks: List<Track>) {
         safTracks = tracks

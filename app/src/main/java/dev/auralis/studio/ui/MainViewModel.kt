@@ -103,16 +103,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (downloadList.isEmpty()) return@combine libTracks
         val byUri = downloadList.filter { it.trackUri.isNotBlank() }.associateBy { it.trackUri }
         val byPath = downloadList.filter { it.destinationPath.isNotBlank() }.associateBy { it.destinationPath }
-        val byIdentity = downloadList.filter { it.recordingIdentity.isNotBlank() }.associateBy { it.recordingIdentity }
+        val byId = downloadList.filter { it.trackUri.isNotBlank() }.associateBy { it.trackUri.substringAfterLast('/') }
+        val byFileName = downloadList.filter { it.fileName.isNotBlank() }.associateBy { it.fileName.trim().lowercase() }
+        val byFileStem = downloadList.filter { it.fileName.isNotBlank() }.associateBy { it.fileName.substringBeforeLast('.').trim().lowercase() }
+        val byIdentity = downloadList.filter { it.recordingIdentity.isNotBlank() }.associateBy { it.recordingIdentity.trim().lowercase() }
+        val byTitle = downloadList.filter { it.title.isNotBlank() }.associateBy { it.title.trim().lowercase() }
+
         libTracks.map { track ->
+            val trackId = track.uri.substringAfterLast('/')
+            val cleanDisplayName = track.displayName.trim().lowercase()
+            val cleanStem = track.displayName.substringBeforeLast('.').trim().lowercase()
             val match = byUri[track.uri]
                 ?: byPath[track.uri]
-                ?: byIdentity[DownloadIngestionRequest.deriveRecordingIdentity(track.artist, track.title)]
+                ?: (if (trackId.isNotEmpty() && trackId.all { it.isDigit() }) byId[trackId] else null)
+                ?: byFileName[cleanDisplayName]
+                ?: byFileStem[cleanStem]
+                ?: byIdentity[DownloadIngestionRequest.deriveRecordingIdentity(track.artist, track.title).lowercase()]
+                ?: byTitle[track.title.trim().lowercase()]
+
             if (match != null) {
                 // If title was corrupted by underscores from older downloads or media scanner, restore proper title
-                val isCorruptedTitle = track.title.all { it == '_' || it == '-' || it == ' ' } || track.title.contains("___")
-                val restoredTitle = if (isCorruptedTitle && match.title.isNotBlank()) match.title else track.title
-                val restoredArtist = if (track.artist.isBlank() && match.artist.isNotBlank()) match.artist else track.artist
+                val isCorruptedTitle = track.title.all { it == '_' || it == '-' || it == ' ' } || track.title.contains("___") || track.title.endsWith(".opus", true) || track.title.endsWith(".mp3", true) || track.title.endsWith(".m4a", true)
+                val restoredTitle = if ((isCorruptedTitle || track.title.isBlank()) && match.title.isNotBlank()) match.title else track.title
+                val restoredArtist = if ((track.artist.isBlank() || track.artist == "<unknown>" || track.artist.equals("Unknown Artist", true)) && match.artist.isNotBlank()) match.artist else track.artist
                 val artwork = match.artworkUrl.takeIf { it.isNotBlank() } ?: track.customArtworkUri
                 track.copy(
                     title = restoredTitle,

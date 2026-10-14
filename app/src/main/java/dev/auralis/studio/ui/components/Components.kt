@@ -199,19 +199,23 @@ fun TrackArtwork(track: Track?, modifier: Modifier = Modifier) {
     val tokens = LocalAuralisTokens.current
     val shape  = remember(tokens.artworkCorner) { RoundedCornerShape(tokens.artworkCorner.dp) }
     val rawUri = track?.artworkUri
-    val context = androidx.compose.ui.platform.LocalContext.current
     val model: Any? = remember(rawUri) {
-        if (rawUri.isNullOrBlank()) null
-        else if (rawUri.startsWith("/") && !rawUri.startsWith("content://") && !rawUri.startsWith("file://")) {
-            java.io.File(rawUri)
-        } else {
-            rawUri
+        when {
+            rawUri.isNullOrBlank() -> null
+            rawUri.startsWith("content://") -> android.net.Uri.parse(rawUri)
+            rawUri.startsWith("file://") -> {
+                val path = android.net.Uri.parse(rawUri).path
+                if (path != null) java.io.File(path) else android.net.Uri.parse(rawUri)
+            }
+            rawUri.startsWith("/") -> java.io.File(rawUri)
+            else -> rawUri
         }
     }
     Box(modifier = modifier.clip(shape), contentAlignment = Alignment.Center) {
         if (model == null) {
             DefaultArtworkPlaceholder(shape, Modifier.fillMaxSize())
         } else {
+            val context = androidx.compose.ui.platform.LocalContext.current
             val request = remember(model) {
                 coil.request.ImageRequest.Builder(context)
                     .data(model)

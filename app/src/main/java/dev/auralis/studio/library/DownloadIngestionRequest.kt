@@ -60,7 +60,9 @@ data class DownloadIngestionRequest(
             durationMs: Long? = null,
             safeHeaders: Map<String, String> = emptyMap(),
             formatExtension: String? = null,
+            artworkUrl: String? = null,
         ): DownloadIngestionRequest {
+            val effectiveArt = artworkUrl?.takeIf { it.isNotBlank() } ?: descriptor.artworkUrl
             return DownloadIngestionRequest(
                 provider = "lrr_${descriptor.source.lowercase().trim().replace(Regex("[^a-z0-9_]"), "_")}",
                 providerTrackId = descriptor.sourceId ?: ResolverDownloadDescriptor.sha256Hex(descriptor.canonicalUrl.trim()),
@@ -68,7 +70,7 @@ data class DownloadIngestionRequest(
                 title = descriptor.title,
                 artist = descriptor.artist,
                 album = descriptor.album,
-                artworkUrl = descriptor.artworkUrl,
+                artworkUrl = effectiveArt,
                 durationMs = durationMs ?: descriptor.expectedDurationMs ?: 0L,
                 recordingIdentity = descriptor.recordingIdentity,
                 isrc = null,

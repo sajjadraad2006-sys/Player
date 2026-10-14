@@ -108,6 +108,8 @@ enum class HomeCategory(val titleRes: Int) {
     PLAYLISTS(R.string.filter_playlists),
     FAVORITES(R.string.filter_favorites),
     RECENT(R.string.filter_recent),
+    RECENT_ADD(R.string.category_recent_add),
+    MOST_PLAYED(R.string.category_most_play),
     FOLDERS(R.string.filter_folders),
 }
 
@@ -182,6 +184,10 @@ fun HomeScreen(
     }
     val recentlyAddedTracks = remember(tracks) {
         tracks.sortedByDescending { it.dateAddedSeconds }.take(100)
+    }
+    val mostPlayedTracks = remember(tracks, historyUris) {
+        val playCounts = historyUris.groupingBy { it }.eachCount()
+        tracks.sortedByDescending { playCounts[it.uri] ?: 0 }
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -822,6 +828,8 @@ fun HomeScreen(
                     HomeCategory.SONGS -> tracks
                     HomeCategory.FAVORITES -> favoriteTracks
                     HomeCategory.RECENT -> historyTracks
+                    HomeCategory.RECENT_ADD -> recentlyAddedTracks
+                    HomeCategory.MOST_PLAYED -> mostPlayedTracks
                     HomeCategory.FOLDERS -> tracks
                     else -> emptyList()
                 }
@@ -1186,7 +1194,7 @@ private fun ClassicSixCardGrid(
                 count = recentAddCount,
                 icon = Icons.Default.History,
                 accentColor = Color(0xFF10B981),
-                onClick = { onSelectCategory(HomeCategory.SONGS) },
+                onClick = { onSelectCategory(HomeCategory.RECENT_ADD) },
                 modifier = Modifier.weight(1f),
             )
             CategoryTile(
@@ -1194,7 +1202,7 @@ private fun ClassicSixCardGrid(
                 count = mostPlayCount,
                 icon = Icons.Default.Equalizer,
                 accentColor = Color(0xFFA855F7),
-                onClick = { onSelectCategory(HomeCategory.RECENT) },
+                onClick = { onSelectCategory(HomeCategory.MOST_PLAYED) },
                 modifier = Modifier.weight(1f),
             )
         }

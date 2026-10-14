@@ -59,6 +59,13 @@ class DownloadIngestionManager(
     private val requestHeadersFor: (OnlineTrack) -> Map<String, String> = { emptyMap() },
 ) {
 
+    private val artworkClient: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(25, java.util.concurrent.TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .build()
+
     /** In-process ownership of DownloadKeys so only one job runs per key. */
     private val activeKeys = MutableSet<String>()
     private val activeRecordings = MutableSet<String>()
@@ -272,7 +279,14 @@ class DownloadIngestionManager(
                     contentValues.put(MediaStore.Audio.Media.IS_PENDING, 0)
                     context.contentResolver.update(insertedUri, contentValues, null, null)
 
-                    localUri = insertedUri
+                    runCatching {
+                        val mediaId = android.content.ContentUris.parseId(insertedUri)
+                        android.content.ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, mediaId)
+                    }.getOrNull()?.let { canonicalUri ->
+                        localUri = canonicalUri
+                    } ?: run {
+                        localUri = insertedUri
+                    }
                     localFilePath = insertedUri.toString()
                 } else {
                     val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
@@ -347,7 +361,7 @@ class DownloadIngestionManager(
                         .url(artUrl)
                         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
                         .build()
-                    okHttpClient.newCall(artReq).execute().use { resp ->
+                    artworkClient.newCall(artReq).execute().use { resp ->
                         if (resp.isSuccessful) {
                             resp.body?.byteStream()?.use { input ->
                                 coverFile.outputStream().use { output ->

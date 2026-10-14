@@ -85,15 +85,15 @@ class VisualizerAnalyzer(
     private fun applyQuality(quality: VisualQuality) {
         when (quality) {
             VisualQuality.REDUCED -> {
-                bandCount       = 24
-                targetIntervalMs = 40   // ~25 fps
+                bandCount       = 48
+                targetIntervalMs = 35   // ~30 fps
             }
             VisualQuality.BALANCED -> {
                 bandCount       = 48
                 targetIntervalMs = 22   // ~45 fps
             }
             VisualQuality.FULL -> {
-                bandCount       = 64
+                bandCount       = 48
                 targetIntervalMs = 16   // ~60 fps
             }
         }
@@ -143,7 +143,7 @@ class VisualizerAnalyzer(
         val sampleRate = tap.sampleRateHz.toFloat()
         val binToHz = sampleRate / fftSize.toFloat()
         val minFreq  = 20f
-        val maxFreq  = minOf(20_000f, sampleRate * 0.48f).coerceAtLeast(minFreq * 2f)
+        val maxFreq  = minOf(16_500f, sampleRate * 0.45f).coerceAtLeast(minFreq * 2f)
         val logMin   = log10(minFreq)
         val logMax   = log10(maxFreq)
 
@@ -167,12 +167,12 @@ class VisualizerAnalyzer(
             // Equal-loudness / pink noise tilt compensation: music rolls off at ~3-4dB per octave,
             // so we progressively boost high bands so Treble and Air dance dynamically alongside Bass.
             val bandFraction = band.toFloat() / (bandCount - 1).coerceAtLeast(1)
-            val tiltDb = bandFraction * 22.0f
+            val tiltDb = bandFraction * 26.0f
 
-            val db = 20f * log10(max(energy, 0.00000005f)) + tiltDb
-            val norm = if (energy < 0.0000002f) 0f else ((db + 72f) / 72f).coerceIn(0f, 1f)
+            val db = 20f * log10(max(energy, 0.00000002f)) + tiltDb
+            val norm = if (energy < 0.00000005f) 0f else ((db + 76f) / 76f).coerceIn(0f, 1f)
             // A gentle perceptual curve expands low-level musical detail. Zero stays zero.
-            bandMags[band] = if (norm <= 0f) 0f else norm.pow(0.80f)
+            bandMags[band] = if (norm <= 0f) 0f else norm.pow(0.75f)
         }
 
         // Time-correct analysis smoothing: fast transient attack, musical release.

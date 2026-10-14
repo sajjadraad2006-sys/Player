@@ -54,13 +54,13 @@ class LyricsRepository(
         const val MATCHER_VERSION = 2
         /** Local durations below this are previews/incomplete — never used for lyric matching. */
         const val MIN_FULL_TRACK_MS_FOR_MATCHING = 45_000L
-        /**
-         * Deploy-time epoch of matching algorithm v2. Set to 0 so ALL pre-existing
-         * auto-matched cache rows are re-validated exactly once after this update
-         * (they were matched against poisoned preview-duration metadata). Rows
-         * fetched afterwards carry a fresh lastValidatedAt and are trusted.
-         */
         const val MATCHER_EPOCH_MS = 0L
+    }
+
+    fun lyricsIdentityKey(track: Track): String {
+        val cleanArtist = LyricsMetadataNormalizer.artist(track.artist).trim().lowercase()
+        val cleanTitle = LyricsMetadataNormalizer.title(track.title).trim().lowercase()
+        return "identity:$cleanArtist - $cleanTitle"
     }
 
     /**
@@ -76,7 +76,8 @@ class LyricsRepository(
         }
 
         // ── Step 2 & 3: Local .lrc — manual first, then auto ──────────────
-        val cachedManual = dao.getLyrics(track.uri)?.takeIf { it.manualSelection }
+        val identityKey = lyricsIdentityKey(track)
+        val cachedManual = (dao.getLyrics(track.uri) ?: dao.getLyrics(identityKey))?.takeIf { it.manualSelection }
         if (cachedManual != null) {
             Log.d(TAG, "Using manually selected local/cache lyrics for ${track.title}")
             return@withContext applyStoredOffset(track, parseCachedEntity(cachedManual))
@@ -92,7 +93,7 @@ class LyricsRepository(
         // Cache entries fetched under an older matching algorithm (or against
         // preview-duration metadata) are treated as stale and re-evaluated.
         // Manual selections and imports never reach this branch (returned above).
-        val cached = dao.getLyrics(track.uri)
+        val cached = dao.getLyrics(track.uri) ?: dao.getLyrics(identityKey)
         if (cached != null && isCacheValid(cached)) {
             val staleFromOldMatcher = cached.lastValidatedAt < MATCHER_EPOCH_MS ||
                 (cached.trackDurationMs > 0 && cached.trackDurationMs < MIN_FULL_TRACK_MS_FOR_MATCHING)
@@ -310,6 +311,10 @@ class LyricsRepository(
         )
         dao.clearAutoCache(track.uri)
         dao.upsertLyrics(entity)
+        val identityKey = lyricsIdentityKey(track)
+        if (identityKey.isNotBlank()) {
+            dao.upsertLyrics(entity.copy(id = 0, trackUri = identityKey))
+        }
     }
 
     /** Searches for candidate lyrics from online provider for manual selection. */
@@ -359,8 +364,13 @@ class LyricsRepository(
         )
         dao.clearAutoCache(track.uri)
         dao.upsertLyrics(entity)
+        val identityKey = lyricsIdentityKey(track)
+        if (identityKey.isNotBlank()) {
+            dao.upsertLyrics(entity.copy(id = 0, trackUri = identityKey))
+        }
         val missKey = track.uri.ifBlank { "${track.title}|${track.artist}|${track.durationMs}" }
         negativeCache.edit().remove(missKey).apply()
+        negativeCache.edit().remove(identityKey).apply()
         applyStoredOffset(track, parseCachedEntity(entity))
     }
 
@@ -374,13 +384,14 @@ class LyricsRepository(
     private fun applyStoredOffset(track: Track, lyrics: SyncedLyrics): SyncedLyrics =
         lyrics.copy(offsetMs = offsetStore.getLong(offsetKey(track), lyrics.offsetMs).coerceIn(-30_000L, 30_000L))
 
-    private fun offsetKey(track: Track): String = track.uri.ifBlank {
-        "${track.title}|${track.artist}|${track.durationMs}"
-    }
+    private fun offsetKey(track: Track): String =
+        if (track.uri.isNotBlank() && !track.uri.startsWith("http")) track.uri
+        else lyricsIdentityKey(track)
 
     /** Clears all cache (including manual) — user-initiated reset. */
     suspend fun clearAll(track: Track) {
         dao.clearAllLyrics(track.uri)
+        dao.clearAllLyrics(lyricsIdentityKey(track))
     }
 
     fun isNetworkAvailable(): Boolean {

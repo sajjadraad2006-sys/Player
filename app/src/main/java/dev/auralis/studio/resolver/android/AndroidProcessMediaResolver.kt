@@ -338,6 +338,7 @@ class AndroidProcessMediaResolver(
     private var isBound = false
     private var bindDeferred = CompletableDeferred<ILrrResolverService?>()
     private val pendingRequests = ConcurrentHashMap<String, (Result<String>) -> Unit>()
+    private val resolutionCache = ConcurrentHashMap<String, Pair<Long, ResolverResult.Success>>()
 
     private val resolverScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var idleJob: Job? = null
@@ -464,11 +465,23 @@ class AndroidProcessMediaResolver(
         if (validationErr != null) {
             return@withContext ResolverResult.Failure(validationErr)
         }
+        val cacheKey = "${request.sourceUrl?.trim()}|${request.sourceId?.trim()}|${request.preferredAudioQuality.name}|${request.formatHint}"
+        val now = System.currentTimeMillis()
+        val cached = resolutionCache[cacheKey]
+        if (cached != null && cached.first > now + 30_000L) {
+            return@withContext cached.second
+        }
+
         val requestJson = json.encodeToString(ResolverRequest.serializer(), request)
         try {
-            executeIpc(request.requestId, request.sourceUrl.orEmpty()) { svc, cb ->
+            val result = executeIpc(request.requestId, request.sourceUrl.orEmpty()) { svc, cb ->
                 svc.resolve(requestJson, cb)
             }
+            if (result is ResolverResult.Success) {
+                val expiry = result.lease?.knownExpiryEpochMs ?: (now + 4 * 3600 * 1000L)
+                resolutionCache[cacheKey] = (expiry to result)
+            }
+            result
         } finally {
             scheduleIdleUnbind()
         }

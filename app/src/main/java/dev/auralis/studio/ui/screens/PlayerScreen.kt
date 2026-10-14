@@ -1631,8 +1631,22 @@ private class SpectrumRenderer(val count: Int = 48) {
         lastNanos = nowNanos
         val gravity = 1.6f * deltaSec
 
+        val hasTargets = targets.isNotEmpty()
+        val srcSize = targets.size
+
         for (i in 0 until count) {
-            val target = targets.getOrElse(i) { 0f }.coerceIn(0f, 1f)
+            val target = if (!hasTargets) {
+                0f
+            } else if (srcSize == count) {
+                targets[i].coerceIn(0f, 1f)
+            } else {
+                val srcPos = i.toFloat() * (srcSize - 1).toFloat() / (count - 1).coerceAtLeast(1).toFloat()
+                val lowIdx = srcPos.toInt().coerceIn(0, srcSize - 1)
+                val highIdx = (lowIdx + 1).coerceIn(0, srcSize - 1)
+                val frac = srcPos - lowIdx
+                ((1f - frac) * targets[lowIdx] + frac * targets[highIdx]).coerceIn(0f, 1f)
+            }
+
             val timeConstant = if (target > currentMagnitudes[i]) 0.035f else 0.140f
             val factor = 1f - kotlin.math.exp(-deltaSec / timeConstant)
             currentMagnitudes[i] += (target - currentMagnitudes[i]) * factor

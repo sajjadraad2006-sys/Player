@@ -258,6 +258,7 @@ internal sealed interface FreshResolutionResult {
         val format: ResolvedFormatDescriptor,
         val lease: EphemeralResourceLease,
         val resolvedDurationMs: Long? = null,
+        val resolvedArtworkUrl: String? = null,
     ) : FreshResolutionResult
 
     data class TerminalFailure(val message: String, val code: ResolverErrorCode = ResolverErrorCode.Unknown) : FreshResolutionResult
@@ -370,6 +371,7 @@ class DownloadWorker(
                     durationMs = res1.resolvedDurationMs ?: descriptor.expectedDurationMs,
                     safeHeaders = SecretSanitizer.extractSafeHeaders(lease1.headers),
                     formatExtension = format1.extension ?: format1.container,
+                    artworkUrl = res1.resolvedArtworkUrl,
                 )
 
                 val result1 = manager.download(req1, onProgress = { downloaded, total ->
@@ -395,6 +397,7 @@ class DownloadWorker(
                             durationMs = res2.resolvedDurationMs ?: descriptor.expectedDurationMs,
                             safeHeaders = SecretSanitizer.extractSafeHeaders(lease2.headers),
                             formatExtension = format2.extension ?: format2.container,
+                            artworkUrl = res2.resolvedArtworkUrl,
                         )
                         val result2 = manager.download(req2, onProgress = { downloaded, total ->
                             DownloadNotificationHelper.showProgress(applicationContext, notifId, descriptor.title, descriptor.artist, downloaded, total)
@@ -537,6 +540,7 @@ class DownloadWorker(
             format = selectedFormat,
             lease = lease,
             resolvedDurationMs = media.durationMs,
+            resolvedArtworkUrl = media.artworkUrl,
         )
     }
 
