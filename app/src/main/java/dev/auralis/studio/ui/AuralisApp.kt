@@ -145,6 +145,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     val appDisplayName by viewModel.appDisplayName.collectAsStateWithLifecycle()
     val activeAppIconAlias by viewModel.activeAppIconAlias.collectAsStateWithLifecycle()
     val youtubeLyricsTranslation by viewModel.youtubeLyricsTranslation.collectAsStateWithLifecycle()
+    val hasMoreOnline by viewModel.hasMoreOnline.collectAsStateWithLifecycle()
 
     var audioPermissionGranted by remember { mutableStateOf(viewModel.hasAudioPermission) }
     var notificationPermissionGranted by remember {
@@ -348,6 +349,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                                 onlineResults         = onlineResults,
                                 isSearchingOnline     = isSearchingOnline,
                                 isSearchingOnlineMore = isSearchingOnlineMore,
+                                hasMoreOnline         = hasMoreOnline,
                                 onLoadMoreOnline      = viewModel::loadMoreOnlineResults,
                                 onlinePlaylists       = onlinePlaylists,
                                 isSearchingPlaylists  = isSearchingPlaylists,

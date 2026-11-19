@@ -206,6 +206,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isSearchingOnlineMore: StateFlow<Boolean> = _isSearchingOnlineMore.asStateFlow()
     private val _onlineSearchPage = MutableStateFlow(0)
     val onlineSearchPage: StateFlow<Int> = _onlineSearchPage.asStateFlow()
+    private val _hasMoreOnline = MutableStateFlow(true)
+    val hasMoreOnline: StateFlow<Boolean> = _hasMoreOnline.asStateFlow()
     private val _onlineProviderFailures = MutableStateFlow(0)
     val onlineProviderFailures: StateFlow<Int> = _onlineProviderFailures.asStateFlow()
     private val _providersPending = MutableStateFlow(0)
@@ -431,6 +433,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .distinctUntilChanged()
                 .flatMapLatest { query ->
                     _onlineSearchPage.value = 0
+                    _hasMoreOnline.value = true
                     if (query.isBlank()) {
                         _isSearchingOnline.value = false
                         _isSearchingOnlineMore.value = false
@@ -512,11 +515,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loadMoreOnlineResults() {
         val query = _onlineSearchQuery.value.trim()
-        if (query.isBlank() || _isSearchingOnline.value || _isSearchingOnlineMore.value) return
+        if (query.isBlank() || !_hasMoreOnline.value || _isSearchingOnline.value || _isSearchingOnlineMore.value) return
 
         val nextPage = _onlineSearchPage.value + 1
         viewModelScope.launch {
             _isSearchingOnlineMore.value = true
+            var receivedNewItems = false
             try {
                 container.unifiedSearch.search(query, page = nextPage).collect { snapshot ->
                     if (snapshot.recordings.isNotEmpty()) {
@@ -524,12 +528,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val existingIdentities = currentList.map { it.recordingIdentity }.toSet()
                         val newRecordings = snapshot.recordings.filterNot { it.recordingIdentity in existingIdentities }
                         if (newRecordings.isNotEmpty()) {
+                            receivedNewItems = true
                             _onlineResults.value = currentList + newRecordings
                             _onlineSearchPage.value = nextPage
                         }
                     }
                     if (snapshot.isComplete) {
                         _isSearchingOnlineMore.value = false
+                        if (!receivedNewItems) {
+                            _hasMoreOnline.value = false
+                        }
                     }
                 }
             } catch (ce: CancellationException) {

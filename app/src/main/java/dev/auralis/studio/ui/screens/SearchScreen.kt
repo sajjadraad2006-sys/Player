@@ -127,6 +127,7 @@ fun SearchScreen(
     onlineResults: List<UnifiedTrack>,
     isSearchingOnline: Boolean,
     isSearchingOnlineMore: Boolean = false,
+    hasMoreOnline: Boolean = true,
     onLoadMoreOnline: () -> Unit = {},
     onlinePlaylists: List<dev.auralis.studio.online.OnlinePlaylist> = emptyList(),
     isSearchingPlaylists: Boolean = false,
@@ -785,11 +786,11 @@ fun SearchScreen(
                     }
 
                     val onlineListState = rememberLazyListState()
-                    val shouldLoadMore by remember(onlineResults.size, isSearchingOnline, isSearchingOnlineMore) {
+                    val shouldLoadMore by remember(onlineResults.size, isSearchingOnline, isSearchingOnlineMore, hasMoreOnline) {
                         derivedStateOf {
                             val totalCount = onlineResults.size
                             val lastVisible = onlineListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-                            totalCount > 0 && !isSearchingOnline && !isSearchingOnlineMore && lastVisible >= totalCount - 4
+                            hasMoreOnline && totalCount > 0 && !isSearchingOnline && !isSearchingOnlineMore && lastVisible >= totalCount - 4
                         }
                     }
 
