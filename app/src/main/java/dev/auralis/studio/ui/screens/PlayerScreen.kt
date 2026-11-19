@@ -1301,7 +1301,7 @@ private fun LyricsPage(
                         )
                     }
 
-                    if (!line.translation.isNullOrBlank()) {
+                    if (showTranslation && !line.translation.isNullOrBlank()) {
                         Text(
                             text = line.translation,
                             style = MaterialTheme.typography.bodyMedium.copy(

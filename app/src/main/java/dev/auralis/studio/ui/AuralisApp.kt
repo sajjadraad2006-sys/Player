@@ -495,6 +495,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                         isSearchingLyricsCandidates = isSearchingLyricsCandidates,
                         onLoadLyricsCandidates = viewModel::loadLyricsCandidates,
                         onSelectLyricsCandidate = viewModel::selectLyricsCandidate,
+                        onRequestLyricsTranslation = viewModel::requestLyricsTranslation,
                         onOpenRecommendations = { recommendationsVisible = true },
                     )
                     // Audio effects sheet shown over the player
