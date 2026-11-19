@@ -63,20 +63,63 @@ class YouTubeCaptionsClient {
         val videoId: String,
     )
 
+    data class CaptionTrackInfo(
+        val baseUrl: String,
+        val lang: String,
+        val isArabic: Boolean,
+    )
+
     /**
      * Resolves synced lyrics from YouTube captions for the given track.
      */
-    suspend fun resolve(track: Track): CaptionsResult? = withContext(Dispatchers.IO) {
+    suspend fun resolve(track: Track, translateToArabic: Boolean = true): CaptionsResult? = withContext(Dispatchers.IO) {
         try {
             val videoId = extractOrSearchVideoId(track) ?: return@withContext null
-            val captionTrackUrl = fetchCaptionTrackUrl(videoId) ?: return@withContext null
-            val lines = fetchAndParseCaptions(captionTrackUrl)
-            if (lines.isEmpty()) return@withContext null
+            val trackInfo = fetchCaptionTrackInfo(videoId) ?: return@withContext null
+            val originalLines = fetchAndParseCaptions(trackInfo.baseUrl)
+            if (originalLines.isEmpty()) return@withContext null
 
-            val lrc = toLrc(lines)
-            val plain = lines.joinToString("\n") { it.text }
+            // If captions are not in Arabic, and translateToArabic is enabled, fetch Arabic translation track
+            val finalLines = if (translateToArabic && !trackInfo.isArabic) {
+                try {
+                    val translatedUrl = if (trackInfo.baseUrl.contains("tlang=")) {
+                        trackInfo.baseUrl
+                    } else {
+                        val sep = if (trackInfo.baseUrl.contains("?")) "&" else "?"
+                        "${trackInfo.baseUrl}${sep}tlang=ar"
+                    }
+                    val transLines = fetchAndParseCaptions(translatedUrl)
+                    if (transLines.isNotEmpty()) {
+                        val matched = originalLines.mapIndexed { idx, orig ->
+                            val match = transLines.firstOrNull { abs(it.timeMs - orig.timeMs) < 1200L }
+                                ?: transLines.getOrNull(idx)
+                            if (match != null && match.text.isNotBlank() && match.text != orig.text) {
+                                orig.copy(translation = match.text)
+                            } else {
+                                orig
+                            }
+                        }
+                        // Fall back to translator for any lines that missed translation
+                        if (matched.any { it.translation.isNullOrBlank() }) {
+                            LyricsTranslator.translateLines(matched, "ar")
+                        } else {
+                            matched
+                        }
+                    } else {
+                        LyricsTranslator.translateLines(originalLines, "ar")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to fetch translated captions: ${e.message}")
+                    LyricsTranslator.translateLines(originalLines, "ar")
+                }
+            } else {
+                originalLines
+            }
+
+            val lrc = toLrc(finalLines)
+            val plain = finalLines.joinToString("\n") { it.text }
             val syncedLyrics = SyncedLyrics(
-                lines = lines,
+                lines = finalLines,
                 synced = true,
                 source = LyricsSource.YOUTUBE_CAPTIONS,
             )
@@ -163,7 +206,7 @@ class YouTubeCaptionsClient {
         return null
     }
 
-    private suspend fun fetchCaptionTrackUrl(videoId: String): String? {
+    private suspend fun fetchCaptionTrackInfo(videoId: String): CaptionTrackInfo? {
         val payload = buildJsonObject {
             put("videoId", videoId)
             putJsonObject("context") {
@@ -191,24 +234,25 @@ class YouTubeCaptionsClient {
 
         if (captions.isEmpty()) return null
 
-        var bestUrl: String? = null
+        var bestTrack: CaptionTrackInfo? = null
         var foundArabic = false
 
         for (item in captions) {
             val obj = item.jsonObject
             val baseUrl = obj["baseUrl"]?.jsonPrimitive?.content ?: continue
             val lang = obj["languageCode"]?.jsonPrimitive?.content.orEmpty()
+            val isAr = lang.startsWith("ar", ignoreCase = true)
 
-            if (lang.startsWith("ar", ignoreCase = true)) {
-                bestUrl = baseUrl
+            if (isAr) {
+                bestTrack = CaptionTrackInfo(baseUrl, lang, isArabic = true)
                 foundArabic = true
                 break
-            } else if (!foundArabic && bestUrl == null) {
-                bestUrl = baseUrl
+            } else if (!foundArabic && bestTrack == null) {
+                bestTrack = CaptionTrackInfo(baseUrl, lang, isArabic = false)
             }
         }
 
-        return bestUrl
+        return bestTrack
     }
 
     private suspend fun fetchAndParseCaptions(captionUrl: String): List<LyricsLine> {
@@ -312,7 +356,11 @@ class YouTubeCaptionsClient {
             val sec = totalSec % 60
             val hundredths = (line.timeMs % 1000) / 10
             val timeTag = String.format(Locale.US, "[%02d:%02d.%02d]", min, sec, hundredths)
-            "$timeTag ${line.text}"
+            if (!line.translation.isNullOrBlank()) {
+                "$timeTag ${line.text} || ${line.translation}"
+            } else {
+                "$timeTag ${line.text}"
+            }
         }
     }
 

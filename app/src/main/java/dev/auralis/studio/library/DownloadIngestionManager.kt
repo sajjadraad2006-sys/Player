@@ -417,6 +417,55 @@ class DownloadIngestionManager(
         }
     }
 
+    /**
+     * Deletes a downloaded track directly:
+     * 1. Removes the physical file from storage (Scoped Storage MediaStore URI, File, or SAF Document).
+     * 2. Deletes the locally cached cover art if present.
+     * 3. Deletes the Room download entity.
+     * 4. Refreshes the local MediaStore repository.
+     */
+    suspend fun deleteDownload(trackUri: String): Boolean = withContext(Dispatchers.IO) {
+        val entity = downloadsDao.findByTrackUri(trackUri)
+            ?: downloadsDao.findAllCompleted().firstOrNull { it.trackUri == trackUri || it.destinationPath == trackUri }
+            ?: return@withContext false
+
+        var fileDeleted = true
+        val path = entity.destinationPath.ifBlank { entity.trackUri }
+
+        if (path.startsWith("content://")) {
+            runCatching {
+                val rows = context.contentResolver.delete(Uri.parse(path), null, null)
+                fileDeleted = rows > 0
+            }.onFailure { fileDeleted = false }
+        } else {
+            val file = File(path)
+            if (file.exists()) {
+                fileDeleted = file.delete()
+                MediaScannerConnection.scanFile(context, arrayOf(file.absolutePath), null, null)
+            }
+        }
+
+        if (entity.trackUri.startsWith("content://") && entity.trackUri != path) {
+            runCatching {
+                context.contentResolver.delete(Uri.parse(entity.trackUri), null, null)
+            }
+        }
+
+        // Delete local cached artwork
+        val coverFile = File(context.filesDir, "covers/${entity.id}.jpg")
+        if (coverFile.exists()) {
+            coverFile.delete()
+        }
+
+        // Delete Room download entity
+        downloadsDao.deleteById(entity.id)
+
+        // Refresh MediaStore repository so the track disappears from library
+        runCatching { mediaStoreRepository.refresh() }
+
+        fileDeleted
+    }
+
     private suspend fun resolveExistingCompleted(existing: DownloadEntity): Result<Track> {
         if (existing.trackUri.isBlank()) {
             return Result.failure(IllegalStateException("Completed download has no local file"))

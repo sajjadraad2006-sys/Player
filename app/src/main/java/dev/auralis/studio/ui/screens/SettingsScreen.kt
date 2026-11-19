@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -88,6 +89,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Dashboard
 import dev.auralis.studio.ui.components.ColorPickerDialog
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.text.style.TextAlign
+import android.widget.Toast
+import dev.auralis.studio.settings.AppIconManager
 
 // ─── Sub-screen navigation ────────────────────────────────────────────────────
 private enum class SettingsSection { ROOT, APPEARANCE, HOME_LAYOUT, LANGUAGE, LIBRARY, PROVIDERS, PRIVACY, ABOUT }
@@ -120,6 +127,12 @@ fun SettingsScreen(
     metadataRepairMessage: String? = null,
     homeLayout: dev.auralis.studio.core.model.HomeLayoutSettings = dev.auralis.studio.core.model.HomeLayoutSettings(),
     onHomeLayoutChange: (dev.auralis.studio.core.model.HomeLayoutSettings) -> Unit = {},
+    appDisplayName: String = "",
+    activeAppIconAlias: String = "default",
+    onAppDisplayNameChange: (String) -> Unit = {},
+    onAppIconChange: (String) -> Unit = {},
+    youtubeLyricsTranslation: Boolean = true,
+    onYoutubeLyricsTranslationChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var section by remember { mutableStateOf(SettingsSection.ROOT) }
@@ -139,6 +152,12 @@ fun SettingsScreen(
         SettingsSection.APPEARANCE -> AppearanceSection(
             theme = theme,
             onThemeChange = onThemeChange,
+            appDisplayName = appDisplayName,
+            activeAppIconAlias = activeAppIconAlias,
+            onAppDisplayNameChange = onAppDisplayNameChange,
+            onAppIconChange = onAppIconChange,
+            youtubeLyricsTranslation = youtubeLyricsTranslation,
+            onYoutubeLyricsTranslationChange = onYoutubeLyricsTranslationChange,
             onBack = { section = SettingsSection.ROOT },
             modifier = modifier,
         )
@@ -320,6 +339,12 @@ private fun NavRow(icon: ImageVector, title: String, subtitle: String, onClick: 
 private fun AppearanceSection(
     theme: ThemeSettings,
     onThemeChange: (ThemeSettings) -> Unit,
+    appDisplayName: String = "",
+    activeAppIconAlias: String = "default",
+    onAppDisplayNameChange: (String) -> Unit = {},
+    onAppIconChange: (String) -> Unit = {},
+    youtubeLyricsTranslation: Boolean = true,
+    onYoutubeLyricsTranslationChange: (Boolean) -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -329,6 +354,160 @@ private fun AppearanceSection(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onBack) { Text(stringResource(R.string.back)) }
                 Text(stringResource(R.string.appearance), style = MaterialTheme.typography.headlineMedium, color = colors.onBackground)
+            }
+        }
+
+        // ── App Launcher Icon & Custom Display Name ─────────────────────────
+        item {
+            SettingsCard(stringResource(R.string.app_icon_and_name_customization)) {
+                // App Name editor
+                var isEditingName by remember { mutableStateOf(false) }
+                var tempName by remember(appDisplayName) { mutableStateOf(appDisplayName) }
+
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.customize_app_name),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.onSurface,
+                            )
+                            Text(
+                                text = if (appDisplayName.isNotBlank()) appDisplayName else stringResource(R.string.app_name),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.primary,
+                            )
+                        }
+                        IconButton(onClick = { isEditingName = !isEditingName }) {
+                            Icon(
+                                imageVector = Icons.Default.Build,
+                                contentDescription = stringResource(R.string.edit),
+                                tint = colors.primary,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+
+                    if (isEditingName) {
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = tempName,
+                            onValueChange = { tempName = it },
+                            label = { Text(stringResource(R.string.customize_app_name)) },
+                            placeholder = { Text(stringResource(R.string.app_name)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = {
+                                        onAppDisplayNameChange(tempName.trim())
+                                        isEditingName = false
+                                    }
+                                ) {
+                                    Icon(Icons.Default.Check, contentDescription = stringResource(R.string.save), tint = colors.primary)
+                                }
+                            }
+                        )
+                        Spacer(Modifier.height(6.dp))
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = colors.outline.copy(alpha = 0.2f))
+
+                // App Launcher Icon Picker
+                Column {
+                    Text(
+                        text = stringResource(R.string.choose_app_icon),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.onSurface,
+                    )
+                    Text(
+                        text = stringResource(R.string.choose_app_icon_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurface.copy(alpha = 0.65f),
+                    )
+                    Spacer(Modifier.height(10.dp))
+
+                    val context = LocalContext.current
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(vertical = 4.dp),
+                    ) {
+                        items(AppIconManager.availableIcons, key = { it.id }) { iconOption ->
+                            val isSelected = iconOption.id == activeAppIconAlias
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        if (!isSelected) {
+                                            val changed = AppIconManager.setAppIcon(context, iconOption.id)
+                                            if (changed) {
+                                                onAppIconChange(iconOption.id)
+                                                Toast.makeText(context, context.getString(iconOption.titleRes), Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                    .padding(4.dp)
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(54.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(if (isSelected) colors.primary.copy(alpha = 0.15f) else colors.surfaceVariant)
+                                        .border(
+                                            width = if (isSelected) 2.5.dp else 1.dp,
+                                            color = if (isSelected) colors.primary else colors.outline.copy(alpha = 0.3f),
+                                            shape = RoundedCornerShape(14.dp)
+                                        )
+                                ) {
+                                    Image(
+                                        painter = painterResource(iconOption.iconRes),
+                                        contentDescription = stringResource(iconOption.titleRes),
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(10.dp)),
+                                    )
+                                    if (isSelected) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(colors.primary.copy(alpha = 0.25f)),
+                                            contentAlignment = Alignment.TopEnd
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = colors.primary,
+                                                modifier = Modifier
+                                                    .size(16.dp)
+                                                    .padding(2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = stringResource(iconOption.titleRes),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) colors.primary else colors.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.width(64.dp),
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -449,6 +628,36 @@ private fun AppearanceSection(
                     Switch(
                         checked         = theme.hapticFeedback,
                         onCheckedChange = { onThemeChange(theme.copy(hapticFeedback = it)) },
+                    )
+                }
+            }
+        }
+
+        // YouTube Timed Captions & Arabic Translation
+        item {
+            SettingsCard(stringResource(R.string.youtube_timed_lyrics)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.lyrics_translation_title),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.onSurface,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            stringResource(R.string.lyrics_translation_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurface.copy(0.65f),
+                        )
+                    }
+                    Switch(
+                        checked = youtubeLyricsTranslation,
+                        onCheckedChange = onYoutubeLyricsTranslationChange,
                     )
                 }
             }

@@ -141,6 +141,8 @@ fun HomeScreen(
     layoutSettings: HomeLayoutSettings = HomeLayoutSettings(),
     onUpdateLayoutSettings: (HomeLayoutSettings) -> Unit = {},
     recommendations: List<Track> = emptyList(),
+    onOpenRecommendationMix: ((seedTrack: Track, mix: List<Track>) -> Unit)? = null,
+    appDisplayName: String = "",
 ) {
     val colors = MaterialTheme.colorScheme
     var selectedCategory by remember { mutableStateOf<HomeCategory?>(null) }
@@ -266,7 +268,7 @@ fun HomeScreen(
                             }
                             Spacer(Modifier.width(12.dp))
                             Text(
-                                text = stringResource(R.string.app_name),
+                                text = appDisplayName.takeIf { it.isNotBlank() } ?: stringResource(R.string.app_name),
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = colors.onBackground,
@@ -503,7 +505,7 @@ fun HomeScreen(
                                             ) {
                                                 Column(Modifier.weight(1f)) {
                                                     Text(
-                                                        text = stringResource(R.string.app_name),
+                                                        text = appDisplayName.takeIf { it.isNotBlank() } ?: stringResource(R.string.app_name),
                                                         style = MaterialTheme.typography.titleLarge,
                                                         fontWeight = FontWeight.Bold,
                                                         color = colors.onSurface,
@@ -710,7 +712,13 @@ fun HomeScreen(
                                     }
                                 }
                                 TextButton(onClick = {
-                                    recommendations.firstOrNull()?.let { onPlay(it, recommendations) }
+                                    recommendations.firstOrNull()?.let { seed ->
+                                        if (onOpenRecommendationMix != null) {
+                                            onOpenRecommendationMix(seed, recommendations)
+                                        } else {
+                                            onPlay(seed, recommendations)
+                                        }
+                                    }
                                 }) {
                                     Text(stringResource(R.string.play_all), style = MaterialTheme.typography.labelMedium)
                                 }
@@ -725,7 +733,13 @@ fun HomeScreen(
                                             .width(115.dp)
                                             .clip(RoundedCornerShape(14.dp))
                                             .background(colors.surfaceVariant.copy(alpha = 0.35f))
-                                            .clickable { onPlay(trk, recommendations) }
+                                            .clickable {
+                                                if (onOpenRecommendationMix != null) {
+                                                    onOpenRecommendationMix(trk, recommendations)
+                                                } else {
+                                                    onPlay(trk, recommendations)
+                                                }
+                                            }
                                             .padding(8.dp),
                                     ) {
                                         TrackArtwork(trk, Modifier.size(99.dp).clip(RoundedCornerShape(10.dp)))

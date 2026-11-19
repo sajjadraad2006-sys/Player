@@ -25,6 +25,7 @@ data class LyricsLine(
     val timeMs: Long,
     val text: String,
     val words: List<LyricsWord>? = null,
+    val translation: String? = null,
 ) {
     val hasWordTiming: Boolean get() = !words.isNullOrEmpty()
 }

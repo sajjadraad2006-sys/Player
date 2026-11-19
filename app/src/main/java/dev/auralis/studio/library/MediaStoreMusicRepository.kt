@@ -34,20 +34,25 @@ class MediaStoreMusicRepository(private val context: Context) {
         withContext(Dispatchers.IO) {
             runCatching {
                 val collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-                val projection = arrayOf(
-                    MediaStore.Audio.Media._ID,
-                    MediaStore.Audio.Media.TITLE,
-                    MediaStore.Audio.Media.ARTIST,
-                    MediaStore.Audio.Media.ALBUM,
-                    MediaStore.Audio.Media.ALBUM_ID,
-                    MediaStore.Audio.Media.DURATION,
-                    MediaStore.Audio.Media.DATE_ADDED,
-                    MediaStore.Audio.Media.DISPLAY_NAME,
-                    MediaStore.Audio.Media.MIME_TYPE,
-                    MediaStore.Audio.Media.SIZE,
-                    MediaStore.Audio.Media.TRACK,
-                    MediaStore.Audio.Media.YEAR,
-                )
+                val projection = buildList {
+                    add(MediaStore.Audio.Media._ID)
+                    add(MediaStore.Audio.Media.TITLE)
+                    add(MediaStore.Audio.Media.ARTIST)
+                    add(MediaStore.Audio.Media.ALBUM)
+                    add(MediaStore.Audio.Media.ALBUM_ID)
+                    add(MediaStore.Audio.Media.DURATION)
+                    add(MediaStore.Audio.Media.DATE_ADDED)
+                    add(MediaStore.Audio.Media.DISPLAY_NAME)
+                    add(MediaStore.Audio.Media.MIME_TYPE)
+                    add(MediaStore.Audio.Media.SIZE)
+                    add(MediaStore.Audio.Media.TRACK)
+                    add(MediaStore.Audio.Media.YEAR)
+                    add(MediaStore.Audio.Media.DATA)
+                    add(MediaStore.Audio.Media.BUCKET_DISPLAY_NAME)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        add(MediaStore.Audio.Media.RELATIVE_PATH)
+                    }
+                }.toTypedArray()
                 val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND ${MediaStore.Audio.Media.DURATION} >= ?"
                 val args = arrayOf(minimumDurationMs.toString())
                 val songs = mutableListOf<Track>()
@@ -70,19 +75,50 @@ class MediaStoreMusicRepository(private val context: Context) {
                     val sizeIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
                     val trackIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK)
                     val yearIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.YEAR)
+                    val dataIndex = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
+                    val bucketIndex = cursor.getColumnIndex(MediaStore.Audio.Media.BUCKET_DISPLAY_NAME)
+                    val relativePathIndex = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        cursor.getColumnIndex(MediaStore.Audio.Media.RELATIVE_PATH)
+                    } else -1
+
                     while (cursor.moveToNext()) {
+                        val displayName = cursor.getString(nameIndex).orEmpty()
+                        val title = cursor.getString(titleIndex)?.takeIf(String::isNotBlank) ?: displayName
+                        val artist = cursor.getString(artistIndex)?.takeUnless { it == "<unknown>" }.orEmpty()
+                        val album = cursor.getString(albumIndex)?.takeUnless { it == "<unknown>" }.orEmpty()
+                        val duration = cursor.getLong(durationIndex)
+                        val mimeType = cursor.getString(mimeIndex)
+                        val filePath = if (dataIndex >= 0) cursor.getString(dataIndex) else null
+                        val bucketName = if (bucketIndex >= 0) cursor.getString(bucketIndex) else null
+                        val relativePath = if (relativePathIndex >= 0) cursor.getString(relativePathIndex) else null
+
+                        if (VoiceNoteFilter.isVoiceNote(
+                                path = filePath,
+                                relativePath = relativePath,
+                                bucketName = bucketName,
+                                displayName = displayName,
+                                title = title,
+                                artist = artist,
+                                album = album,
+                                durationMs = duration,
+                                mimeType = mimeType,
+                            )
+                        ) {
+                            continue
+                        }
+
                         val id = cursor.getLong(idIndex)
                         songs += Track(
                             id = id,
                             uri = ContentUris.withAppendedId(collection, id).toString(),
-                            title = cursor.getString(titleIndex)?.takeIf(String::isNotBlank) ?: cursor.getString(nameIndex),
-                            artist = cursor.getString(artistIndex)?.takeUnless { it == "<unknown>" }.orEmpty(),
-                            album = cursor.getString(albumIndex)?.takeUnless { it == "<unknown>" }.orEmpty(),
+                            title = title,
+                            artist = artist,
+                            album = album,
                             albumId = cursor.getLong(albumIdIndex).takeIf { it > 0 },
-                            durationMs = cursor.getLong(durationIndex),
+                            durationMs = duration,
                             dateAddedSeconds = cursor.getLong(addedIndex),
-                            displayName = cursor.getString(nameIndex).orEmpty(),
-                            mimeType = cursor.getString(mimeIndex),
+                            displayName = displayName,
+                            mimeType = mimeType,
                             sizeBytes = cursor.getLong(sizeIndex),
                             trackNumber = cursor.getInt(trackIndex).takeIf { it > 0 },
                             year = cursor.getInt(yearIndex).takeIf { it > 0 },

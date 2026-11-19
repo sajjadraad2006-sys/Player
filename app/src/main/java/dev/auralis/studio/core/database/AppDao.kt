@@ -57,6 +57,9 @@ interface AppDao {
     @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId AND trackUri = :uri")
     suspend fun removePlaylistTrack(playlistId: Long, uri: String)
 
+    @Query("DELETE FROM playlist_tracks WHERE trackUri = :uri")
+    suspend fun removeTrackFromAllPlaylists(uri: String)
+
     @Query("SELECT * FROM audio_presets ORDER BY name COLLATE NOCASE")
     fun observeAudioPresets(): Flow<List<AudioPresetEntity>>
 
@@ -68,6 +71,9 @@ interface AppDao {
 
     @Query("SELECT * FROM bookmarks WHERE trackUri = :uri ORDER BY positionMs")
     fun observeBookmarks(uri: String): Flow<List<BookmarkEntity>>
+
+    @Query("DELETE FROM bookmarks WHERE trackUri = :uri")
+    suspend fun deleteBookmarksForTrack(uri: String)
 
     @Insert
     suspend fun addBookmark(bookmark: BookmarkEntity): Long

@@ -44,17 +44,40 @@ class SafMusicRepository(private val context: Context) {
                 ?.takeIf(String::isNotBlank)
                 ?: file.name?.substringBeforeLast('.')
                 ?: return null
+            val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST).orEmpty()
+            val album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM).orEmpty()
+            val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            val displayName = file.name.orEmpty()
+            val mimeType = file.type
+            val bucketName = file.parentFile?.name
+            val relativePath = file.uri.path
+
+            if (VoiceNoteFilter.isVoiceNote(
+                    path = uri.path,
+                    relativePath = relativePath,
+                    bucketName = bucketName,
+                    displayName = displayName,
+                    title = title,
+                    artist = artist,
+                    album = album,
+                    durationMs = durationMs,
+                    mimeType = mimeType,
+                )
+            ) {
+                return null
+            }
+
             Track(
                 id = uri.toString().hashCode().toLong(),
                 uri = uri.toString(),
                 title = title,
-                artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST).orEmpty(),
-                album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM).orEmpty(),
+                artist = artist,
+                album = album,
                 albumId = null,
-                durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L,
+                durationMs = durationMs,
                 dateAddedSeconds = file.lastModified() / 1000,
-                displayName = file.name.orEmpty(),
-                mimeType = file.type,
+                displayName = displayName,
+                mimeType = mimeType,
                 sizeBytes = file.length(),
                 trackNumber = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)?.substringBefore('/')?.toIntOrNull(),
                 year = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_YEAR)?.toIntOrNull(),
@@ -65,6 +88,6 @@ class SafMusicRepository(private val context: Context) {
     }.getOrNull()
 
     private companion object {
-        val AUDIO_EXTENSIONS = setOf("mp3", "m4a", "aac", "flac", "wav", "ogg", "oga", "opus", "amr")
+        val AUDIO_EXTENSIONS = setOf("mp3", "m4a", "aac", "flac", "wav", "ogg", "oga", "opus")
     }
 }

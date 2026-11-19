@@ -22,13 +22,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -56,8 +62,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.media3.common.MediaItem
 import dev.auralis.studio.R
+import dev.auralis.studio.core.database.DownloadEntity
+import dev.auralis.studio.core.database.DownloadStatus
 import dev.auralis.studio.core.database.PlaylistEntity
 import dev.auralis.studio.core.model.Track
 import dev.auralis.studio.ui.components.GlassCard
@@ -65,7 +75,7 @@ import dev.auralis.studio.ui.components.TrackRow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 
-private enum class LibraryTab { SONGS, ALBUMS, ARTISTS, FAVORITES, PLAYLISTS }
+private enum class LibraryTab { SONGS, DOWNLOADS, ALBUMS, ARTISTS, FAVORITES, PLAYLISTS }
 
 @Composable
 fun LibraryScreen(
@@ -80,6 +90,13 @@ fun LibraryScreen(
     onPlayNext: (Track) -> Unit,
     onAddToQueue: (Track) -> Unit,
     onAddToPlaylist: (Long, String) -> Unit,
+    completedDownloads: List<DownloadEntity> = emptyList(),
+    onDeleteDownload: ((Track) -> Unit)? = null,
+    playbackQueue: List<MediaItem> = emptyList(),
+    currentQueueIndex: Int = 0,
+    onMoveQueueItem: ((Int, Int) -> Unit)? = null,
+    onQueueIndex: ((Int) -> Unit)? = null,
+    onRemoveQueueItem: ((Int) -> Unit)? = null,
     currentTrack: Track? = null,
     onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
@@ -89,6 +106,7 @@ fun LibraryScreen(
     var selectedGroupName by remember { mutableStateOf<String?>(null) }
     var selectedPlaylist by remember { mutableStateOf<PlaylistEntity?>(null) }
     var createDialog by remember { mutableStateOf(false) }
+    var trackToDelete by remember { mutableStateOf<Track?>(null) }
     val tabs = LibraryTab.entries
     val colors = MaterialTheme.colorScheme
     val unknownAlbum = stringResource(R.string.unknown_album)
@@ -202,6 +220,44 @@ fun LibraryScreen(
                 onAddToQueue = onAddToQueue,
                 onAddToPlaylist = onAddToPlaylist,
             )
+            LibraryTab.DOWNLOADS -> {
+                val downloadedUris = remember(completedDownloads) {
+                    completedDownloads
+                        .filter { it.status == DownloadStatus.COMPLETED.name }
+                        .flatMap { listOf(it.trackUri, it.destinationPath) }
+                        .filter { it.isNotBlank() }
+                        .toSet()
+                }
+                val downloadedTracks = remember(tracks, downloadedUris) {
+                    tracks.filter { it.uri in downloadedUris }
+                }
+                TrackList(
+                    title = null,
+                    tracks = downloadedTracks,
+                    favorites = favorites,
+                    playlists = playlists,
+                    currentTrack = currentTrack,
+                    onBack = null,
+                    onPlay = onPlay,
+                    onToggleFavorite = onToggleFavorite,
+                    onPlayNext = onPlayNext,
+                    onAddToQueue = onAddToQueue,
+                    onAddToPlaylist = onAddToPlaylist,
+                    onDeleteTrack = if (onDeleteDownload != null) { track -> trackToDelete = track } else null,
+                    headerContent = if (playbackQueue.isNotEmpty() && onMoveQueueItem != null) {
+                        {
+                            DownloadsQueueSection(
+                                queue = playbackQueue,
+                                currentIndex = currentQueueIndex,
+                                tracks = tracks,
+                                onMoveQueueItem = onMoveQueueItem,
+                                onQueueIndex = onQueueIndex,
+                                onRemoveQueueItem = onRemoveQueueItem,
+                            )
+                        }
+                    } else null,
+                )
+            }
             LibraryTab.FAVORITES -> TrackList(
                 title = null,
                 tracks = tracks.filter { it.uri in favorites },
@@ -238,6 +294,32 @@ fun LibraryScreen(
                 onDelete = onDeletePlaylist,
             )
         }
+    }
+
+    if (trackToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { trackToDelete = null },
+            title = { Text(stringResource(R.string.delete)) },
+            text = { Text(stringResource(R.string.remove_download_confirm)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        trackToDelete?.let { track ->
+                            onDeleteDownload?.invoke(track)
+                        }
+                        trackToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                ) {
+                    Text(stringResource(R.string.delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { trackToDelete = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
     }
 
     if (createDialog) {
@@ -279,6 +361,8 @@ private fun TrackList(
     onAddToQueue: (Track) -> Unit,
     onAddToPlaylist: (Long, String) -> Unit,
     currentTrack: Track? = null,
+    onDeleteTrack: ((Track) -> Unit)? = null,
+    headerContent: (@Composable () -> Unit)? = null,
 ) {
     val colors = MaterialTheme.colorScheme
 
@@ -286,6 +370,11 @@ private fun TrackList(
         contentPadding = PaddingValues(bottom = 28.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
+        if (headerContent != null) {
+            item(key = "tracklist_header_content") {
+                headerContent()
+            }
+        }
         item {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
                 if (title != null) {
@@ -373,6 +462,8 @@ private fun TrackList(
                     onPlayNext = { onPlayNext(track) },
                     onAddToQueue = { onAddToQueue(track) },
                     onAddToPlaylist = { onAddToPlaylist(it, track.uri) },
+                    onRemove = onDeleteTrack?.let { deleteFn -> { deleteFn(track) } },
+                    removeLabel = if (onDeleteTrack != null) stringResource(R.string.delete) else null,
                 )
             }
         }
@@ -518,9 +609,155 @@ private fun PlaylistList(
 private fun tabLabel(tab: LibraryTab): String = stringResource(
     when (tab) {
         LibraryTab.SONGS -> R.string.songs
+        LibraryTab.DOWNLOADS -> R.string.downloads
         LibraryTab.ALBUMS -> R.string.albums
         LibraryTab.ARTISTS -> R.string.artists
         LibraryTab.FAVORITES -> R.string.favorites
         LibraryTab.PLAYLISTS -> R.string.playlists
     },
 )
+
+@Composable
+private fun DownloadsQueueSection(
+    queue: List<MediaItem>,
+    currentIndex: Int,
+    tracks: List<Track>,
+    onMoveQueueItem: (fromIndex: Int, toIndex: Int) -> Unit,
+    onQueueIndex: ((Int) -> Unit)?,
+    onRemoveQueueItem: ((Int) -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    var expanded by remember { mutableStateOf(true) }
+
+    val upcomingItems = remember(queue, currentIndex) {
+        queue.mapIndexed { index, item -> index to item }
+            .filter { (index, _) -> index >= currentIndex }
+    }
+
+    if (upcomingItems.isEmpty()) return
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable { expanded = !expanded }
+                .padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.AutoMirrored.Filled.QueueMusic,
+                    contentDescription = null,
+                    tint = colors.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(R.string.upcoming_queue) + " (${upcomingItems.size})",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.onBackground,
+                )
+            }
+            Icon(
+                if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = null,
+                tint = colors.onSurfaceVariant,
+            )
+        }
+
+        if (expanded) {
+            Spacer(Modifier.height(6.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                upcomingItems.forEach { (index, item) ->
+                    val isCurrent = index == currentIndex
+                    val matchingTrack = tracks.firstOrNull { it.uri == item.mediaId }
+                    GlassCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { onQueueIndex?.invoke(index) },
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                (index + 1).toString(),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isCurrent) colors.primary else colors.onSurfaceVariant,
+                                modifier = Modifier.width(24.dp),
+                            )
+                            Column(modifier = Modifier.weight(1f).padding(horizontal = 6.dp)) {
+                                Text(
+                                    item.mediaMetadata.title?.toString() ?: matchingTrack?.title.orEmpty(),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                                    color = if (isCurrent) colors.primary else colors.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    item.mediaMetadata.artist?.toString() ?: matchingTrack?.artist.orEmpty(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = colors.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+
+                            // Reordering controls
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { onMoveQueueItem(index, index - 1) },
+                                    enabled = index > 0,
+                                    modifier = Modifier.size(32.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Default.KeyboardArrowUp,
+                                        contentDescription = stringResource(R.string.move_up),
+                                        tint = if (index > 0) colors.onSurface else colors.onSurface.copy(alpha = 0.3f),
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { onMoveQueueItem(index, index + 1) },
+                                    enabled = index < queue.size - 1,
+                                    modifier = Modifier.size(32.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Default.KeyboardArrowDown,
+                                        contentDescription = stringResource(R.string.move_down),
+                                        tint = if (index < queue.size - 1) colors.onSurface else colors.onSurface.copy(alpha = 0.3f),
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
+                                if (onRemoveQueueItem != null) {
+                                    IconButton(
+                                        onClick = { onRemoveQueueItem(index) },
+                                        modifier = Modifier.size(32.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = stringResource(R.string.remove_from_queue),
+                                            tint = colors.error.copy(alpha = 0.8f),
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

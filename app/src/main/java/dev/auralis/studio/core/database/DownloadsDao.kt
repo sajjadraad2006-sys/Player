@@ -73,6 +73,12 @@ interface DownloadsDao {
     @Query("DELETE FROM downloads WHERE id = :id")
     suspend fun deleteById(id: Long)
 
+    @Query("SELECT * FROM downloads WHERE trackUri = :trackUri LIMIT 1")
+    suspend fun findByTrackUri(trackUri: String): DownloadEntity?
+
+    @Query("DELETE FROM downloads WHERE trackUri = :trackUri")
+    suspend fun deleteByTrackUri(trackUri: String)
+
     /** Duplicate DB rows for the same stable key (historical pollution cleanup). */
     @Query("SELECT * FROM downloads WHERE provider = :provider AND providerTrackId = :providerTrackId ORDER BY createdAt ASC")
     suspend fun findAllByKey(provider: String, providerTrackId: String): List<DownloadEntity>

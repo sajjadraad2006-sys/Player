@@ -32,6 +32,15 @@ data class DownloadResource(
     val isOriginal: Boolean = false,
 )
 
+data class OnlinePlaylist(
+    val id: String,
+    val title: String,
+    val author: String,
+    val trackCount: Int,
+    val artworkUrl: String,
+    val provider: String = "youtube",
+)
+
 interface MusicCatalogProvider {
     val id: String
     val displayName: String

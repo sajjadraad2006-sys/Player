@@ -104,4 +104,117 @@ class YouTubeCatalogProviderTest {
         assertFalse(origProfile.isCompatibleWith(remixProfile))
         assertFalse(liveProfile.isCompatibleWith(remixProfile))
     }
+
+    @Test
+    fun extractTracksFromJsonElement_parsesCompactAndPlaylistPanelRenderers() {
+        val sampleJson = """
+        {
+          "contents": {
+            "twoColumnWatchNextResults": {
+              "secondaryResults": {
+                "secondaryResults": {
+                  "results": [
+                    {
+                      "compactVideoRenderer": {
+                        "videoId": "abc12345678",
+                        "title": { "simpleText": "Algorithmic Recommended Song" },
+                        "shortBylineText": { "runs": [{ "text": "Artist One" }] },
+                        "lengthText": { "simpleText": "4:15" }
+                      }
+                    },
+                    {
+                      "playlistPanelVideoRenderer": {
+                        "videoId": "def87654321",
+                        "title": { "runs": [{ "text": "Playlist Radio Track" }] },
+                        "longBylineText": { "runs": [{ "text": "Artist Two" }] },
+                        "lengthText": { "simpleText": "3:30" }
+                      }
+                    },
+                    {
+                      "playlistVideoRenderer": {
+                        "videoId": "ghi11223344",
+                        "title": { "runs": [{ "text": "Browse Playlist Song" }] },
+                        "shortBylineText": { "runs": [{ "text": "Artist Three" }] },
+                        "lengthSeconds": "180"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+        """.trimIndent()
+
+        val jsonElement = kotlinx.serialization.json.Json.parseToJsonElement(sampleJson)
+        val tracks = YouTubeCatalogProvider.extractTracksFromJsonElement(jsonElement)
+
+        assertEquals(3, tracks.size)
+
+        val track1 = tracks[0]
+        assertEquals("abc12345678", track1.id)
+        assertEquals("Algorithmic Recommended Song", track1.title)
+        assertEquals("Artist One", track1.artist)
+        assertEquals(255_000L, track1.durationMs)
+        assertEquals("https://i.ytimg.com/vi/abc12345678/hqdefault.jpg", track1.artworkUrl)
+
+        val track2 = tracks[1]
+        assertEquals("def87654321", track2.id)
+        assertEquals("Playlist Radio Track", track2.title)
+        assertEquals("Artist Two", track2.artist)
+        assertEquals(210_000L, track2.durationMs)
+
+        val track3 = tracks[2]
+        assertEquals("ghi11223344", track3.id)
+        assertEquals("Browse Playlist Song", track3.title)
+        assertEquals("Artist Three", track3.artist)
+        assertEquals(180_000L, track3.durationMs)
+    }
+
+    @Test
+    fun extractPlaylistsFromJsonElement_parsesPlaylistRenderer() {
+        val sampleJson = """
+        {
+          "contents": {
+            "sectionListRenderer": {
+              "contents": [
+                {
+                  "itemSectionRenderer": {
+                    "contents": [
+                      {
+                        "playlistRenderer": {
+                          "playlistId": "PL1234567890abcdef",
+                          "title": { "simpleText": "Top Hits 2026" },
+                          "shortBylineText": { "runs": [{ "text": "Music Channel" }] },
+                          "videoCount": "42",
+                          "thumbnails": [
+                            {
+                              "thumbnails": [
+                                { "url": "https://i.ytimg.com/vi/thumb/hqdefault.jpg" }
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+        """.trimIndent()
+
+        val jsonElement = kotlinx.serialization.json.Json.parseToJsonElement(sampleJson)
+        val playlists = YouTubeCatalogProvider.extractPlaylistsFromJsonElement(jsonElement)
+
+        assertEquals(1, playlists.size)
+        val pl = playlists[0]
+        assertEquals("PL1234567890abcdef", pl.id)
+        assertEquals("Top Hits 2026", pl.title)
+        assertEquals("Music Channel", pl.author)
+        assertEquals(42, pl.trackCount)
+        assertEquals("https://i.ytimg.com/vi/thumb/hqdefault.jpg", pl.artworkUrl)
+        assertEquals("youtube", pl.provider)
+    }
 }

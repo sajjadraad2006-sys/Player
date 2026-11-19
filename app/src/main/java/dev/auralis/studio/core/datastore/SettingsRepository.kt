@@ -83,6 +83,41 @@ class SettingsRepository(private val context: Context) {
         val homeShowFilterChips = booleanPreferencesKey("home_show_filter_chips")
         val homeShowRecommendations = booleanPreferencesKey("home_show_recommendations")
         val homeShowGreetingHeader = booleanPreferencesKey("home_show_greeting_header")
+        val appDisplayName = stringPreferencesKey("app_display_name")
+        val activeAppIconAlias = stringPreferencesKey("active_app_icon_alias")
+        val youtubeLyricsTranslation = booleanPreferencesKey("youtube_lyrics_translation")
+    }
+
+    val appDisplayName: Flow<String> = context.settingsDataStore.data.map { preferences ->
+        preferences[Keys.appDisplayName].orEmpty()
+    }
+
+    suspend fun setAppDisplayName(name: String) {
+        context.settingsDataStore.edit { preferences ->
+            val trimmed = name.trim()
+            if (trimmed.isBlank()) preferences.remove(Keys.appDisplayName)
+            else preferences[Keys.appDisplayName] = trimmed
+        }
+    }
+
+    val activeAppIconAlias: Flow<String> = context.settingsDataStore.data.map { preferences ->
+        preferences[Keys.activeAppIconAlias] ?: "default"
+    }
+
+    suspend fun setActiveAppIconAlias(alias: String) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[Keys.activeAppIconAlias] = alias
+        }
+    }
+
+    val youtubeLyricsTranslation: Flow<Boolean> = context.settingsDataStore.data.map { preferences ->
+        preferences[Keys.youtubeLyricsTranslation] ?: true
+    }
+
+    suspend fun setYoutubeLyricsTranslation(enabled: Boolean) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[Keys.youtubeLyricsTranslation] = enabled
+        }
     }
 
     val homeLayoutSettings: Flow<HomeLayoutSettings> = context.settingsDataStore.data.map { p ->

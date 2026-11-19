@@ -10,17 +10,26 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
@@ -60,6 +69,7 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SuggestionChip
@@ -116,6 +126,13 @@ fun SearchScreen(
     playlists: List<PlaylistEntity>,
     onlineResults: List<UnifiedTrack>,
     isSearchingOnline: Boolean,
+    isSearchingOnlineMore: Boolean = false,
+    onLoadMoreOnline: () -> Unit = {},
+    onlinePlaylists: List<dev.auralis.studio.online.OnlinePlaylist> = emptyList(),
+    isSearchingPlaylists: Boolean = false,
+    onSearchPlaylists: (String) -> Unit = {},
+    onPlayPlaylist: (dev.auralis.studio.online.OnlinePlaylist, Int, Boolean) -> Unit = { _, _, _ -> },
+    onFetchPlaylistTracks: suspend (String) -> List<dev.auralis.studio.online.OnlineTrack> = { emptyList() },
     providerFailures: Int = 0,
     recentSearches: List<String> = emptyList(),
     downloads: List<DownloadEntity> = emptyList(),
@@ -140,9 +157,8 @@ fun SearchScreen(
     modifier: Modifier = Modifier,
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
-    var localPage by remember(query, results.size) { mutableIntStateOf(1) }
-    var onlinePage by remember(query, onlineResults.size) { mutableIntStateOf(1) }
-    val pageSize = 12
+    var selectedOnlineCategory by remember { mutableIntStateOf(0) } // 0: Tracks, 1: Playlists
+    var selectedPlaylistForDetail by remember { mutableStateOf<dev.auralis.studio.online.OnlinePlaylist?>(null) }
     var sourceSheetTrack by remember { mutableStateOf<UnifiedTrack?>(null) }
     var inspectingSource by remember { mutableStateOf<dev.auralis.studio.online.RecordingSource?>(null) }
     var showImportDialog by remember { mutableStateOf(false) }
@@ -226,7 +242,11 @@ fun SearchScreen(
             onValueChange = {
                 onQueryChange(it)
                 if (selectedTab == 1 && it.length >= 2) {
-                    onSearchOnline(it)
+                    if (selectedOnlineCategory == 1) {
+                        onSearchPlaylists(it)
+                    } else {
+                        onSearchOnline(it)
+                    }
                 }
             },
             modifier = Modifier
@@ -235,6 +255,7 @@ fun SearchScreen(
             placeholder = {
                 Text(
                     if (selectedTab == 0) stringResource(R.string.search_hint)
+                    else if (selectedOnlineCategory == 1) stringResource(R.string.search_playlists_hint)
                     else stringResource(R.string.search_online_hint)
                 )
             },
@@ -252,7 +273,13 @@ fun SearchScreen(
             keyboardActions = KeyboardActions(
                 onSearch = {
                     onCommitSearch(query)
-                    if (query.isNotBlank()) onSearchOnline(query)
+                    if (query.isNotBlank()) {
+                        if (selectedOnlineCategory == 1) {
+                            onSearchPlaylists(query)
+                        } else {
+                            onSearchOnline(query)
+                        }
+                    }
                 }
             ),
             singleLine = true,
@@ -302,7 +329,13 @@ fun SearchScreen(
                     .background(if (selectedTab == 1) colors.primary else colors.surfaceVariant.copy(alpha = 0.85f))
                     .clickable {
                         selectedTab = 1
-                        if (query.isNotBlank()) onSearchOnline(query)
+                        if (query.isNotBlank()) {
+                            if (selectedOnlineCategory == 1) {
+                                onSearchPlaylists(query)
+                            } else {
+                                onSearchOnline(query)
+                            }
+                        }
                     }
                     .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center,
@@ -325,32 +358,101 @@ fun SearchScreen(
             }
         }
 
-        // Clean Music Genres / Trending Tags
+        // Online Sub-Category Filter Chips: [ Tracks | Playlists ]
         if (selectedTab == 1) {
             Spacer(Modifier.height(6.dp))
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(GENERAL_MUSIC_CATEGORIES) { (searchKeyword, labelResource) ->
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(colors.surfaceVariant.copy(alpha = 0.8f))
-                            .clickable {
-                                onQueryChange(searchKeyword)
-                                onSearchOnline(searchKeyword)
-                                onCommitSearch(searchKeyword)
-                            }
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = stringResource(labelResource),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = colors.primary,
+                val tracksActive = selectedOnlineCategory == 0
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if (tracksActive) colors.primary else colors.surfaceVariant.copy(alpha = 0.7f))
+                        .clickable {
+                            selectedOnlineCategory = 0
+                            if (query.isNotBlank()) onSearchOnline(query)
+                        }
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.MusicNote,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = if (tracksActive) colors.onPrimary else colors.onSurfaceVariant,
                         )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.online_filter_tracks),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = if (tracksActive) FontWeight.Bold else FontWeight.Medium,
+                            color = if (tracksActive) colors.onPrimary else colors.onSurface,
+                        )
+                    }
+                }
+
+                val playlistsActive = selectedOnlineCategory == 1
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if (playlistsActive) colors.primary else colors.surfaceVariant.copy(alpha = 0.7f))
+                        .clickable {
+                            selectedOnlineCategory = 1
+                            if (query.isNotBlank()) onSearchPlaylists(query)
+                        }
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.PlaylistPlay,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = if (playlistsActive) colors.onPrimary else colors.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.online_filter_playlists),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = if (playlistsActive) FontWeight.Bold else FontWeight.Medium,
+                            color = if (playlistsActive) colors.onPrimary else colors.onSurface,
+                        )
+                    }
+                }
+            }
+
+            // Genre tags (when in Tracks mode)
+            if (selectedOnlineCategory == 0) {
+                Spacer(Modifier.height(6.dp))
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(GENERAL_MUSIC_CATEGORIES) { (searchKeyword, labelResource) ->
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(colors.surfaceVariant.copy(alpha = 0.8f))
+                                .clickable {
+                                    onQueryChange(searchKeyword)
+                                    onSearchOnline(searchKeyword)
+                                    onCommitSearch(searchKeyword)
+                                }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = stringResource(labelResource),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.primary,
+                            )
+                        }
                     }
                 }
             }
@@ -555,19 +657,11 @@ fun SearchScreen(
                     }
                 }
             } else {
-                val localTotalPages = maxOf(1, (results.size + pageSize - 1) / pageSize)
-                val currentLocalPage = localPage.coerceIn(1, localTotalPages)
-                val pagedResults = remember(results, currentLocalPage) {
-                    val from = (currentLocalPage - 1) * pageSize
-                    val to = minOf(from + pageSize, results.size)
-                    if (from < results.size) results.subList(from, to) else emptyList()
-                }
-
                 LazyColumn(
                     contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    items(pagedResults, key = Track::uri) { track ->
+                    items(results, key = Track::uri) { track ->
                         TrackRow(
                             track = track,
                             isPlaying = currentTrack?.uri == track.uri,
@@ -581,21 +675,72 @@ fun SearchScreen(
                             maxTitleLines = 3,
                         )
                     }
-
-                    if (localTotalPages > 1) {
-                        item(key = "local_pagination_bar") {
-                            SearchPaginationBar(
-                                currentPage = currentLocalPage,
-                                totalPages = localTotalPages,
-                                onPageChange = { localPage = it },
-                            )
-                        }
-                    }
                 }
             }
         } else {
             // Online General Music Search & Download
-            if (isSearchingOnline && onlineResults.isEmpty()) {
+            if (selectedOnlineCategory == 1) {
+                // Playlists Search View
+                if (isSearchingPlaylists && onlinePlaylists.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(color = colors.primary)
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                stringResource(R.string.searching),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.onSurfaceVariant,
+                            )
+                        }
+                    }
+                } else if (onlinePlaylists.isEmpty()) {
+                    Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.PlaylistPlay,
+                                contentDescription = null,
+                                tint = colors.primary,
+                                modifier = Modifier.size(56.dp),
+                            )
+                            Spacer(Modifier.height(16.dp))
+                            Text(
+                                if (query.isBlank()) stringResource(R.string.search_playlists_hint)
+                                else stringResource(R.string.no_playlists_found),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.onBackground.copy(alpha = 0.75f),
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
+                } else {
+                    Column(Modifier.fillMaxSize()) {
+                        if (isSearchingPlaylists) {
+                            LinearProgressIndicator(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 2.dp)
+                                    .height(2.dp),
+                                color = colors.primary,
+                                trackColor = colors.surfaceVariant,
+                            )
+                        }
+                        LazyColumn(
+                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 28.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            items(onlinePlaylists, key = { "pl_${it.id}" }) { playlist ->
+                                OnlinePlaylistCard(
+                                    playlist = playlist,
+                                    onClick = {
+                                        if (query.isNotBlank()) onCommitSearch(query)
+                                        selectedPlaylistForDetail = playlist
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            } else if (isSearchingOnline && onlineResults.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(color = colors.primary)
@@ -638,19 +783,28 @@ fun SearchScreen(
                             trackColor = colors.surfaceVariant,
                         )
                     }
-                    val onlineTotalPages = maxOf(1, (onlineResults.size + pageSize - 1) / pageSize)
-                    val currentOnlinePage = onlinePage.coerceIn(1, onlineTotalPages)
-                    val pagedOnlineResults = remember(onlineResults, currentOnlinePage) {
-                        val from = (currentOnlinePage - 1) * pageSize
-                        val to = minOf(from + pageSize, onlineResults.size)
-                        if (from < onlineResults.size) onlineResults.subList(from, to) else emptyList()
+
+                    val onlineListState = rememberLazyListState()
+                    val shouldLoadMore by remember(onlineResults.size, isSearchingOnline, isSearchingOnlineMore) {
+                        derivedStateOf {
+                            val totalCount = onlineResults.size
+                            val lastVisible = onlineListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                            totalCount > 0 && !isSearchingOnline && !isSearchingOnlineMore && lastVisible >= totalCount - 4
+                        }
+                    }
+
+                    LaunchedEffect(shouldLoadMore) {
+                        if (shouldLoadMore) {
+                            onLoadMoreOnline()
+                        }
                     }
 
                     LazyColumn(
+                        state = onlineListState,
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 28.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        items(pagedOnlineResults, key = { "online:${it.uiKey}" }) { onlineTrack ->
+                        items(onlineResults, key = { "online:${it.uiKey}" }) { onlineTrack ->
                             val downloadStatus = RecordingDownloadMatcher.status(onlineTrack, downloads)
                             OnlineTrackCard(
                                 track = onlineTrack,
@@ -667,13 +821,30 @@ fun SearchScreen(
                             )
                         }
 
-                        if (onlineTotalPages > 1) {
-                            item(key = "online_pagination_bar") {
-                                SearchPaginationBar(
-                                    currentPage = currentOnlinePage,
-                                    totalPages = onlineTotalPages,
-                                    onPageChange = { onlinePage = it },
-                                )
+                        if (isSearchingOnlineMore) {
+                            item(key = "online_loading_more") {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(20.dp),
+                                            strokeWidth = 2.dp,
+                                            color = colors.primary,
+                                        )
+                                        Text(
+                                            stringResource(R.string.loading_more),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = colors.onSurfaceVariant,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -718,6 +889,332 @@ fun SearchScreen(
                     }
                 }
                 Spacer(Modifier.height(20.dp))
+            }
+        }
+    }
+
+    selectedPlaylistForDetail?.let { playlist ->
+        PlaylistDetailBottomSheet(
+            playlist = playlist,
+            onDismiss = { selectedPlaylistForDetail = null },
+            onPlayAll = {
+                onPlayPlaylist(playlist, 0, false)
+                selectedPlaylistForDetail = null
+            },
+            onShuffle = {
+                onPlayPlaylist(playlist, 0, true)
+                selectedPlaylistForDetail = null
+            },
+            onPlayTrackAtIndex = { index ->
+                onPlayPlaylist(playlist, index, false)
+                selectedPlaylistForDetail = null
+            },
+            onFetchTracks = onFetchPlaylistTracks,
+        )
+    }
+}
+
+@Composable
+fun OnlinePlaylistCard(
+    playlist: dev.auralis.studio.online.OnlinePlaylist,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    GlassCard(
+        modifier = modifier.fillMaxWidth(),
+        onClick = onClick,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(12.dp)),
+            ) {
+                AsyncImage(
+                    model = playlist.artworkUrl,
+                    contentDescription = playlist.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.35f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.PlaylistPlay,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
+            }
+
+            Spacer(Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = playlist.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = playlist.author,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (playlist.trackCount > 0) {
+                        Spacer(Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = colors.primary.copy(alpha = 0.15f),
+                        ) {
+                            Text(
+                                text = "${playlist.trackCount} tracks",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.primary,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PlaylistDetailBottomSheet(
+    playlist: dev.auralis.studio.online.OnlinePlaylist,
+    onDismiss: () -> Unit,
+    onPlayAll: () -> Unit,
+    onShuffle: () -> Unit,
+    onPlayTrackAtIndex: (Int) -> Unit,
+    onFetchTracks: suspend (String) -> List<dev.auralis.studio.online.OnlineTrack>,
+    modifier: Modifier = Modifier,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    val colors = MaterialTheme.colorScheme
+    var tracks by remember { mutableStateOf<List<dev.auralis.studio.online.OnlineTrack>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    androidx.compose.runtime.LaunchedEffect(playlist.id) {
+        isLoading = true
+        tracks = onFetchTracks(playlist.id)
+        isLoading = false
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = colors.surface.copy(alpha = 0.96f),
+        tonalElevation = 6.dp,
+        modifier = modifier,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.92f)
+                .navigationBarsPadding()
+                .padding(bottom = 16.dp),
+        ) {
+            // Header: Artwork + Title + Author + Buttons
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(90.dp)
+                        .clip(RoundedCornerShape(14.dp)),
+                ) {
+                    AsyncImage(
+                        model = playlist.artworkUrl,
+                        contentDescription = playlist.title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                }
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = playlist.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = playlist.author,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (playlist.trackCount > 0 || tracks.isNotEmpty()) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = "${if (tracks.isNotEmpty()) tracks.size else playlist.trackCount} tracks",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.primary,
+                        )
+                    }
+                }
+            }
+
+            // Action Buttons: Play All + Shuffle
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Button(
+                    onClick = onPlayAll,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp),
+                    enabled = !isLoading && tracks.isNotEmpty(),
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.play_all))
+                }
+                OutlinedButton(
+                    onClick = onShuffle,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp),
+                    enabled = !isLoading && tracks.isNotEmpty(),
+                ) {
+                    Icon(Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.shuffle))
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // Track list
+            if (isLoading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = colors.primary)
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            stringResource(R.string.loading_playlist_tracks),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                }
+            } else if (tracks.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        stringResource(R.string.no_tracks_in_playlist),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant,
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    itemsIndexed(tracks, key = { idx, t -> "pl_${playlist.id}_${idx}_${t.id}" }) { index, track ->
+                        GlassCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { onPlayTrackAtIndex(index) },
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "${index + 1}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.onSurfaceVariant,
+                                    modifier = Modifier.width(28.dp),
+                                    textAlign = TextAlign.Center,
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(RoundedCornerShape(8.dp)),
+                                ) {
+                                    AsyncImage(
+                                        model = track.artworkUrl,
+                                        contentDescription = track.title,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = track.title,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = colors.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = track.artist,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = colors.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                if (track.durationMs > 0) {
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = android.text.format.DateUtils.formatElapsedTime(track.durationMs / 1000),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = colors.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

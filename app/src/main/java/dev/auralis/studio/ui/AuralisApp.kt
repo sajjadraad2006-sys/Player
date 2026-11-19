@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import dev.auralis.studio.core.model.AnimationStyle
+import dev.auralis.studio.ui.sheets.RecommendationPlaylistSheet
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
@@ -109,6 +110,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     val history by viewModel.historyUris.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val currentTrack by viewModel.currentPlayingTrack.collectAsStateWithLifecycle()
+    val playback by viewModel.playbackState.collectAsStateWithLifecycle()
     val playbackError by remember(viewModel.playbackState) {
         viewModel.playbackState.map { it.error }.distinctUntilChanged()
     }.collectAsStateWithLifecycle(null)
@@ -119,6 +121,10 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     val scanning by viewModel.isScanning.collectAsStateWithLifecycle()
     val onlineResults by viewModel.onlineResults.collectAsStateWithLifecycle()
     val isSearchingOnline by viewModel.isSearchingOnline.collectAsStateWithLifecycle()
+    val isSearchingOnlineMore by viewModel.isSearchingOnlineMore.collectAsStateWithLifecycle()
+    val onlinePlaylists by viewModel.onlinePlaylistResults.collectAsStateWithLifecycle()
+    val isSearchingPlaylists by viewModel.isSearchingPlaylists.collectAsStateWithLifecycle()
+    val autoplayEnabled by viewModel.autoplayEnabled.collectAsStateWithLifecycle()
     val onlineProviderFailures by viewModel.onlineProviderFailures.collectAsStateWithLifecycle()
     val folders by viewModel.musicFolders.collectAsStateWithLifecycle()
     val minimumDuration by viewModel.minimumTrackDuration.collectAsStateWithLifecycle()
@@ -136,6 +142,9 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     val youtubeApiKey by viewModel.youtubeApiKey.collectAsStateWithLifecycle()
     val homeLayout by viewModel.homeLayoutSettings.collectAsStateWithLifecycle()
     val offlineRecommendations by viewModel.offlineRecommendations.collectAsStateWithLifecycle()
+    val appDisplayName by viewModel.appDisplayName.collectAsStateWithLifecycle()
+    val activeAppIconAlias by viewModel.activeAppIconAlias.collectAsStateWithLifecycle()
+    val youtubeLyricsTranslation by viewModel.youtubeLyricsTranslation.collectAsStateWithLifecycle()
 
     var audioPermissionGranted by remember { mutableStateOf(viewModel.hasAudioPermission) }
     var notificationPermissionGranted by remember {
@@ -148,6 +157,8 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
     var playerVisible by rememberSaveable { mutableStateOf(false) }
     var quickAudioVisible by rememberSaveable { mutableStateOf(false) }
     var recommendationsVisible by rememberSaveable { mutableStateOf(false) }
+    var recommendationMixSeedTrack by remember { mutableStateOf<Track?>(null) }
+    var recommendationMixTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var welcomeDismissed by rememberSaveable { mutableStateOf(false) }
     val destination = runCatching { MainDestination.valueOf(destinationName) }.getOrDefault(MainDestination.HOME)
     val artworkPalette = rememberArtworkPalette(currentTrack?.artworkUri)
@@ -247,8 +258,8 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                                     playbackStateFlow = viewModel.playbackState,
                                     onOpen      = { playerVisible = true },
                                     onPlayPause = viewModel.playback::playPause,
-                                    onNext      = viewModel.playback::next,
-                                    onPrevious  = viewModel.playback::previous,
+                                    onNext      = viewModel::skipNext,
+                                    onPrevious  = viewModel::skipPrevious,
                                     modifier    = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                                 )
                             }
@@ -299,11 +310,23 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                                 layoutSettings = homeLayout,
                                 onUpdateLayoutSettings = viewModel::updateHomeLayout,
                                 recommendations = offlineRecommendations,
+                                onOpenRecommendationMix = { seed, mix ->
+                                    recommendationMixSeedTrack = seed
+                                    recommendationMixTracks = mix
+                                },
+                                appDisplayName = appDisplayName,
                             )
                             MainDestination.LIBRARY -> LibraryScreen(
                                 tracks = tracks,
                                 favorites = favorites,
                                 playlists = playlists,
+                                completedDownloads = downloads,
+                                onDeleteDownload = viewModel::deleteDownloadedTrack,
+                                playbackQueue = playback.queue,
+                                currentQueueIndex = playback.currentIndex,
+                                onMoveQueueItem = viewModel::moveQueueItem,
+                                onQueueIndex = viewModel.playback::playQueueIndex,
+                                onRemoveQueueItem = viewModel.playback::removeQueueItem,
                                 currentTrack = currentTrack,
                                 playlistTrackUris = viewModel::playlistTrackUris,
                                 onCreatePlaylist = viewModel::createPlaylist,
@@ -324,6 +347,13 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                                 currentTrack          = currentTrack,
                                 onlineResults         = onlineResults,
                                 isSearchingOnline     = isSearchingOnline,
+                                isSearchingOnlineMore = isSearchingOnlineMore,
+                                onLoadMoreOnline      = viewModel::loadMoreOnlineResults,
+                                onlinePlaylists       = onlinePlaylists,
+                                isSearchingPlaylists  = isSearchingPlaylists,
+                                onSearchPlaylists     = viewModel::searchOnlinePlaylists,
+                                onPlayPlaylist        = viewModel::playOnlinePlaylist,
+                                onFetchPlaylistTracks = viewModel::getPlaylistTracks,
                                 providerFailures      = onlineProviderFailures,
                                 recentSearches        = recentSearches,
                                 downloads             = downloads,
@@ -373,6 +403,12 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                                 metadataRepairMessage = viewModel.metadataRepairMessage.collectAsStateWithLifecycle().value,
                                 homeLayout = homeLayout,
                                 onHomeLayoutChange = viewModel::updateHomeLayout,
+                                appDisplayName = appDisplayName,
+                                activeAppIconAlias = activeAppIconAlias,
+                                onAppDisplayNameChange = viewModel::setAppDisplayName,
+                                onAppIconChange = viewModel::setActiveAppIconAlias,
+                                youtubeLyricsTranslation = youtubeLyricsTranslation,
+                                onYoutubeLyricsTranslationChange = viewModel::setYoutubeLyricsTranslation,
                                 modifier = commonModifier,
                             )
                             MainDestination.AUDIO_LAB -> AudioLabScreen(
@@ -436,8 +472,8 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                         visualizerWaveform  = visualizerWaveform,
                         onBack              = { playerVisible = false },
                         onPlayPause         = viewModel.playback::playPause,
-                        onNext              = viewModel.playback::next,
-                        onPrevious          = viewModel.playback::previous,
+                        onNext              = viewModel::skipNext,
+                        onPrevious          = viewModel::skipPrevious,
                         onSeek              = viewModel::seekTo,
                         onToggleFavorite    = { currentTrack?.let { viewModel.toggleFavorite(it.uri) } },
                         onShuffle           = viewModel.playback::toggleShuffle,
@@ -445,6 +481,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                         onQueueIndex        = viewModel.playback::playQueueIndex,
                         onRemoveQueue       = viewModel.playback::removeQueueItem,
                         onClearQueue        = viewModel.playback::clearQueue,
+                        onMoveQueue         = viewModel::moveQueueItem,
                         onOpenAudioLab      = { playerVisible = false; destinationName = MainDestination.AUDIO_LAB.name },
                         onOpenQuickAudio    = { quickAudioVisible = true },
                         onSleepTimer        = viewModel::startSleepTimer,
@@ -476,6 +513,8 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                             onlineRecommendations = viewModel.onlineRecommendations.collectAsStateWithLifecycle().value,
                             isSearchingOnline = viewModel.isSearchingRecommendations.collectAsStateWithLifecycle().value,
                             downloads = downloads,
+                            autoplayEnabled = autoplayEnabled,
+                            onToggleAutoplay = viewModel::setAutoplayEnabled,
                             onPlayOffline = { track, list ->
                                 viewModel.playback.play(track, list)
                                 recommendationsVisible = false
@@ -493,6 +532,38 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                         )
                     }
                 }
+
+                // Smart Recommendation Playlist Sheet
+                RecommendationPlaylistSheet(
+                    visible = recommendationMixSeedTrack != null,
+                    seedTrack = recommendationMixSeedTrack,
+                    recommendations = recommendationMixTracks,
+                    onDismiss = {
+                        recommendationMixSeedTrack = null
+                        recommendationMixTracks = emptyList()
+                    },
+                    onPlayImmediately = { seed, mix ->
+                        viewModel.playback.play(seed, mix)
+                        recommendationMixSeedTrack = null
+                        recommendationMixTracks = emptyList()
+                    },
+                    onQueueAsNext = { mix ->
+                        viewModel.playNext(mix)
+                        recommendationMixSeedTrack = null
+                        recommendationMixTracks = emptyList()
+                    },
+                    onPlayTrack = { trk ->
+                        viewModel.playback.play(trk, recommendationMixTracks)
+                        recommendationMixSeedTrack = null
+                        recommendationMixTracks = emptyList()
+                    },
+                    onPlayNextTrack = { trk ->
+                        viewModel.playNext(trk)
+                    },
+                    onAddToQueue = { trk ->
+                        viewModel.addToQueue(trk)
+                    },
+                )
             }
         }
     }

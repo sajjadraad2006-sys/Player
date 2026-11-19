@@ -325,6 +325,7 @@ fun TrackRow(
     isPlaying: Boolean = false,
     maxTitleLines: Int = 2,
     onRemove: (() -> Unit)? = null,
+    removeLabel: String? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
@@ -413,7 +414,7 @@ fun TrackRow(
                     )
                     if (onRemove != null) {
                         DropdownMenuItem(
-                            text = { Text(stringResource(R.string.remove_from_playlist)) },
+                            text = { Text(removeLabel ?: stringResource(R.string.remove_from_playlist)) },
                             onClick = { menuExpanded = false; onRemove() },
                         )
                     }

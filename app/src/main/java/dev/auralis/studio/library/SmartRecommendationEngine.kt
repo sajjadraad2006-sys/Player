@@ -1,9 +1,12 @@
 package dev.auralis.studio.library
 
 import dev.auralis.studio.core.model.Track
+import dev.auralis.studio.online.ProviderResult
 import dev.auralis.studio.online.SearchNormalization
 import dev.auralis.studio.online.UnifiedSearchAggregator
 import dev.auralis.studio.online.UnifiedTrack
+import dev.auralis.studio.online.UnifiedTrackMerger
+import dev.auralis.studio.online.YouTubeCatalogProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.withContext
@@ -19,6 +22,7 @@ import kotlin.math.abs
 class SmartRecommendationEngine(
     private val unifiedSearch: UnifiedSearchAggregator? = null,
     private val networkMonitor: dev.auralis.studio.core.NetworkMonitor? = null,
+    private val youtubeCatalog: YouTubeCatalogProvider? = null,
 ) {
     private val onlineCache = ConcurrentHashMap<String, List<UnifiedTrack>>()
 
@@ -131,20 +135,99 @@ class SmartRecommendationEngine(
     }
 
     /**
-     * Recommends online tracks from YouTube and connected providers matching
-     * the current artist or vibe.
+     * Recommends online tracks using YouTube's native algorithmic "Up Next" / "Radio"
+     * recommendation engine (/youtubei/v1/next), falling back to multi-query search if needed.
      */
     suspend fun getOnlineRecommendations(
         currentTrack: Track?,
         limit: Int = 30,
     ): List<UnifiedTrack> = withContext(Dispatchers.IO) {
-        if (currentTrack == null || unifiedSearch == null) return@withContext emptyList()
+        if (currentTrack == null) return@withContext emptyList()
         if (networkMonitor?.currentOnline == false) return@withContext emptyList()
         val cacheKey = currentTrack.uri.ifBlank { "${currentTrack.artist}#${currentTrack.title}" }
 
         onlineCache[cacheKey]?.let { cached ->
             if (cached.isNotEmpty()) return@withContext cached.take(limit)
         }
+
+        // 1. Try True YouTube Algorithmic Recommendations via InnerTube /next
+        if (youtubeCatalog != null) {
+            val algorithmic = fetchAlgorithmicRecommendations(currentTrack, limit)
+            if (algorithmic.isNotEmpty()) {
+                onlineCache[cacheKey] = algorithmic
+                return@withContext algorithmic
+            }
+        }
+
+        // 2. Fallback to heuristic query search if InnerTube /next fails or is unavailable
+        val fallback = fetchSearchBasedRecommendations(currentTrack, limit)
+        if (fallback.isNotEmpty()) {
+            onlineCache[cacheKey] = fallback
+        }
+        fallback
+    }
+
+    private suspend fun fetchAlgorithmicRecommendations(
+        currentTrack: Track,
+        limit: Int,
+    ): List<UnifiedTrack> {
+        val catalog = youtubeCatalog ?: return emptyList()
+
+        // 1. Identify video ID from URI or metadata
+        var videoId = extractYouTubeVideoId(currentTrack.uri)
+
+        // 2. If not directly identifiable (e.g. local file), perform fast lookup for top match
+        if (videoId.isNullOrBlank()) {
+            val query = listOf(currentTrack.artist, currentTrack.title)
+                .filter { it.isNotBlank() && !it.contains("unknown", ignoreCase = true) }
+                .joinToString(" ")
+                .trim()
+
+            if (query.isNotBlank()) {
+                val searchResult = catalog.search(query)
+                if (searchResult is ProviderResult.Success && searchResult.data.isNotEmpty()) {
+                    videoId = searchResult.data.first().id
+                }
+            }
+        }
+
+        val resolvedVideoId = videoId?.takeIf { it.isNotBlank() } ?: return emptyList()
+
+        // 3. Query native YouTube "Watch Next" algorithm
+        val nextResult = catalog.fetchWatchNext(resolvedVideoId)
+        if (nextResult is ProviderResult.Success && nextResult.data.isNotEmpty()) {
+            val filtered = nextResult.data.filter { it.id != resolvedVideoId }
+            val merged = UnifiedTrackMerger.merge(filtered)
+            if (merged.isNotEmpty()) {
+                return merged.take(limit)
+            }
+        }
+
+        return emptyList()
+    }
+
+    private fun extractYouTubeVideoId(uri: String): String? {
+        val trimmed = uri.trim()
+        if (trimmed.isBlank()) return null
+
+        val watchMatch = Regex("""[?&]v=([a-zA-Z0-9_-]{11})""").find(trimmed)
+        if (watchMatch != null) return watchMatch.groupValues[1]
+
+        val shortMatch = Regex("""youtu\.be/([a-zA-Z0-9_-]{11})""").find(trimmed)
+        if (shortMatch != null) return shortMatch.groupValues[1]
+
+        if (trimmed.length == 11 && trimmed.matches(Regex("^[a-zA-Z0-9_-]{11}\$"))) {
+            return trimmed
+        }
+
+        return null
+    }
+
+    private suspend fun fetchSearchBasedRecommendations(
+        currentTrack: Track,
+        limit: Int,
+    ): List<UnifiedTrack> {
+        val searchAggregator = unifiedSearch ?: return emptyList()
 
         val rawArtist = currentTrack.artist.trim()
         val rawTitle = currentTrack.title.trim()
@@ -165,7 +248,6 @@ class SmartRecommendationEngine(
             cleanTitle
         }
 
-        // Generate prioritized complementary recommendation queries
         val queries = mutableListOf<String>()
         val hasArabic = (detectedArtist ?: "").any { it in '\u0600'..'\u06FF' } || coreTitle.any { it in '\u0600'..'\u06FF' }
 
@@ -185,9 +267,9 @@ class SmartRecommendationEngine(
             }
         }
 
-        if (queries.isEmpty()) return@withContext emptyList()
+        if (queries.isEmpty()) return emptyList()
 
-        return@withContext try {
+        return try {
             val aggregated = mutableListOf<UnifiedTrack>()
             val seenKeys = mutableSetOf<String>()
             val normCurrentTitle = SearchNormalization.normalize(rawTitle)
@@ -196,7 +278,7 @@ class SmartRecommendationEngine(
             for (query in queries) {
                 if (aggregated.size >= limit) break
                 val snapshot = withTimeoutOrNull(2_500L) {
-                    unifiedSearch.search(query).firstOrNull { it.isComplete || it.recordings.size >= (limit - aggregated.size) }
+                    searchAggregator.search(query).firstOrNull { it.isComplete || it.recordings.size >= (limit - aggregated.size) }
                 }
 
                 val items = snapshot?.recordings.orEmpty()
@@ -213,11 +295,7 @@ class SmartRecommendationEngine(
                 }
             }
 
-            val finalResult = aggregated.take(limit)
-            if (finalResult.isNotEmpty()) {
-                onlineCache[cacheKey] = finalResult
-            }
-            finalResult
+            aggregated.take(limit)
         } catch (_: Exception) {
             emptyList()
         }

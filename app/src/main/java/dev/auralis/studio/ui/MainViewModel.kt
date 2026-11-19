@@ -9,6 +9,7 @@ import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import dev.auralis.studio.AuralisApplication
 import dev.auralis.studio.R
 import dev.auralis.studio.core.database.DownloadEntity
@@ -26,11 +27,13 @@ import dev.auralis.studio.lyrics.LyricsClock
 import dev.auralis.studio.online.CanonicalRecording
 import dev.auralis.studio.online.DownloadQuality
 import dev.auralis.studio.online.LocalRecordingSource
+import dev.auralis.studio.online.OnlinePlaylist
 import dev.auralis.studio.online.OnlineRecordingSource
 import dev.auralis.studio.online.OnlineTrack
 import dev.auralis.studio.online.PlaybackSourceSelector
 import dev.auralis.studio.online.ProviderResult
 import dev.auralis.studio.online.UnifiedTrack
+import dev.auralis.studio.online.UnifiedTrackMerger
 import dev.auralis.studio.online.toStreamableTrack
 import dev.auralis.studio.playback.PlaybackConnection
 import dev.auralis.studio.audio.visualizer.VisualizerAnalyzer
@@ -70,6 +73,12 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
+
+data class ActivePlaylistSession(
+    val playlist: OnlinePlaylist,
+    val allTracks: List<CanonicalRecording>,
+    var currentIndex: Int,
+)
 
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -193,6 +202,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val onlineResults: StateFlow<List<UnifiedTrack>> = _onlineResults.asStateFlow()
     private val _isSearchingOnline = MutableStateFlow(false)
     val isSearchingOnline: StateFlow<Boolean> = _isSearchingOnline.asStateFlow()
+    private val _isSearchingOnlineMore = MutableStateFlow(false)
+    val isSearchingOnlineMore: StateFlow<Boolean> = _isSearchingOnlineMore.asStateFlow()
+    private val _onlineSearchPage = MutableStateFlow(0)
+    val onlineSearchPage: StateFlow<Int> = _onlineSearchPage.asStateFlow()
     private val _onlineProviderFailures = MutableStateFlow(0)
     val onlineProviderFailures: StateFlow<Int> = _onlineProviderFailures.asStateFlow()
     private val _providersPending = MutableStateFlow(0)
@@ -214,11 +227,80 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    val recommendationEngine = dev.auralis.studio.library.SmartRecommendationEngine(container.unifiedSearch, container.networkMonitor)
+    val appDisplayName: StateFlow<String> = container.settings.appDisplayName
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
+
+    val activeAppIconAlias: StateFlow<String> = container.settings.activeAppIconAlias
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "default")
+
+    val youtubeLyricsTranslation: StateFlow<Boolean> = container.settings.youtubeLyricsTranslation
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    fun setAppDisplayName(name: String) {
+        viewModelScope.launch {
+            container.settings.setAppDisplayName(name)
+        }
+    }
+
+    fun setActiveAppIconAlias(alias: String) {
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val success = dev.auralis.studio.settings.AppIconManager.setAppIcon(app, alias)
+            if (success) {
+                container.settings.setActiveAppIconAlias(alias)
+            }
+        }
+    }
+
+    fun setYoutubeLyricsTranslation(enabled: Boolean) {
+        viewModelScope.launch {
+            container.settings.setYoutubeLyricsTranslation(enabled)
+        }
+    }
+
+    val recommendationEngine = dev.auralis.studio.library.SmartRecommendationEngine(
+        unifiedSearch = container.unifiedSearch,
+        networkMonitor = container.networkMonitor,
+        youtubeCatalog = container.youtubeProvider,
+    )
     private val _offlineRecommendations = MutableStateFlow<List<Track>>(emptyList())
     val offlineRecommendations: StateFlow<List<Track>> = _offlineRecommendations.asStateFlow()
     private val _onlineRecommendations = MutableStateFlow<List<UnifiedTrack>>(emptyList())
     val onlineRecommendations: StateFlow<List<UnifiedTrack>> = _onlineRecommendations.asStateFlow()
+
+    // ── Infinite Smart Autoplay & Queue State ────────────────────────────────
+    private val _autoplayEnabled = MutableStateFlow(prefs.getBoolean("infinite_autoplay_enabled", true))
+    val autoplayEnabled: StateFlow<Boolean> = _autoplayEnabled.asStateFlow()
+
+    fun setAutoplayEnabled(enabled: Boolean) {
+        _autoplayEnabled.value = enabled
+        prefs.edit().putBoolean("infinite_autoplay_enabled", enabled).apply()
+    }
+
+    fun toggleAutoplay() {
+        setAutoplayEnabled(!_autoplayEnabled.value)
+    }
+
+    private val _onlineUpNextQueue = MutableStateFlow<List<CanonicalRecording>>(emptyList())
+    val onlineUpNextQueue: StateFlow<List<CanonicalRecording>> = _onlineUpNextQueue.asStateFlow()
+
+    private val _activePlaylistSession = MutableStateFlow<ActivePlaylistSession?>(null)
+    val activePlaylistSession: StateFlow<ActivePlaylistSession?> = _activePlaylistSession.asStateFlow()
+
+    fun clearActivePlaylistSession() {
+        _activePlaylistSession.value = null
+    }
+
+    private val _onlinePlaylistResults = MutableStateFlow<List<OnlinePlaylist>>(emptyList())
+    val onlinePlaylistResults: StateFlow<List<OnlinePlaylist>> = _onlinePlaylistResults.asStateFlow()
+
+    private val _isSearchingPlaylists = MutableStateFlow(false)
+    val isSearchingPlaylists: StateFlow<Boolean> = _isSearchingPlaylists.asStateFlow()
+
+    private val playedOnlineIdentities = ConcurrentHashMap.newKeySet<String>()
+    private val resolvedOnlineTracks = ConcurrentHashMap<String, Track>()
+    private var isResolvingNextTrack = false
+    private var lastResolvedTrackIdentity: String? = null
 
     private val _isSearchingRecommendations = MutableStateFlow(false)
     val isSearchingRecommendations: StateFlow<Boolean> = _isSearchingRecommendations.asStateFlow()
@@ -232,6 +314,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val uri = mediaItem?.mediaId ?: return@combine null
         val found = allTracks.firstOrNull { it.uri == uri }
             ?: (if (onlineTrack?.uri == uri) onlineTrack else null)
+            ?: resolvedOnlineTracks[uri]
             ?: generatedTrack(uri)
         val meta = mediaItem.mediaMetadata
         if (found != null && found.artworkUri == null && meta.artworkUri != null) {
@@ -318,6 +401,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (track == null) _lyricsState.value = LyricsUiState.NotFound
                     else resolveLyrics(track)
                     refreshRecommendations(track)
+                    onTrackTransitioned(track)
                 }
         }
         viewModelScope.launch {
@@ -330,6 +414,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             playbackState.collect { state ->
                 lyricsClock.update(state.positionMs, state.isPlaying, audioConfig.value.speed)
+
+                // Just-In-Time Continuous Autoplay & Lookahead Resolution (N+1)
+                if ((_autoplayEnabled.value || _activePlaylistSession.value != null) && state.isPlaying) {
+                    val queueRemaining = state.queue.size - (state.currentIndex + 1)
+                    if (queueRemaining <= 0) {
+                        triggerPreFetchNextTrack()
+                    }
+                }
             }
         }
         viewModelScope.launch {
@@ -338,14 +430,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .map { it.trim() }
                 .distinctUntilChanged()
                 .flatMapLatest { query ->
+                    _onlineSearchPage.value = 0
                     if (query.isBlank()) {
                         _isSearchingOnline.value = false
+                        _isSearchingOnlineMore.value = false
                         _onlineProviderFailures.value = 0
                         _providersPending.value = 0
                         flowOf(dev.auralis.studio.online.SearchSnapshot.EMPTY)
                     } else {
                         _isSearchingOnline.value = true
-                        container.unifiedSearch.search(query)
+                        container.unifiedSearch.search(query, page = 0)
                     }
                 }
                 .collectLatest { snapshot ->
@@ -387,8 +481,65 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Deletes a downloaded track directly:
+     * - Physical file and cached artwork removed from disk via [DownloadIngestionManager.deleteDownload]
+     * - Download DB record, favorites, playlists, and bookmarks cleaned
+     * - Removed from active playback queue if currently loaded
+     * - Media library refreshed
+     */
+    fun deleteDownloadedTrack(track: Track) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                container.downloadManager.deleteDownload(track.uri)
+                dao.removeFavorite(track.uri)
+                dao.removeTrackFromAllPlaylists(track.uri)
+                dao.deleteBookmarksForTrack(track.uri)
+            }
+            val currentQueue = playback.state.value.queue
+            for (i in currentQueue.indices.reversed()) {
+                if (currentQueue[i].mediaId == track.uri) {
+                    playback.removeQueueItem(i)
+                }
+            }
+            refreshLibrary()
+        }
+    }
+
     fun searchOnline(query: String) {
         _onlineSearchQuery.value = query
+    }
+
+    fun loadMoreOnlineResults() {
+        val query = _onlineSearchQuery.value.trim()
+        if (query.isBlank() || _isSearchingOnline.value || _isSearchingOnlineMore.value) return
+
+        val nextPage = _onlineSearchPage.value + 1
+        viewModelScope.launch {
+            _isSearchingOnlineMore.value = true
+            try {
+                container.unifiedSearch.search(query, page = nextPage).collect { snapshot ->
+                    if (snapshot.recordings.isNotEmpty()) {
+                        val currentList = _onlineResults.value
+                        val existingIdentities = currentList.map { it.recordingIdentity }.toSet()
+                        val newRecordings = snapshot.recordings.filterNot { it.recordingIdentity in existingIdentities }
+                        if (newRecordings.isNotEmpty()) {
+                            _onlineResults.value = currentList + newRecordings
+                            _onlineSearchPage.value = nextPage
+                        }
+                    }
+                    if (snapshot.isComplete) {
+                        _isSearchingOnlineMore.value = false
+                    }
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                Log.w("MainViewModel", "Failed to load more online results: ${e.message}")
+            } finally {
+                _isSearchingOnlineMore.value = false
+            }
+        }
     }
 
     fun commitSearch(query: String) {
@@ -431,6 +582,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playOnlineTrack(unifiedTrack: CanonicalRecording) {
+        clearActivePlaylistSession()
         viewModelScope.launch {
             // Check completed download in local database first
             val derivedId = DownloadIngestionRequest.deriveRecordingIdentity(unifiedTrack.artist, unifiedTrack.title)
@@ -462,85 +614,339 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            // Deterministic playback candidate failover
-            val isLocalReadable: (String) -> Boolean = { uri -> isUriReadable(uri) }
-            val candidates = PlaybackSourceSelector.rank(unifiedTrack.sources, isLocalReadable)
-            for (candidate in candidates) {
-                when (candidate) {
-                    is LocalRecordingSource -> {
-                        val localTrack = candidate.originalLocalTrack ?: container.library.track(candidate.contentUri)
-                        if (localTrack != null) {
-                            val trackWithArt = if (localTrack.customArtworkUri.isNullOrBlank() && unifiedTrack.artworkUrl.isNotBlank()) {
-                                localTrack.copy(customArtworkUri = unifiedTrack.artworkUrl)
-                            } else localTrack
-                            playback.play(trackWithArt, listOf(trackWithArt))
-                            return@launch
-                        }
+            val app = getApplication<Application>()
+            Toast.makeText(app, app.getString(R.string.loading_stream), Toast.LENGTH_SHORT).show()
+
+            val trackToPlay = withContext(Dispatchers.IO) {
+                resolveOnlineTrackStream(unifiedTrack)
+            }
+
+            if (trackToPlay != null) {
+                resolvedOnlineTracks[trackToPlay.uri] = trackToPlay
+                currentPlayingOnlineTrack.value = trackToPlay
+                playback.play(trackToPlay, listOf(trackToPlay))
+
+                // Record identity as played
+                playedOnlineIdentities.add(unifiedTrack.recordingIdentity)
+                unifiedTrack.sources.forEach { playedOnlineIdentities.add(it.providerTrackId) }
+
+                // If onlineUpNextQueue is empty and autoplay is enabled and not in playlist session, fetch recommendations
+                if (_autoplayEnabled.value && _onlineUpNextQueue.value.isEmpty() && _activePlaylistSession.value == null) {
+                    fetchAndPopulateAutoplayQueue(trackToPlay, unifiedTrack)
+                } else {
+                    triggerPreFetchNextTrack()
+                }
+            }
+        }
+    }
+
+    suspend fun resolveOnlineTrackStream(unifiedTrack: CanonicalRecording): Track? {
+        val isLocalReadable: (String) -> Boolean = { uri -> isUriReadable(uri) }
+        val candidates = PlaybackSourceSelector.rank(unifiedTrack.sources, isLocalReadable)
+        for (candidate in candidates) {
+            when (candidate) {
+                is LocalRecordingSource -> {
+                    val localTrack = candidate.originalLocalTrack ?: container.library.track(candidate.contentUri)
+                    if (localTrack != null) {
+                        return if (localTrack.customArtworkUri.isNullOrBlank() && unifiedTrack.artworkUrl.isNotBlank()) {
+                            localTrack.copy(customArtworkUri = unifiedTrack.artworkUrl)
+                        } else localTrack
                     }
-                    is OnlineRecordingSource -> {
-                        val onlineTrack = candidate.originalTrack
-                        if (onlineTrack != null) {
-                            if (onlineTrack.provider.equals("youtube", true)) {
-                                val watchUrl = onlineTrack.sourceUrl.takeIf { it.isNotBlank() }
-                                    ?: "https://www.youtube.com/watch?v=${onlineTrack.id}"
-                                val app = getApplication<Application>()
-                                Toast.makeText(app, app.getString(R.string.loading_stream), Toast.LENGTH_SHORT).show()
-                                val resolvedMedia = withContext(Dispatchers.IO) {
-                                    container.mediaResolver.resolve(
-                                        dev.auralis.studio.resolver.api.ResolverRequest(
-                                            sourceUrl = watchUrl,
-                                            sourceId = onlineTrack.id,
-                                            intent = dev.auralis.studio.resolver.api.ResolveIntent.PLAYBACK,
-                                        )
+                }
+                is OnlineRecordingSource -> {
+                    val onlineTrack = candidate.originalTrack
+                    if (onlineTrack != null) {
+                        if (onlineTrack.provider.equals("youtube", true)) {
+                            val watchUrl = onlineTrack.sourceUrl.takeIf { it.isNotBlank() }
+                                ?: "https://www.youtube.com/watch?v=${onlineTrack.id}"
+                            val resolvedMedia = withContext(Dispatchers.IO) {
+                                container.mediaResolver.resolve(
+                                    dev.auralis.studio.resolver.api.ResolverRequest(
+                                        sourceUrl = watchUrl,
+                                        sourceId = onlineTrack.id,
+                                        intent = dev.auralis.studio.resolver.api.ResolveIntent.PLAYBACK,
+                                    )
+                                )
+                            }
+                            if (resolvedMedia is dev.auralis.studio.resolver.api.ResolverResult.Success) {
+                                val streamUrl = resolvedMedia.lease?.url
+                                    ?: resolvedMedia.media.rawFormats.firstOrNull { it.isAudioOnly && it.url.isNotBlank() }?.url
+                                    ?: resolvedMedia.media.rawFormats.firstOrNull { it.url.isNotBlank() }?.url
+                                if (!streamUrl.isNullOrBlank()) {
+                                    return Track(
+                                        id = -1L,
+                                        uri = streamUrl,
+                                        title = unifiedTrack.title,
+                                        artist = unifiedTrack.artist,
+                                        album = unifiedTrack.album,
+                                        durationMs = resolvedMedia.media.durationMs ?: unifiedTrack.durationMs,
+                                        customArtworkUri = unifiedTrack.artworkUrl.takeIf { it.isNotBlank() },
                                     )
                                 }
-                                if (resolvedMedia is dev.auralis.studio.resolver.api.ResolverResult.Success) {
-                                    val streamUrl = resolvedMedia.lease?.url
-                                        ?: resolvedMedia.media.rawFormats.firstOrNull { it.isAudioOnly && it.url.isNotBlank() }?.url
-                                        ?: resolvedMedia.media.rawFormats.firstOrNull { it.url.isNotBlank() }?.url
-                                    if (!streamUrl.isNullOrBlank()) {
-                                        val trackToPlay = Track(
-                                            id = -1L,
-                                            uri = streamUrl,
-                                            title = unifiedTrack.title,
-                                            artist = unifiedTrack.artist,
-                                            album = unifiedTrack.album,
-                                            durationMs = resolvedMedia.media.durationMs ?: unifiedTrack.durationMs,
-                                            customArtworkUri = unifiedTrack.artworkUrl.takeIf { it.isNotBlank() },
-                                        )
-                                        currentPlayingOnlineTrack.value = trackToPlay
-                                        playback.play(trackToPlay, listOf(trackToPlay))
-                                        return@launch
-                                    }
-                                } else if (resolvedMedia is dev.auralis.studio.resolver.api.ResolverResult.Failure) {
-                                    Toast.makeText(app, resolvedMedia.error.safeUserMessage, Toast.LENGTH_SHORT).show()
-                                }
                             }
-                            val resolved = providerRegistry.resolveStream(onlineTrack)
-                            if (resolved is ProviderResult.Success) {
-                                val trackToPlay = onlineTrack.copy(
-                                    streamUrl = resolved.data.url.takeIf { resolved.data.kind == dev.auralis.studio.online.MediaUrlKind.STREAM },
-                                    previewUrl = resolved.data.url.takeIf { resolved.data.kind == dev.auralis.studio.online.MediaUrlKind.PREVIEW },
-                                    streamAllowed = resolved.data.kind == dev.auralis.studio.online.MediaUrlKind.STREAM,
-                                ).toStreamableTrack()
-                                if (trackToPlay != null) {
-                                    currentPlayingOnlineTrack.value = trackToPlay
-                                    playback.play(trackToPlay, listOf(trackToPlay))
-                                    return@launch
-                                }
-                            } else if (!onlineTrack.bestStreamUrl.isNullOrBlank()) {
-                                val trackToPlay = onlineTrack.toStreamableTrack()
-                                if (trackToPlay != null) {
-                                    currentPlayingOnlineTrack.value = trackToPlay
-                                    playback.play(trackToPlay, listOf(trackToPlay))
-                                    return@launch
-                                }
-                            }
+                        }
+                        val resolved = providerRegistry.resolveStream(onlineTrack)
+                        if (resolved is ProviderResult.Success) {
+                            val track = onlineTrack.copy(
+                                streamUrl = resolved.data.url.takeIf { resolved.data.kind == dev.auralis.studio.online.MediaUrlKind.STREAM },
+                                previewUrl = resolved.data.url.takeIf { resolved.data.kind == dev.auralis.studio.online.MediaUrlKind.PREVIEW },
+                                streamAllowed = resolved.data.kind == dev.auralis.studio.online.MediaUrlKind.STREAM,
+                            ).toStreamableTrack()
+                            if (track != null) return track
+                        } else if (!onlineTrack.bestStreamUrl.isNullOrBlank()) {
+                            val track = onlineTrack.toStreamableTrack()
+                            if (track != null) return track
                         }
                     }
                 }
             }
         }
+        return null
+    }
+
+    private fun fetchAndPopulateAutoplayQueue(anchorTrack: Track, anchorRecording: CanonicalRecording) {
+        viewModelScope.launch {
+            val nextRecs = recommendationEngine.getOnlineRecommendations(anchorTrack, limit = 15)
+            val filtered = nextRecs.filter { rec ->
+                rec.recordingIdentity !in playedOnlineIdentities &&
+                    rec.sources.none { it.providerTrackId in playedOnlineIdentities }
+            }
+            if (filtered.isNotEmpty()) {
+                _onlineUpNextQueue.value = filtered
+                triggerPreFetchNextTrack()
+            }
+        }
+    }
+
+    private fun triggerPreFetchNextTrack() {
+        if (!_autoplayEnabled.value && _activePlaylistSession.value == null) return
+        if (isResolvingNextTrack) return
+
+        val session = _activePlaylistSession.value
+        val nextItem = if (session != null) {
+            val nextIndex = session.currentIndex + 1
+            if (nextIndex in session.allTracks.indices) {
+                session.allTracks[nextIndex]
+            } else null
+        } else {
+            _onlineUpNextQueue.value.firstOrNull()
+        } ?: return
+
+        if (nextItem.recordingIdentity == lastResolvedTrackIdentity) return
+
+        viewModelScope.launch {
+            isResolvingNextTrack = true
+            try {
+                val resolvedTrack = withContext(Dispatchers.IO) {
+                    resolveOnlineTrackStream(nextItem)
+                }
+                if (resolvedTrack != null) {
+                    if (_activePlaylistSession.value == null) {
+                        _onlineUpNextQueue.value = _onlineUpNextQueue.value.filterNot { it.recordingIdentity == nextItem.recordingIdentity }
+                    }
+                    lastResolvedTrackIdentity = nextItem.recordingIdentity
+                    playedOnlineIdentities.add(nextItem.recordingIdentity)
+                    nextItem.sources.forEach { playedOnlineIdentities.add(it.providerTrackId) }
+                    resolvedOnlineTracks[resolvedTrack.uri] = resolvedTrack
+                    playback.addToQueue(resolvedTrack)
+                } else {
+                    if (_activePlaylistSession.value == null) {
+                        _onlineUpNextQueue.value = _onlineUpNextQueue.value.filterNot { it.recordingIdentity == nextItem.recordingIdentity }
+                    }
+                }
+            } finally {
+                isResolvingNextTrack = false
+            }
+        }
+    }
+
+    private fun onTrackTransitioned(track: Track?) {
+        if (track != null) {
+            lastResolvedTrackIdentity = null
+            playedOnlineIdentities.add(track.uri)
+            resolvedOnlineTracks[track.uri]?.let {
+                currentPlayingOnlineTrack.value = it
+            }
+
+            val session = _activePlaylistSession.value
+            if (session != null) {
+                val foundIndex = session.allTracks.indexOfFirst { recording ->
+                    recording.sources.any { source ->
+                        source.providerTrackId == track.uri ||
+                            (source as? LocalRecordingSource)?.contentUri == track.uri
+                    } || resolvedOnlineTracks[track.uri]?.title == recording.title
+                }
+                if (foundIndex >= 0) {
+                    session.currentIndex = foundIndex
+                    _onlineUpNextQueue.value = session.allTracks.drop(foundIndex + 1)
+                } else if (session.currentIndex < session.allTracks.size - 1) {
+                    session.currentIndex++
+                    _onlineUpNextQueue.value = session.allTracks.drop(session.currentIndex + 1)
+                }
+                triggerPreFetchNextTrack()
+            } else {
+                triggerPreFetchNextTrack()
+            }
+
+            if (_autoplayEnabled.value && _onlineUpNextQueue.value.size < 3 && _activePlaylistSession.value == null) {
+                viewModelScope.launch {
+                    val anchor = _onlineUpNextQueue.value.lastOrNull()?.let { rec ->
+                        Track(
+                            id = -1L,
+                            uri = rec.onlineSources.firstOrNull()?.id.orEmpty(),
+                            title = rec.title,
+                            artist = rec.artist,
+                        )
+                    } ?: track
+
+                    val newRecommendations = recommendationEngine.getOnlineRecommendations(anchor, limit = 15)
+                    val unplayed = newRecommendations.filter { rec ->
+                        rec.recordingIdentity !in playedOnlineIdentities &&
+                            rec.sources.none { it.providerTrackId in playedOnlineIdentities }
+                    }
+                    if (unplayed.isNotEmpty()) {
+                        _onlineUpNextQueue.value = _onlineUpNextQueue.value + unplayed
+                        triggerPreFetchNextTrack()
+                    }
+                }
+            }
+        }
+    }
+
+    fun playOnlinePlaylist(playlist: OnlinePlaylist, startIndex: Int = 0, shuffle: Boolean = false) {
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            Toast.makeText(app, app.getString(R.string.loading_playlist_tracks), Toast.LENGTH_SHORT).show()
+
+            val outcome = withContext(Dispatchers.IO) {
+                container.youtubeProvider.fetchPlaylistTracks(playlist.id)
+            }
+
+            if (outcome !is ProviderResult.Success || outcome.data.isEmpty()) {
+                Toast.makeText(app, app.getString(R.string.no_tracks_in_playlist), Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+
+            val canonicalRecordings = UnifiedTrackMerger.merge(outcome.data)
+            if (canonicalRecordings.isEmpty()) return@launch
+
+            val listToPlay = if (shuffle) {
+                canonicalRecordings.shuffled()
+            } else {
+                canonicalRecordings
+            }
+
+            val validIndex = startIndex.coerceIn(listToPlay.indices)
+            _activePlaylistSession.value = ActivePlaylistSession(
+                playlist = playlist,
+                allTracks = listToPlay,
+                currentIndex = validIndex,
+            )
+
+            val selectedRecording = listToPlay[validIndex]
+            val remainingRecordings = listToPlay.drop(validIndex + 1)
+
+            _onlineUpNextQueue.value = remainingRecordings
+            playOnlineTrack(selectedRecording)
+        }
+    }
+
+    fun skipNext() {
+        viewModelScope.launch {
+            val player = playback.controllerInstance
+            if (player != null && player.hasNextMediaItem() && player.currentMediaItemIndex < player.mediaItemCount - 1) {
+                player.seekToNextMediaItem()
+                return@launch
+            }
+
+            val session = _activePlaylistSession.value
+            if (session != null && session.currentIndex < session.allTracks.size - 1) {
+                session.currentIndex++
+                val nextRecording = session.allTracks[session.currentIndex]
+                _onlineUpNextQueue.value = session.allTracks.drop(session.currentIndex + 1)
+                val resolved = withContext(Dispatchers.IO) {
+                    resolveOnlineTrackStream(nextRecording)
+                }
+                if (resolved != null) {
+                    resolvedOnlineTracks[resolved.uri] = resolved
+                    currentPlayingOnlineTrack.value = resolved
+                    playback.play(resolved, listOf(resolved))
+                    triggerPreFetchNextTrack()
+                    return@launch
+                }
+            }
+
+            val nextRecording = _onlineUpNextQueue.value.firstOrNull()
+            if (nextRecording != null) {
+                _onlineUpNextQueue.value = _onlineUpNextQueue.value.drop(1)
+                val resolved = withContext(Dispatchers.IO) {
+                    resolveOnlineTrackStream(nextRecording)
+                }
+                if (resolved != null) {
+                    lastResolvedTrackIdentity = nextRecording.recordingIdentity
+                    playedOnlineIdentities.add(nextRecording.recordingIdentity)
+                    nextRecording.sources.forEach { playedOnlineIdentities.add(it.providerTrackId) }
+                    resolvedOnlineTracks[resolved.uri] = resolved
+                    currentPlayingOnlineTrack.value = resolved
+                    playback.play(resolved, listOf(resolved))
+                    triggerPreFetchNextTrack()
+                    return@launch
+                }
+            }
+
+            playback.next()
+        }
+    }
+
+    fun skipPrevious() {
+        viewModelScope.launch {
+            val session = _activePlaylistSession.value
+            if (session != null && session.currentIndex > 0) {
+                session.currentIndex--
+                val prevRecording = session.allTracks[session.currentIndex]
+                _onlineUpNextQueue.value = session.allTracks.drop(session.currentIndex + 1)
+                val resolved = withContext(Dispatchers.IO) {
+                    resolveOnlineTrackStream(prevRecording)
+                }
+                if (resolved != null) {
+                    resolvedOnlineTracks[resolved.uri] = resolved
+                    currentPlayingOnlineTrack.value = resolved
+                    playback.play(resolved, listOf(resolved))
+                    triggerPreFetchNextTrack()
+                    return@launch
+                }
+            }
+
+            playback.previous()
+        }
+    }
+
+    fun searchOnlinePlaylists(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) {
+            _onlinePlaylistResults.value = emptyList()
+            return
+        }
+        viewModelScope.launch {
+            _isSearchingPlaylists.value = true
+            try {
+                val outcome = withContext(Dispatchers.IO) {
+                    container.youtubeProvider.searchPlaylists(trimmed)
+                }
+                if (outcome is ProviderResult.Success) {
+                    _onlinePlaylistResults.value = outcome.data
+                } else {
+                    _onlinePlaylistResults.value = emptyList()
+                }
+            } finally {
+                _isSearchingPlaylists.value = false
+            }
+        }
+    }
+
+    suspend fun getPlaylistTracks(playlistId: String): List<OnlineTrack> = withContext(Dispatchers.IO) {
+        val result = container.youtubeProvider.fetchPlaylistTracks(playlistId)
+        if (result is ProviderResult.Success) result.data else emptyList()
     }
 
     /** One tap → at most one download. Re-entry for an active DownloadKey is ignored. */
@@ -985,6 +1391,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { container.lyrics.updateOffset(track, safeOffset) }
     }
 
+    fun requestLyricsTranslation() {
+        val found = _lyricsState.value as? LyricsUiState.Found ?: return
+        val lyrics = found.lyrics
+        if (lyrics.lines.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                val translated = container.lyrics.translateLyrics(lyrics)
+                _lyricsState.value = LyricsUiState.Found(translated)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                Log.w("MainViewModel", "Failed to translate lyrics: ${e.message}")
+            }
+        }
+    }
+
     fun importLyrics(lrcContent: String) {
         val track = currentLyricsTrack ?: return
         viewModelScope.launch {
@@ -1063,6 +1485,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 durationMs = downloadedMetadata.durationMs.takeIf { it > 0 } ?: local.durationMs,
             )
         }
+        resolvedOnlineTracks[mediaId]?.let { return it }
         val item = playbackState.value.currentMediaItem ?: return null
         return Track(
             id = mediaId.hashCode().toLong(),
@@ -1109,6 +1532,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playNext(track: Track) = playback.playNext(track)
+    fun playNext(tracks: List<Track>) = playback.playNext(tracks)
+    fun moveQueueItem(fromIndex: Int, toIndex: Int) = playback.moveMediaItem(fromIndex, toIndex)
     fun addToQueue(track: Track) = playback.addToQueue(track)
 
     fun shuffleAll(tracksList: List<Track>) {

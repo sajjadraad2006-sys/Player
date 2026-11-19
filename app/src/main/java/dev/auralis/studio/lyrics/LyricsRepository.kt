@@ -67,12 +67,21 @@ class LyricsRepository(
      * Resolves lyrics for [track], following the offline-first pipeline.
      * Returns [SyncedLyrics.EMPTY] if nothing is available.
      */
-    suspend fun resolve(track: Track, forceRefresh: Boolean = false): SyncedLyrics = withContext(Dispatchers.IO) {
+    suspend fun resolve(track: Track, forceRefresh: Boolean = false, translateToArabic: Boolean = false): SyncedLyrics = withContext(Dispatchers.IO) {
+        suspend fun postProcess(result: SyncedLyrics): SyncedLyrics {
+            val withOffset = applyStoredOffset(track, result)
+            return if (translateToArabic && withOffset.lines.isNotEmpty()) {
+                translateLyrics(withOffset, "ar")
+            } else {
+                withOffset
+            }
+        }
+
         // ── Step 1: Embedded metadata ──────────────────────────────────────
         val embedded = readEmbeddedLyrics(track)
         if (embedded != null) {
             Log.d(TAG, "Using embedded lyrics for ${track.title}")
-            return@withContext applyStoredOffset(track, embedded)
+            return@withContext postProcess(embedded)
         }
 
         // ── Step 2 & 3: Local .lrc — manual first, then auto ──────────────
@@ -80,13 +89,13 @@ class LyricsRepository(
         val cachedManual = (dao.getLyrics(track.uri) ?: dao.getLyrics(identityKey))?.takeIf { it.manualSelection }
         if (cachedManual != null) {
             Log.d(TAG, "Using manually selected local/cache lyrics for ${track.title}")
-            return@withContext applyStoredOffset(track, parseCachedEntity(cachedManual))
+            return@withContext postProcess(parseCachedEntity(cachedManual))
         }
 
         val localLrc = findLocalLrc(track)
         if (localLrc != null) {
             Log.d(TAG, "Using local .lrc file for ${track.title}")
-            return@withContext applyStoredOffset(track, localLrc)
+            return@withContext postProcess(localLrc)
         }
 
         // ── Step 4: Valid online cache ─────────────────────────────────────
@@ -99,7 +108,7 @@ class LyricsRepository(
                 (cached.trackDurationMs > 0 && cached.trackDurationMs < MIN_FULL_TRACK_MS_FOR_MATCHING)
             if (!staleFromOldMatcher) {
                 Log.d(TAG, "Using cached LRCLIB lyrics for ${track.title}")
-                return@withContext applyStoredOffset(track, parseCachedEntity(cached))
+                return@withContext postProcess(parseCachedEntity(cached))
             }
             Log.d(TAG, "Discarding stale low-confidence lyrics cache for ${track.title}")
             dao.clearAutoCache(track.uri)
@@ -148,7 +157,7 @@ class LyricsRepository(
                 dao.clearAutoCache(track.uri)
                 dao.upsertLyrics(entity)
                 negativeCache.edit().remove(missKey).apply()
-                return@withContext applyStoredOffset(track, parseCachedEntity(entity))
+                return@withContext postProcess(parseCachedEntity(entity))
             }
         } catch (e: CancellationException) {
             throw e
@@ -158,7 +167,7 @@ class LyricsRepository(
 
         // ── Step 6: Synced Captions fallback (YouTube timed text) ─────────
         try {
-            val ytCaptions = youtubeCaptions.resolve(track)
+            val ytCaptions = youtubeCaptions.resolve(track, translateToArabic = translateToArabic)
             if (ytCaptions != null) {
                 val entity = LyricsCacheEntity(
                     trackUri       = track.uri,
@@ -174,7 +183,7 @@ class LyricsRepository(
                 dao.clearAutoCache(track.uri)
                 dao.upsertLyrics(entity)
                 negativeCache.edit().remove(missKey).apply()
-                return@withContext applyStoredOffset(track, ytCaptions.lyrics)
+                return@withContext postProcess(ytCaptions.lyrics)
             }
         } catch (e: CancellationException) {
             throw e
@@ -186,6 +195,17 @@ class LyricsRepository(
             negativeCache.edit().putLong(missKey, System.currentTimeMillis()).apply()
         }
         SyncedLyrics.EMPTY
+    }
+
+    /**
+     * Translates lines of [lyrics] into [targetLang], preserving timestamps and word timings.
+     */
+    suspend fun translateLyrics(lyrics: SyncedLyrics, targetLang: String = "ar"): SyncedLyrics = withContext(Dispatchers.IO) {
+        if (lyrics.lines.isEmpty()) return@withContext lyrics
+        if (lyrics.lines.all { !it.translation.isNullOrBlank() }) return@withContext lyrics
+
+        val translatedLines = LyricsTranslator.translateLines(lyrics.lines, targetLang)
+        lyrics.copy(lines = translatedLines)
     }
 
     /**

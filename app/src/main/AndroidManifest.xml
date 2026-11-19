@@ -26,12 +26,147 @@
             android:resource="@xml/automotive_app_desc" />
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true" />
+
+        <activity-alias
+            android:name=".MainActivityDefault"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:roundIcon="@mipmap/ic_launcher_round"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".MainActivityAliasAzure"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/ic_icon_azure"
+            android:roundIcon="@drawable/ic_icon_azure"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".MainActivityAliasSilver"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/ic_icon_silver"
+            android:roundIcon="@drawable/ic_icon_silver"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".MainActivityAliasOrange"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/ic_icon_orange"
+            android:roundIcon="@drawable/ic_icon_orange"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".MainActivityAliasGolden"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/ic_icon_golden"
+            android:roundIcon="@drawable/ic_icon_golden"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".MainActivityAliasCyan"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/ic_icon_cyan"
+            android:roundIcon="@drawable/ic_icon_cyan"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".MainActivityAliasGradient"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/ic_icon_gradient"
+            android:roundIcon="@drawable/ic_icon_gradient"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".MainActivityAliasGreen"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/ic_icon_green"
+            android:roundIcon="@drawable/ic_icon_green"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".MainActivityAliasPink"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/ic_icon_pink"
+            android:roundIcon="@drawable/ic_icon_pink"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".MainActivityAliasPurple"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/ic_icon_purple"
+            android:roundIcon="@drawable/ic_icon_purple"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <service
             android:name=".playback.PlaybackService"

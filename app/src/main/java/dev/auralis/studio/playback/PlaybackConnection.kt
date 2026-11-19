@@ -77,6 +77,12 @@ class PlaybackConnection(
         )
     }
 
+    val controllerInstance: MediaController? get() = controller
+    val hasNext: Boolean get() = controller?.hasNextMediaItem() == true
+    val hasPrevious: Boolean get() = controller?.hasPreviousMediaItem() == true
+    fun hasNextMediaItem(): Boolean = controller?.hasNextMediaItem() == true
+    fun hasPreviousMediaItem(): Boolean = controller?.hasPreviousMediaItem() == true
+
     fun play(track: Track, queue: List<Track>) {
         val player = controller ?: return
         val items = queue.map { it.toMediaItem() }
@@ -99,6 +105,20 @@ class PlaybackConnection(
         val player = controller ?: return
         val index = (player.currentMediaItemIndex + 1).coerceAtMost(player.mediaItemCount)
         player.addMediaItem(index, track.toMediaItem())
+    }
+
+    fun playNext(tracks: List<Track>) {
+        val player = controller ?: return
+        if (tracks.isEmpty()) return
+        val index = (player.currentMediaItemIndex + 1).coerceAtMost(player.mediaItemCount)
+        player.addMediaItems(index, tracks.map { it.toMediaItem() })
+    }
+
+    fun moveMediaItem(fromIndex: Int, toIndex: Int) {
+        val player = controller ?: return
+        if (fromIndex in 0 until player.mediaItemCount && toIndex in 0 until player.mediaItemCount && fromIndex != toIndex) {
+            player.moveMediaItem(fromIndex, toIndex)
+        }
     }
 
     fun addToQueue(track: Track) {

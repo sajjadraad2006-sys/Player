@@ -95,18 +95,22 @@ object LrcParser {
                 rest.replace(Regex("""<[^>]+>"""), "").trim()
             }
 
+            val parts = rawExtracted.split("||", limit = 2)
+            val mainText = parts[0].trim()
+            val translationText = parts.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+
             // Normalize non-vocal audio descriptions to clean instrumental tag
             val cleanText = when {
-                AUDIO_DESCRIPTION_RE.matches(rawExtracted) || PAREN_DESCRIPTION_RE.matches(rawExtracted) -> "[Instrumental]"
-                else -> rawExtracted
+                AUDIO_DESCRIPTION_RE.matches(mainText) || PAREN_DESCRIPTION_RE.matches(mainText) -> "[Instrumental]"
+                else -> mainText
             }
 
             if (allTimestamps.isEmpty()) {
                 // Plain line — treat as unsynced if we later find no timestamps at all
-                lines.add(LyricsLine(-1L, cleanText, words))
+                lines.add(LyricsLine(-1L, cleanText, words, translationText))
             } else {
                 for (ts in allTimestamps) {
-                    lines.add(LyricsLine(ts, cleanText, words))
+                    lines.add(LyricsLine(ts, cleanText, words, translationText))
                 }
             }
         }

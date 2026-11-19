@@ -42,6 +42,7 @@ private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleW
 @Serializable
 private data class YouTubeSearchResponse(
     val items: List<YouTubeSearchResultItem> = emptyList(),
+    val nextPageToken: String? = null,
 )
 
 @Serializable
@@ -112,7 +113,7 @@ private data class YouTubeStatus(
  * 5. Handles missing API keys gracefully with [ProviderResult.NotConfigured].
  * 6. Never logs secrets or API keys.
  */
-class YouTubeCatalogProvider(
+open class YouTubeCatalogProvider(
     private var apiKey: String = "",
     val enableWebFallback: Boolean = true,
 ) : MusicCatalogProvider {
@@ -126,6 +127,9 @@ class YouTubeCatalogProvider(
     fun updateApiKey(newKey: String) {
         apiKey = newKey.trim()
     }
+
+    private val innerTubeContinuationTokens = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val dataApiPageTokens = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     private val client by lazy {
         HttpClient(OkHttp) {
@@ -151,26 +155,30 @@ class YouTubeCatalogProvider(
         }
     }
 
-    override suspend fun search(query: String, page: Int): ProviderResult<List<OnlineTrack>> {
+    open override suspend fun search(query: String, page: Int): ProviderResult<List<OnlineTrack>> {
         if (!isConfigured) return ProviderResult.NotConfigured
         val trimmed = query.trim()
         if (trimmed.isBlank()) return ProviderResult.Success(emptyList())
 
         if (apiKey.isNotBlank()) {
-            val apiResult = searchWithDataApi(trimmed)
+            val apiResult = searchWithDataApi(trimmed, page)
             if (apiResult is ProviderResult.Success && apiResult.data.isNotEmpty()) {
                 return apiResult
             }
         }
 
         if (enableWebFallback) {
-            return searchWeb(trimmed)
+            return searchWeb(trimmed, page)
         }
 
         return ProviderResult.NotConfigured
     }
 
-    private suspend fun searchWithDataApi(trimmed: String): ProviderResult<List<OnlineTrack>> {
+    private suspend fun searchWithDataApi(trimmed: String, page: Int = 0): ProviderResult<List<OnlineTrack>> {
+        val pageToken = if (page > 0) {
+            dataApiPageTokens["$trimmed:${page - 1}"] ?: return ProviderResult.Success(emptyList())
+        } else null
+
         return try {
             // 1. Search videos
             val searchResponse = client.get(SEARCH_URL) {
@@ -179,6 +187,9 @@ class YouTubeCatalogProvider(
                 parameter("maxResults", 15)
                 parameter("q", trimmed)
                 parameter("key", apiKey)
+                if (pageToken != null) {
+                    parameter("pageToken", pageToken)
+                }
             }
 
             if (searchResponse.status == HttpStatusCode.Forbidden || searchResponse.status == HttpStatusCode.Unauthorized) {
@@ -192,6 +203,9 @@ class YouTubeCatalogProvider(
             }
 
             val searchDto: YouTubeSearchResponse = searchResponse.body()
+            if (!searchDto.nextPageToken.isNullOrBlank()) {
+                dataApiPageTokens["$trimmed:$page"] = searchDto.nextPageToken
+            }
             val validItems = searchDto.items.filter { it.id.videoId.isNotBlank() }
             if (validItems.isEmpty()) {
                 return ProviderResult.Success(emptyList())
@@ -242,10 +256,10 @@ class YouTubeCatalogProvider(
         }
     }
 
-    suspend fun searchWeb(query: String): ProviderResult<List<OnlineTrack>> {
+    suspend fun searchWeb(query: String, page: Int = 0): ProviderResult<List<OnlineTrack>> {
         // 1. First priority: Direct official InnerTube Web endpoint (pure JSON, resilient against consent walls)
         try {
-            val innerTubeTracks = searchInnerTube(query)
+            val innerTubeTracks = searchInnerTube(query, page)
             if (innerTubeTracks.isNotEmpty()) {
                 return ProviderResult.Success(innerTubeTracks)
             }
@@ -255,7 +269,10 @@ class YouTubeCatalogProvider(
             Log.w(TAG, "InnerTube search attempt fallback to HTML: ${e.message}")
         }
 
-        // 2. Fallback to HTML results scraping with consent bypass cookies
+        // 2. Fallback to HTML results scraping with consent bypass cookies (for page 0)
+        if (page > 0) {
+            return ProviderResult.Success(emptyList())
+        }
         return try {
             val response = client.get("https://www.youtube.com/results") {
                 parameter("search_query", query)
@@ -275,7 +292,16 @@ class YouTubeCatalogProvider(
         }
     }
 
-    private suspend fun searchInnerTube(query: String): List<OnlineTrack> {
+    private suspend fun searchInnerTube(query: String, page: Int = 0): List<OnlineTrack> {
+        val continuationToken = if (page > 0) {
+            innerTubeContinuationTokens["$query:${page - 1}"] ?: run {
+                searchInnerTube(query, 0)
+                innerTubeContinuationTokens["$query:${page - 1}"]
+            }
+        } else null
+
+        if (page > 0 && continuationToken == null) return emptyList()
+
         val payload = buildJsonObject {
             putJsonObject("context") {
                 putJsonObject("client") {
@@ -285,7 +311,11 @@ class YouTubeCatalogProvider(
                     put("gl", "IQ")
                 }
             }
-            put("query", query)
+            if (continuationToken != null) {
+                put("continuation", continuationToken)
+            } else {
+                put("query", query)
+            }
         }
 
         val response = client.post("https://www.youtube.com/youtubei/v1/search") {
@@ -298,7 +328,162 @@ class YouTubeCatalogProvider(
         if (response.status.value !in 200..299) return emptyList()
         val text = response.bodyAsText()
         val jsonElement = runCatching { jsonFormat.parseToJsonElement(text) }.getOrNull() ?: return emptyList()
-        return extractTracksFromJsonElement(jsonElement)
+        val tracks = extractTracksFromJsonElement(jsonElement)
+        val nextToken = extractContinuationToken(jsonElement)
+        if (!nextToken.isNullOrBlank()) {
+            innerTubeContinuationTokens["$query:$page"] = nextToken
+        }
+        return tracks
+    }
+
+    open suspend fun fetchWatchNext(videoId: String): ProviderResult<List<OnlineTrack>> {
+        val trimmedId = videoId.trim()
+        if (trimmedId.isBlank()) return ProviderResult.Success(emptyList())
+
+        return try {
+            val payload = buildJsonObject {
+                putJsonObject("context") {
+                    putJsonObject("client") {
+                        put("clientName", "WEB")
+                        put("clientVersion", "2.20240901.00.00")
+                        put("hl", "ar")
+                        put("gl", "IQ")
+                    }
+                }
+                put("videoId", trimmedId)
+                put("playlistId", "RDAMVM$trimmedId")
+            }
+
+            val response = client.post("https://www.youtube.com/youtubei/v1/next") {
+                contentType(ContentType.Application.Json)
+                setBody(payload.toString())
+                header("X-YouTube-Client-Name", "1")
+                header("X-YouTube-Client-Version", "2.20240901.00.00")
+            }
+
+            if (response.status == HttpStatusCode.Forbidden || response.status == HttpStatusCode.Unauthorized) {
+                return ProviderResult.Unauthorized
+            }
+            if (response.status == HttpStatusCode.TooManyRequests) {
+                return ProviderResult.RateLimited
+            }
+            if (response.status.value !in 200..299) {
+                return ProviderResult.Error("YouTube Watch Next returned HTTP ${response.status.value}", response.status.value)
+            }
+
+            val text = response.bodyAsText()
+            val jsonElement = runCatching { jsonFormat.parseToJsonElement(text) }.getOrNull()
+                ?: return ProviderResult.Error("Invalid JSON from YouTube Watch Next")
+
+            val tracks = extractTracksFromJsonElement(jsonElement)
+                .filter { it.id != trimmedId }
+
+            ProviderResult.Success(tracks)
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (e: Exception) {
+            Log.w(TAG, "YouTube fetchWatchNext failed: ${e.message}")
+            ProviderResult.Error(e.message ?: "YouTube Watch Next failed")
+        }
+    }
+
+    open suspend fun searchPlaylists(query: String): ProviderResult<List<OnlinePlaylist>> {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) return ProviderResult.Success(emptyList())
+
+        return try {
+            val payload = buildJsonObject {
+                putJsonObject("context") {
+                    putJsonObject("client") {
+                        put("clientName", "WEB")
+                        put("clientVersion", "2.20240901.00.00")
+                        put("hl", "ar")
+                        put("gl", "IQ")
+                    }
+                }
+                put("query", trimmed)
+                put("params", "EgIQAw%3D%3D")
+            }
+
+            val response = client.post("https://www.youtube.com/youtubei/v1/search") {
+                contentType(ContentType.Application.Json)
+                setBody(payload.toString())
+                header("X-YouTube-Client-Name", "1")
+                header("X-YouTube-Client-Version", "2.20240901.00.00")
+            }
+
+            if (response.status == HttpStatusCode.Forbidden || response.status == HttpStatusCode.Unauthorized) {
+                return ProviderResult.Unauthorized
+            }
+            if (response.status == HttpStatusCode.TooManyRequests) {
+                return ProviderResult.RateLimited
+            }
+            if (response.status.value !in 200..299) {
+                return ProviderResult.Error("YouTube playlist search returned HTTP ${response.status.value}", response.status.value)
+            }
+
+            val text = response.bodyAsText()
+            val jsonElement = runCatching { jsonFormat.parseToJsonElement(text) }.getOrNull()
+                ?: return ProviderResult.Error("Invalid JSON from YouTube playlist search")
+
+            val playlists = extractPlaylistsFromJsonElement(jsonElement)
+            ProviderResult.Success(playlists)
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (e: Exception) {
+            Log.w(TAG, "YouTube searchPlaylists failed: ${e.message}")
+            ProviderResult.Error(e.message ?: "YouTube playlist search failed")
+        }
+    }
+
+    open suspend fun fetchPlaylistTracks(playlistId: String): ProviderResult<List<OnlineTrack>> {
+        val trimmed = playlistId.trim()
+        if (trimmed.isBlank()) return ProviderResult.Success(emptyList())
+
+        val browseId = if (trimmed.startsWith("VL")) trimmed else "VL$trimmed"
+
+        return try {
+            val payload = buildJsonObject {
+                putJsonObject("context") {
+                    putJsonObject("client") {
+                        put("clientName", "WEB")
+                        put("clientVersion", "2.20240901.00.00")
+                        put("hl", "ar")
+                        put("gl", "IQ")
+                    }
+                }
+                put("browseId", browseId)
+            }
+
+            val response = client.post("https://www.youtube.com/youtubei/v1/browse") {
+                contentType(ContentType.Application.Json)
+                setBody(payload.toString())
+                header("X-YouTube-Client-Name", "1")
+                header("X-YouTube-Client-Version", "2.20240901.00.00")
+            }
+
+            if (response.status == HttpStatusCode.Forbidden || response.status == HttpStatusCode.Unauthorized) {
+                return ProviderResult.Unauthorized
+            }
+            if (response.status == HttpStatusCode.TooManyRequests) {
+                return ProviderResult.RateLimited
+            }
+            if (response.status.value !in 200..299) {
+                return ProviderResult.Error("YouTube playlist browse returned HTTP ${response.status.value}", response.status.value)
+            }
+
+            val text = response.bodyAsText()
+            val jsonElement = runCatching { jsonFormat.parseToJsonElement(text) }.getOrNull()
+                ?: return ProviderResult.Error("Invalid JSON from YouTube playlist browse")
+
+            val tracks = extractTracksFromJsonElement(jsonElement)
+            ProviderResult.Success(tracks)
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (e: Exception) {
+            Log.w(TAG, "YouTube fetchPlaylistTracks failed: ${e.message}")
+            ProviderResult.Error(e.message ?: "YouTube playlist fetch failed")
+        }
     }
 
     private suspend fun fetchVideoDetails(videoIds: List<String>): Map<String, YouTubeVideoDetailsItem> {
@@ -359,7 +544,10 @@ class YouTubeCatalogProvider(
             fun extractVideos(element: JsonElement) {
                 when (element) {
                     is JsonObject -> {
-                        val vr = element["videoRenderer"]?.jsonObject ?: element["compactVideoRenderer"]?.jsonObject
+                        val vr = element["videoRenderer"]?.jsonObject
+                            ?: element["compactVideoRenderer"]?.jsonObject
+                            ?: element["playlistPanelVideoRenderer"]?.jsonObject
+                            ?: element["playlistVideoRenderer"]?.jsonObject
                         if (vr != null) {
                             val videoId = vr["videoId"]?.jsonPrimitive?.contentOrNull
                             if (!videoId.isNullOrBlank() && seenIds.add(videoId)) {
@@ -379,12 +567,18 @@ class YouTubeCatalogProvider(
                                     ?: vr["longBylineText"]?.jsonObject?.get("runs")?.jsonArray
                                         ?.mapNotNull { it.jsonObject["text"]?.jsonPrimitive?.contentOrNull }
                                         ?.joinToString("")
+                                    ?: vr["shortBylineText"]?.jsonObject?.get("simpleText")?.jsonPrimitive?.contentOrNull
+                                    ?: vr["longBylineText"]?.jsonObject?.get("simpleText")?.jsonPrimitive?.contentOrNull
                                 val channel = runsChannel?.takeIf { it.isNotBlank() } ?: "YouTube"
 
                                 val lengthText = vr["lengthText"]?.jsonObject?.get("simpleText")?.jsonPrimitive?.contentOrNull
                                     ?: vr["lengthText"]?.jsonObject?.get("runs")?.jsonArray?.firstOrNull()?.jsonObject?.get("text")?.jsonPrimitive?.contentOrNull
                                     ?: ""
-                                val durationMs = parseClockDurationMs(lengthText)
+                                val durationMs = if (lengthText.isNotBlank()) {
+                                    parseClockDurationMs(lengthText)
+                                } else {
+                                    vr["lengthSeconds"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()?.let { it * 1000L } ?: 0L
+                                }
                                 val artworkUrl = "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
 
                                 tracks.add(
@@ -421,6 +615,104 @@ class YouTubeCatalogProvider(
             return tracks
         }
 
+        fun extractPlaylistsFromJsonElement(jsonElement: JsonElement): List<OnlinePlaylist> {
+            val playlists = mutableListOf<OnlinePlaylist>()
+            val seenIds = mutableSetOf<String>()
+
+            fun extractPlaylists(element: JsonElement) {
+                when (element) {
+                    is JsonObject -> {
+                        val pr = element["playlistRenderer"]?.jsonObject
+                            ?: element["lockupViewModel"]?.jsonObject?.takeIf {
+                                it["contentType"]?.jsonPrimitive?.contentOrNull == "PLAYLIST"
+                            }
+                        if (pr != null) {
+                            val playlistId = pr["playlistId"]?.jsonPrimitive?.contentOrNull
+                                ?: pr["contentId"]?.jsonPrimitive?.contentOrNull
+                            if (!playlistId.isNullOrBlank() && seenIds.add(playlistId)) {
+                                val runsTitle = pr["title"]?.jsonObject?.get("runs")?.jsonArray
+                                    ?.mapNotNull { it.jsonObject["text"]?.jsonPrimitive?.contentOrNull }
+                                    ?.joinToString("")
+                                val title = runsTitle?.takeIf { it.isNotBlank() }
+                                    ?: pr["title"]?.jsonObject?.get("simpleText")?.jsonPrimitive?.contentOrNull
+                                    ?: pr["metadata"]?.jsonObject?.get("lockupMetadataViewModel")?.jsonObject?.get("title")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull
+                                    ?: "Unknown Playlist"
+
+                                val runsAuthor = pr["shortBylineText"]?.jsonObject?.get("runs")?.jsonArray
+                                    ?.mapNotNull { it.jsonObject["text"]?.jsonPrimitive?.contentOrNull }
+                                    ?.joinToString("")
+                                    ?: pr["longBylineText"]?.jsonObject?.get("runs")?.jsonArray
+                                        ?.mapNotNull { it.jsonObject["text"]?.jsonPrimitive?.contentOrNull }
+                                        ?.joinToString("")
+                                    ?: pr["ownerText"]?.jsonObject?.get("runs")?.jsonArray
+                                        ?.mapNotNull { it.jsonObject["text"]?.jsonPrimitive?.contentOrNull }
+                                        ?.joinToString("")
+                                val author = runsAuthor?.takeIf { it.isNotBlank() } ?: "YouTube"
+
+                                val countText = pr["videoCount"]?.jsonPrimitive?.contentOrNull
+                                    ?: pr["videoCountText"]?.jsonObject?.get("runs")?.jsonArray
+                                        ?.mapNotNull { it.jsonObject["text"]?.jsonPrimitive?.contentOrNull }
+                                        ?.joinToString("")
+                                    ?: pr["videoCountText"]?.jsonObject?.get("simpleText")?.jsonPrimitive?.contentOrNull
+                                    ?: ""
+                                val trackCount = Regex("""\d+""").find(countText)?.value?.toIntOrNull() ?: 0
+
+                                var foundArtwork = ""
+                                fun findThumbUrl(elem: JsonElement) {
+                                    if (foundArtwork.isNotBlank()) return
+                                    when (elem) {
+                                        is JsonObject -> {
+                                            val u = elem["url"]?.jsonPrimitive?.contentOrNull
+                                            if (!u.isNullOrBlank()) {
+                                                foundArtwork = u
+                                                return
+                                            }
+                                            for ((_, v) in elem) {
+                                                findThumbUrl(v)
+                                            }
+                                        }
+                                        is JsonArray -> {
+                                            for (item in elem.reversed()) {
+                                                findThumbUrl(item)
+                                                if (foundArtwork.isNotBlank()) return
+                                            }
+                                        }
+                                        else -> Unit
+                                    }
+                                }
+
+                                (pr["thumbnails"] ?: pr["thumbnail"] ?: pr["thumbnailRenderer"])?.let(::findThumbUrl)
+                                val artworkUrl = if (foundArtwork.startsWith("//")) "https:$foundArtwork" else foundArtwork
+
+                                playlists.add(
+                                    OnlinePlaylist(
+                                        id = playlistId,
+                                        title = unescapeHtml(title),
+                                        author = unescapeHtml(author),
+                                        trackCount = trackCount,
+                                        artworkUrl = artworkUrl,
+                                        provider = "youtube",
+                                    )
+                                )
+                            }
+                        }
+                        for ((_, v) in element) {
+                            extractPlaylists(v)
+                        }
+                    }
+                    is JsonArray -> {
+                        for (item in element) {
+                            extractPlaylists(item)
+                        }
+                    }
+                    else -> Unit
+                }
+            }
+
+            extractPlaylists(jsonElement)
+            return playlists
+        }
+
         fun parseIsoDurationMs(durationStr: String): Long {
             if (durationStr.isBlank() || !durationStr.startsWith("PT")) return 0L
             var hours = 0L
@@ -454,6 +746,37 @@ class YouTubeCatalogProvider(
                 .replace("&gt;", ">")
                 .replace("&#x2F;", "/")
                 .replace("&nbsp;", " ")
+        }
+
+        fun extractContinuationToken(element: JsonElement): String? {
+            when (element) {
+                is JsonObject -> {
+                    val cir = element["continuationItemRenderer"]?.jsonObject
+                    if (cir != null) {
+                        val token = cir["continuationEndpoint"]?.jsonObject
+                            ?.get("continuationCommand")?.jsonObject
+                            ?.get("token")?.jsonPrimitive?.contentOrNull
+                        if (!token.isNullOrBlank()) return token
+                    }
+                    val cc = element["continuationCommand"]?.jsonObject
+                    if (cc != null) {
+                        val token = cc["token"]?.jsonPrimitive?.contentOrNull
+                        if (!token.isNullOrBlank()) return token
+                    }
+                    for ((_, child) in element) {
+                        val found = extractContinuationToken(child)
+                        if (found != null) return found
+                    }
+                }
+                is JsonArray -> {
+                    for (child in element) {
+                        val found = extractContinuationToken(child)
+                        if (found != null) return found
+                    }
+                }
+                else -> Unit
+            }
+            return null
         }
     }
 }

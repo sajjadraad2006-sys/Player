@@ -55,6 +55,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.filled.Favorite
@@ -70,6 +71,7 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -183,6 +185,7 @@ fun PlayerScreen(
     onQueueIndex: (Int) -> Unit,
     onRemoveQueue: (Int) -> Unit,
     onClearQueue: () -> Unit,
+    onMoveQueue: ((Int, Int) -> Unit)? = null,
     onOpenAudioLab: () -> Unit,
     onOpenQuickAudio: () -> Unit,
     onSleepTimer: (Int) -> Unit,
@@ -196,6 +199,7 @@ fun PlayerScreen(
     isSearchingLyricsCandidates: Boolean = false,
     onLoadLyricsCandidates: () -> Unit = {},
     onSelectLyricsCandidate: (dev.auralis.studio.lyrics.LrclibTrack) -> Unit = {},
+    onRequestLyricsTranslation: () -> Unit = {},
     onOpenRecommendations: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -341,6 +345,7 @@ fun PlayerScreen(
                         onOffsetChange         = onLyricsOffsetChange,
                         onLoadCandidates       = onLoadLyricsCandidates,
                         onSelectCandidate      = onSelectLyricsCandidate,
+                        onRequestTranslation   = onRequestLyricsTranslation,
                     )
                     PAGE_PLAYER     -> PlayerPage(
                         state               = state,
@@ -359,6 +364,7 @@ fun PlayerScreen(
                         onQueueIndex        = onQueueIndex,
                         onRemoveQueue       = onRemoveQueue,
                         onClearQueue        = onClearQueue,
+                        onMoveQueue         = onMoveQueue,
                         onOpenAudioLab      = onOpenAudioLab,
                         onOpenQuickAudio    = onOpenQuickAudio,
                         onSleepTimer        = onSleepTimer,
@@ -472,6 +478,7 @@ private fun PlayerPage(
     onQueueIndex: (Int) -> Unit,
     onRemoveQueue: (Int) -> Unit,
     onClearQueue: () -> Unit,
+    onMoveQueue: ((Int, Int) -> Unit)? = null,
     onOpenAudioLab: () -> Unit,
     onOpenQuickAudio: () -> Unit,
     onSleepTimer: (Int) -> Unit,
@@ -843,6 +850,32 @@ private fun PlayerPage(
                                 color = colors.onSurfaceVariant,
                             )
                         }
+                        if (onMoveQueue != null) {
+                            IconButton(
+                                onClick = { onMoveQueue(index, index - 1) },
+                                enabled = index > 0,
+                                modifier = Modifier.size(28.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.KeyboardArrowUp,
+                                    contentDescription = stringResource(R.string.move_up),
+                                    tint = if (index > 0) colors.onSurface else colors.onSurface.copy(alpha = 0.3f),
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                            IconButton(
+                                onClick = { onMoveQueue(index, index + 1) },
+                                enabled = index < state.queue.size - 1,
+                                modifier = Modifier.size(28.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.KeyboardArrowDown,
+                                    contentDescription = stringResource(R.string.move_down),
+                                    tint = if (index < state.queue.size - 1) colors.onSurface else colors.onSurface.copy(alpha = 0.3f),
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
                         TextButton(onClick = { onRemoveQueue(index) }) {
                             Text(stringResource(R.string.remove_from_queue), style = MaterialTheme.typography.labelSmall)
                         }
@@ -871,12 +904,16 @@ private fun LyricsPage(
     onOffsetChange: (Long) -> Unit,
     onLoadCandidates: () -> Unit,
     onSelectCandidate: (dev.auralis.studio.lyrics.LrclibTrack) -> Unit,
+    onRequestTranslation: () -> Unit = {},
 ) {
     val colors = MaterialTheme.colorScheme
     val listState = rememberLazyListState()
     val lyrics = (state as? LyricsUiState.Found)?.lyrics ?: SyncedLyrics.EMPTY
     var manualQuery by remember { mutableStateOf("") }
     var showCandidatesSheet by remember { mutableStateOf(false) }
+    var showTranslation by rememberSaveable(lyrics.lines) {
+        mutableStateOf(true)
+    }
 
     var smoothPositionMs by remember(positionMs) { mutableLongStateOf(positionMs) }
     LaunchedEffect(state, lyricsClock) {
@@ -1149,13 +1186,35 @@ private fun LyricsPage(
 
                             Spacer(Modifier.height(4.dp))
 
-                            TextButton(
-                                onClick = {
-                                    onLoadCandidates()
-                                    showCandidatesSheet = true
-                                },
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
                             ) {
-                                Text(stringResource(R.string.choose_lyrics_version), style = MaterialTheme.typography.labelSmall)
+                                TextButton(
+                                    onClick = {
+                                        onLoadCandidates()
+                                        showCandidatesSheet = true
+                                    },
+                                ) {
+                                    Text(stringResource(R.string.choose_lyrics_version), style = MaterialTheme.typography.labelSmall)
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                IconButton(
+                                    onClick = {
+                                        showTranslation = !showTranslation
+                                        if (showTranslation && lyrics.lines.none { !it.translation.isNullOrBlank() }) {
+                                            onRequestTranslation()
+                                        }
+                                    },
+                                    modifier = Modifier.size(32.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Translate,
+                                        contentDescription = stringResource(R.string.lyrics_translation_title),
+                                        tint = if (showTranslation) colors.primary else colors.onSurfaceVariant.copy(alpha = 0.5f),
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
                             }
                         }
                     }
@@ -1239,6 +1298,31 @@ private fun LyricsPage(
                                     } else Modifier,
                                 )
                                 .padding(vertical = 6.dp),
+                        )
+                    }
+
+                    if (!line.translation.isNullOrBlank()) {
+                        Text(
+                            text = line.translation,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = if (isActive) 16.sp else 14.sp,
+                                fontWeight = if (isActive) FontWeight.Medium else FontWeight.Normal,
+                                lineHeight = if (isActive) 22.sp else 19.sp,
+                                textDirection = TextDirection.Content,
+                            ),
+                            color = if (isActive) colors.secondary else lineColor.copy(alpha = 0.65f),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .scale(scale)
+                                .then(
+                                    if (lyrics.synced && line.timeMs >= 0) {
+                                        Modifier.pointerInput(line.timeMs, lyrics.offsetMs) {
+                                            detectTapGestures { onSeek(lyrics.seekPositionFor(line)) }
+                                        }
+                                    } else Modifier,
+                                )
+                                .padding(bottom = 6.dp),
                         )
                     }
                 }
@@ -1421,6 +1505,17 @@ private fun VisualizerPage(
                                 textAlign = TextAlign.Center,
                                 maxLines = 2,
                                 fontWeight = if (isInstrumentalTag) FontWeight.Medium else FontWeight.SemiBold,
+                            )
+                        }
+                        lyricWindow.current?.translation?.takeIf(String::isNotBlank)?.let { translation ->
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                translation,
+                                style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Content),
+                                color = colors.secondary.copy(alpha = 0.90f),
+                                textAlign = TextAlign.Center,
+                                maxLines = 2,
+                                fontWeight = FontWeight.Normal,
                             )
                         }
                         lyricWindow.next?.text?.takeIf(String::isNotBlank)?.let { nextLine ->

@@ -76,6 +76,8 @@ fun RecommendationsSheet(
     onlineRecommendations: List<UnifiedTrack>,
     isSearchingOnline: Boolean,
     downloads: List<DownloadEntity>,
+    autoplayEnabled: Boolean = true,
+    onToggleAutoplay: (Boolean) -> Unit = {},
     onPlayOffline: (Track, List<Track>) -> Unit,
     onPlayOnline: (UnifiedTrack) -> Unit,
     onDownloadOnline: (UnifiedTrack) -> Unit,
@@ -269,6 +271,62 @@ fun RecommendationsSheet(
                 }
             } else {
                 // Online YouTube Recommendations
+                GlassCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 4.dp),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(CircleShape)
+                                    .background(if (autoplayEnabled) colors.primary.copy(alpha = 0.2f) else colors.surfaceVariant),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = if (autoplayEnabled) colors.primary else colors.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = stringResource(R.string.infinite_autoplay_title),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.onSurface,
+                                )
+                                Text(
+                                    text = stringResource(R.string.infinite_autoplay_desc),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        androidx.compose.material3.Switch(
+                            checked = autoplayEnabled,
+                            onCheckedChange = onToggleAutoplay,
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(4.dp))
+
                 if (isSearchingOnline && onlineRecommendations.isEmpty()) {
                     Box(
                         modifier = Modifier
