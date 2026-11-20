@@ -53,7 +53,10 @@ class MediaStoreMusicRepository(private val context: Context) {
                         add(MediaStore.Audio.Media.RELATIVE_PATH)
                     }
                 }.toTypedArray()
-                val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND ${MediaStore.Audio.Media.DURATION} >= ?"
+                val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND ${MediaStore.Audio.Media.DURATION} >= ? " +
+                    "AND ${MediaStore.Audio.Media.TITLE} NOT LIKE 'PTT-%' " +
+                    "AND ${MediaStore.Audio.Media.DISPLAY_NAME} NOT LIKE 'PTT-%' " +
+                    "AND ${MediaStore.Audio.Media.DISPLAY_NAME} NOT LIKE 'AUD-%-WA%'"
                 val args = arrayOf(minimumDurationMs.toString())
                 val songs = mutableListOf<Track>()
                 context.contentResolver.query(

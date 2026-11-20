@@ -32,8 +32,16 @@ private object ArtworkPaletteCache {
 fun rememberArtworkPalette(artworkUri: String?): ArtworkPalette? {
     val context = LocalContext.current
     val palette by produceState<ArtworkPalette?>(initialValue = artworkUri?.let(ArtworkPaletteCache.values::get), key1 = artworkUri) {
-        if (artworkUri == null || value != null) return@produceState
-        value = withContext(Dispatchers.IO) {
+        if (artworkUri.isNullOrBlank()) {
+            value = null
+            return@produceState
+        }
+        val cached = ArtworkPaletteCache.values.get(artworkUri)
+        if (cached != null) {
+            value = cached
+            return@produceState
+        }
+        val extracted = withContext(Dispatchers.IO) {
             runCatching {
                 val model: Any = if (artworkUri.startsWith("/") && !artworkUri.startsWith("content://") && !artworkUri.startsWith("file://")) {
                     java.io.File(artworkUri)
@@ -57,6 +65,9 @@ fun rememberArtworkPalette(artworkUri: String?): ArtworkPalette? {
                     light = Color(generated.lightMutedSwatch?.rgb ?: generated.lightVibrantSwatch?.rgb ?: dominant),
                 ).also { ArtworkPaletteCache.values.put(artworkUri, it) }
             }.getOrNull()
+        }
+        if (extracted != null) {
+            value = extracted
         }
     }
     return palette

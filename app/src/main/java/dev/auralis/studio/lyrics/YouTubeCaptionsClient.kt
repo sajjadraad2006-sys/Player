@@ -50,9 +50,9 @@ class YouTubeCaptionsClient {
             json(json)
         }
         install(HttpTimeout) {
-            requestTimeoutMillis = 6_000L
-            connectTimeoutMillis = 4_000L
-            socketTimeoutMillis = 6_000L
+            requestTimeoutMillis = 15_000L
+            connectTimeoutMillis = 8_000L
+            socketTimeoutMillis = 15_000L
         }
     }
 
@@ -141,11 +141,18 @@ class YouTubeCaptionsClient {
         val match = ytWatchRegex.find(uri)
         if (match != null) return match.groupValues[1]
 
+        // Fast zero-latency extraction from YouTube artwork thumbnail URLs
+        val art = (track.customArtworkUri ?: track.artworkUri).orEmpty()
+        val artRegex = Regex("""(?:ytimg\.com/vi/|youtube\.com/vi/)([a-zA-Z0-9_-]{11})""")
+        val artMatch = artRegex.find(art)
+        if (artMatch != null) return artMatch.groupValues[1]
+
         // Search YouTube for video ID
         val norm = LyricsMetadataNormalizer.normalize(track.title, track.artist)
         val searchTerms = listOfNotNull(
             if (norm.artist.isNotBlank()) "${norm.artist} ${norm.title}" else norm.title,
             if (LyricsMetadataNormalizer.isArabic(norm.title)) "${norm.title} كلمات" else null,
+            norm.title,
         ).distinct()
 
         for (q in searchTerms) {
@@ -174,6 +181,7 @@ class YouTubeCaptionsClient {
                 setBody(payload.toString())
                 header("X-YouTube-Client-Name", "1")
                 header("X-YouTube-Client-Version", "2.20240901.00.00")
+                header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
             }
 
             if (!resp.status.isSuccess()) return null
@@ -197,7 +205,7 @@ class YouTubeCaptionsClient {
                         ?.get("simpleText")?.jsonPrimitive?.content.orEmpty()
                     val videoDurationMs = parseClock(lengthText)
 
-                    if (durationMs <= 0 || videoDurationMs <= 0 || abs(durationMs - videoDurationMs) < 12_000L) {
+                    if (durationMs <= 0 || videoDurationMs <= 0 || abs(durationMs - videoDurationMs) < 25_000L) {
                         return videoId
                     }
                 }
@@ -207,52 +215,70 @@ class YouTubeCaptionsClient {
     }
 
     private suspend fun fetchCaptionTrackInfo(videoId: String): CaptionTrackInfo? {
-        val payload = buildJsonObject {
-            put("videoId", videoId)
-            putJsonObject("context") {
-                putJsonObject("client") {
-                    put("clientName", "ANDROID")
-                    put("clientVersion", "19.29.35")
-                    put("hl", "ar")
-                    put("gl", "IQ")
+        // Try WEB client first (most complete and accessible caption track list)
+        val clients = listOf(
+            Triple("WEB", "2.20240901.00.00", "1"),
+            Triple("ANDROID", "19.29.35", "3"),
+        )
+
+        for ((clientName, clientVersion, clientHeaderId) in clients) {
+            try {
+                val payload = buildJsonObject {
+                    put("videoId", videoId)
+                    putJsonObject("context") {
+                        putJsonObject("client") {
+                            put("clientName", clientName)
+                            put("clientVersion", clientVersion)
+                            put("hl", "ar")
+                            put("gl", "IQ")
+                        }
+                    }
                 }
-            }
+
+                val resp = client.post("https://www.youtube.com/youtubei/v1/player") {
+                    contentType(ContentType.Application.Json)
+                    setBody(payload.toString())
+                    header("X-YouTube-Client-Name", clientHeaderId)
+                    header("X-YouTube-Client-Version", clientVersion)
+                    header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                }
+
+                if (!resp.status.isSuccess()) continue
+                val root = json.parseToJsonElement(resp.bodyAsText()).jsonObject
+                val captions = root["captions"]?.jsonObject
+                    ?.get("playerCaptionsTracklistRenderer")?.jsonObject
+                    ?.get("captionTracks")?.jsonArray ?: continue
+
+                if (captions.isEmpty()) continue
+
+                var bestTrack: CaptionTrackInfo? = null
+                var foundArabic = false
+
+                for (item in captions) {
+                    val obj = item.jsonObject
+                    val baseUrl = obj["baseUrl"]?.jsonPrimitive?.content ?: continue
+                    val lang = obj["languageCode"]?.jsonPrimitive?.content.orEmpty()
+                    val isAr = lang.startsWith("ar", ignoreCase = true)
+
+                    if (isAr) {
+                        bestTrack = CaptionTrackInfo(baseUrl, lang, isArabic = true)
+                        foundArabic = true
+                        break
+                    } else if (!foundArabic && bestTrack == null) {
+                        bestTrack = CaptionTrackInfo(baseUrl, lang, isArabic = false)
+                    }
+                }
+
+                if (bestTrack != null) return bestTrack
+            } catch (_: Exception) {}
         }
 
-        val resp = client.post("https://www.youtube.com/youtubei/v1/player") {
-            contentType(ContentType.Application.Json)
-            setBody(payload.toString())
-            header("X-YouTube-Client-Name", "3")
-            header("X-YouTube-Client-Version", "19.29.35")
-        }
-
-        if (!resp.status.isSuccess()) return null
-        val root = json.parseToJsonElement(resp.bodyAsText()).jsonObject
-        val captions = root["captions"]?.jsonObject
-            ?.get("playerCaptionsTracklistRenderer")?.jsonObject
-            ?.get("captionTracks")?.jsonArray ?: return null
-
-        if (captions.isEmpty()) return null
-
-        var bestTrack: CaptionTrackInfo? = null
-        var foundArabic = false
-
-        for (item in captions) {
-            val obj = item.jsonObject
-            val baseUrl = obj["baseUrl"]?.jsonPrimitive?.content ?: continue
-            val lang = obj["languageCode"]?.jsonPrimitive?.content.orEmpty()
-            val isAr = lang.startsWith("ar", ignoreCase = true)
-
-            if (isAr) {
-                bestTrack = CaptionTrackInfo(baseUrl, lang, isArabic = true)
-                foundArabic = true
-                break
-            } else if (!foundArabic && bestTrack == null) {
-                bestTrack = CaptionTrackInfo(baseUrl, lang, isArabic = false)
-            }
-        }
-
-        return bestTrack
+        // Direct timedtext fallback
+        return CaptionTrackInfo(
+            baseUrl = "https://www.youtube.com/api/timedtext?v=$videoId&lang=ar",
+            lang = "ar",
+            isArabic = true,
+        )
     }
 
     private suspend fun fetchAndParseCaptions(captionUrl: String): List<LyricsLine> {

@@ -91,24 +91,58 @@ object VoiceNoteFilter {
         "3gpp",
     )
 
+    private val EXCLUDED_ARTIST_NAMES = setOf(
+        "<unknown>",
+        "unknown artist",
+        "unknown",
+        "music",
+        "voice recorder",
+        "lyrune",
+        "whatsapp",
+        "whatsapp audio",
+        "whatsapp voice notes",
+        "telegram",
+        "telegram audio",
+        "sound recorder",
+        "call recorder",
+        "recorder",
+        "voice memo",
+        "voice notes",
+        "ptt",
+        "aud",
+    )
+
+    private val EXCLUDED_ALBUM_NAMES = setOf(
+        "<unknown>",
+        "unknown album",
+        "unknown",
+        "voice recorder",
+        "whatsapp",
+        "whatsapp audio",
+        "whatsapp voice notes",
+        "telegram",
+        "telegram audio",
+        "recordings",
+        "call recordings",
+        "voice memos",
+        "voice notes",
+        "sound recorder",
+    )
+
     fun hasValidArtist(artist: String?): Boolean {
         if (artist.isNullOrBlank()) return false
-        val trimmed = artist.trim()
-        return !trimmed.equals("<unknown>", ignoreCase = true) &&
-            !trimmed.equals("Unknown Artist", ignoreCase = true) &&
-            !trimmed.equals("Unknown", ignoreCase = true) &&
-            !trimmed.equals("Music", ignoreCase = true) &&
-            !trimmed.equals("Voice Recorder", ignoreCase = true) &&
-            !trimmed.equals("Lyrune", ignoreCase = true)
+        val trimmed = artist.trim().lowercase()
+        return trimmed !in EXCLUDED_ARTIST_NAMES &&
+            !trimmed.startsWith("whatsapp") &&
+            !trimmed.startsWith("telegram")
     }
 
     fun hasValidAlbum(album: String?): Boolean {
         if (album.isNullOrBlank()) return false
-        val trimmed = album.trim()
-        return !trimmed.equals("<unknown>", ignoreCase = true) &&
-            !trimmed.equals("Unknown Album", ignoreCase = true) &&
-            !trimmed.equals("Unknown", ignoreCase = true) &&
-            !trimmed.equals("Voice Recorder", ignoreCase = true)
+        val trimmed = album.trim().lowercase()
+        return trimmed !in EXCLUDED_ALBUM_NAMES &&
+            !trimmed.startsWith("whatsapp") &&
+            !trimmed.startsWith("telegram")
     }
 
     /**
@@ -146,11 +180,26 @@ object VoiceNoteFilter {
             return true
         }
 
+        // 2. Strict WhatsApp / Chat Push-To-Talk Name Matching (always voice note regardless of metadata)
+        if (cleanName.startsWith("PTT-", ignoreCase = true) || cleanTitle.startsWith("PTT-", ignoreCase = true) ||
+            cleanName.matches(Regex("""^AUD-\d{8}-WA\d+.*""", RegexOption.IGNORE_CASE)) ||
+            cleanTitle.matches(Regex("""^AUD-\d{8}-WA\d+.*""", RegexOption.IGNORE_CASE))
+        ) {
+            return true
+        }
+
+        // 3. Strict WhatsApp Voice Notes Directory (always voice notes)
+        if (cleanPath.contains("whatsapp voice notes") || cleanPath.contains("whatsapp/voice notes") ||
+            cleanPath.contains("com.whatsapp/whatsapp/media/whatsapp voice notes") ||
+            cleanPath.contains("com.whatsapp.w4b/whatsapp business/media/whatsapp business voice notes")
+        ) {
+            return true
+        }
+
         val validArtist = hasValidArtist(artist)
         val validAlbum = hasValidAlbum(album)
 
-        // 2. Layer (a): Directory path and bucket exclusion
-        // Files with a valid artist or album are protected from directory/bucket-based exclusion
+        // 4. Broader checks apply when the audio lacks BOTH a legitimate artist AND album
         if (!validArtist && !validAlbum) {
             for (pattern in EXCLUDED_DIRECTORY_PATTERNS) {
                 if (cleanPath.contains(pattern)) {
@@ -160,29 +209,25 @@ object VoiceNoteFilter {
             if (cleanBucket.isNotEmpty() && cleanBucket in EXCLUDED_BUCKET_NAMES) {
                 return true
             }
-        }
 
-        // 3. Layer (c): Known voice note naming patterns + absence of complete metadata
-        // A single with either a valid artist OR a valid album must never be filtered
-        for (pattern in VOICE_NOTE_NAME_PATTERNS) {
-            if (pattern.matcher(cleanName).matches() || pattern.matcher(cleanTitle).matches()) {
-                if (!validArtist && !validAlbum) {
+            for (pattern in VOICE_NOTE_NAME_PATTERNS) {
+                if (pattern.matcher(cleanName).matches() || pattern.matcher(cleanTitle).matches()) {
                     return true
                 }
             }
-        }
 
-        // 4. Layer (b): Short audio recordings (<= 60s) lacking both valid artist and album
-        if (durationMs in 1..60_000L && !validArtist && !validAlbum) {
-            if (ext in setOf("opus", "ogg", "m4a", "wav", "aac")) {
-                return true
+            // Short audio recordings (<= 60s) lacking both valid artist and album
+            if (durationMs in 1..60_000L) {
+                if (ext in setOf("opus", "ogg", "m4a", "wav", "aac")) {
+                    return true
+                }
             }
-        }
 
-        // 5. Layer (d): Mono audio profile check (if channelCount known)
-        if (channelCount == 1 && (!validArtist && !validAlbum) && durationMs < 120_000L) {
-            if (ext in setOf("opus", "ogg", "m4a", "amr", "wav")) {
-                return true
+            // Mono audio profile check (if channelCount known)
+            if (channelCount == 1 && durationMs < 120_000L) {
+                if (ext in setOf("opus", "ogg", "m4a", "amr", "wav")) {
+                    return true
+                }
             }
         }
 

@@ -2,7 +2,13 @@ package dev.auralis.studio.ui.sheets
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -44,6 +50,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,12 +90,12 @@ fun RecommendationPlaylistSheet(
         visible = visible && seedTrack != null,
         enter = slideInVertically(
             initialOffsetY = { it },
-            animationSpec = tween(340, easing = FastOutSlowInEasing),
-        ) + fadeIn(animationSpec = tween(240)),
+            animationSpec = tween(260, easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)),
+        ) + fadeIn(animationSpec = tween(200)),
         exit = slideOutVertically(
             targetOffsetY = { it },
-            animationSpec = tween(280, easing = FastOutSlowInEasing),
-        ) + fadeOut(animationSpec = tween(180)),
+            animationSpec = tween(140, easing = CubicBezierEasing(0.7f, 0f, 0.84f, 0f)),
+        ) + fadeOut(animationSpec = tween(120)),
         modifier = modifier.fillMaxSize(),
     ) {
         val colors = MaterialTheme.colorScheme
@@ -254,13 +262,24 @@ fun RecommendationPlaylistSheet(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     ) {
+                                        val playNowSource = remember { MutableInteractionSource() }
+                                        val isPlayNowPressed by playNowSource.collectIsPressedAsState()
+                                        val playNowScale by animateFloatAsState(
+                                            targetValue = if (isPlayNowPressed) 0.94f else 1f,
+                                            animationSpec = spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow),
+                                            label = "play_now_squash",
+                                        )
+
                                         Button(
                                             onClick = {
                                                 onPlayImmediately(currentSeed, recommendations)
                                                 onDismiss()
                                             },
+                                            interactionSource = playNowSource,
                                             shape = RoundedCornerShape(14.dp),
-                                            modifier = Modifier.weight(1f),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .scale(playNowScale),
                                             colors = ButtonDefaults.buttonColors(containerColor = colors.primary),
                                         ) {
                                             Icon(
@@ -277,13 +296,24 @@ fun RecommendationPlaylistSheet(
                                             )
                                         }
 
+                                        val queueNextSource = remember { MutableInteractionSource() }
+                                        val isQueueNextPressed by queueNextSource.collectIsPressedAsState()
+                                        val queueNextScale by animateFloatAsState(
+                                            targetValue = if (isQueueNextPressed) 0.94f else 1f,
+                                            animationSpec = spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow),
+                                            label = "queue_next_squash",
+                                        )
+
                                         FilledTonalButton(
                                             onClick = {
                                                 onQueueAsNext(recommendations)
                                                 onDismiss()
                                             },
+                                            interactionSource = queueNextSource,
                                             shape = RoundedCornerShape(14.dp),
-                                            modifier = Modifier.weight(1f),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .scale(queueNextScale),
                                         ) {
                                             Icon(
                                                 Icons.AutoMirrored.Filled.QueueMusic,
@@ -332,8 +362,17 @@ fun RecommendationPlaylistSheet(
 
                         // Individual Recommended Tracks
                         itemsIndexed(recommendations, key = { index, track -> "rec_pl_${index}_${track.uri}" }) { index, track ->
+                            val staggerDelay = (index * 35).coerceAtMost(280)
+                            val itemAlpha by animateFloatAsState(
+                                targetValue = 1f,
+                                animationSpec = tween(durationMillis = 180, delayMillis = staggerDelay),
+                                label = "rec_item_alpha_$index",
+                            )
+
                             GlassCard(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .graphicsLayer { alpha = itemAlpha },
                                 onClick = {
                                     onPlayTrack(track)
                                     onDismiss()
@@ -376,42 +415,42 @@ fun RecommendationPlaylistSheet(
                                         )
                                     }
 
-                                    // Quick action buttons: Play Now, Queue Next, Add to Queue
+                                    // Quick action buttons: Play Now, Queue Next, Add to Queue (Fitts's law: 40dp minimum)
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         IconButton(
                                             onClick = {
                                                 onPlayTrack(track)
                                                 onDismiss()
                                             },
-                                            modifier = Modifier.size(34.dp),
+                                            modifier = Modifier.size(40.dp),
                                         ) {
                                             Icon(
                                                 Icons.Default.PlayArrow,
                                                 contentDescription = stringResource(R.string.play_now),
                                                 tint = colors.primary,
-                                                modifier = Modifier.size(20.dp),
+                                                modifier = Modifier.size(22.dp),
                                             )
                                         }
                                         IconButton(
                                             onClick = { onPlayNextTrack(track) },
-                                            modifier = Modifier.size(34.dp),
+                                            modifier = Modifier.size(40.dp),
                                         ) {
                                             Icon(
                                                 Icons.AutoMirrored.Filled.QueueMusic,
                                                 contentDescription = stringResource(R.string.play_next),
                                                 tint = colors.onSurfaceVariant,
-                                                modifier = Modifier.size(18.dp),
+                                                modifier = Modifier.size(20.dp),
                                             )
                                         }
                                         IconButton(
                                             onClick = { onAddToQueue(track) },
-                                            modifier = Modifier.size(34.dp),
+                                            modifier = Modifier.size(40.dp),
                                         ) {
                                             Icon(
                                                 Icons.AutoMirrored.Filled.PlaylistAdd,
                                                 contentDescription = stringResource(R.string.add_to_queue),
                                                 tint = colors.onSurfaceVariant,
-                                                modifier = Modifier.size(18.dp),
+                                                modifier = Modifier.size(20.dp),
                                             )
                                         }
                                     }

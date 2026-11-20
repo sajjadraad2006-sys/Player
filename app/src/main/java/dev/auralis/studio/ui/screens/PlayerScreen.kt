@@ -915,6 +915,12 @@ private fun LyricsPage(
         mutableStateOf(true)
     }
 
+    LaunchedEffect(lyrics.lines) {
+        if (lyrics.lines.isNotEmpty() && lyrics.lines.none { !it.translation.isNullOrBlank() }) {
+            onRequestTranslation()
+        }
+    }
+
     var smoothPositionMs by remember(positionMs) { mutableLongStateOf(positionMs) }
     LaunchedEffect(state, lyricsClock) {
         if (state is LyricsUiState.Found) {
@@ -1199,14 +1205,17 @@ private fun LyricsPage(
                                     Text(stringResource(R.string.choose_lyrics_version), style = MaterialTheme.typography.labelSmall)
                                 }
                                 Spacer(Modifier.width(8.dp))
+                                val hasTranslations = lyrics.lines.any { !it.translation.isNullOrBlank() }
                                 IconButton(
                                     onClick = {
-                                        showTranslation = !showTranslation
-                                        if (showTranslation && lyrics.lines.none { !it.translation.isNullOrBlank() }) {
+                                        if (!hasTranslations) {
+                                            showTranslation = true
                                             onRequestTranslation()
+                                        } else {
+                                            showTranslation = !showTranslation
                                         }
                                     },
-                                    modifier = Modifier.size(32.dp),
+                                    modifier = Modifier.size(36.dp),
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Translate,

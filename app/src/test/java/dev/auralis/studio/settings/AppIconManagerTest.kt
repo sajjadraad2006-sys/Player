@@ -42,7 +42,7 @@ class AppIconManagerTest {
         val defaultIcon = AppIconManager.availableIcons.firstOrNull { it.id == "default" }
         assertNotNull("Default icon must exist", defaultIcon)
         assertEquals("dev.auralis.studio.MainActivityDefault", defaultIcon?.componentName)
-        assertEquals(R.mipmap.ic_launcher, defaultIcon?.iconRes)
+        assertEquals(R.drawable.ic_icon_default, defaultIcon?.iconRes)
     }
 
     @Test

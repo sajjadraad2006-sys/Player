@@ -300,6 +300,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isSearchingPlaylists: StateFlow<Boolean> = _isSearchingPlaylists.asStateFlow()
 
     private val playedOnlineIdentities = ConcurrentHashMap.newKeySet<String>()
+    private val playedOnlineHistory = java.util.ArrayDeque<Track>()
     private val resolvedOnlineTracks = ConcurrentHashMap<String, Track>()
     private var isResolvingNextTrack = false
     private var lastResolvedTrackIdentity: String? = null
@@ -630,6 +631,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             if (trackToPlay != null) {
+                currentPlayingOnlineTrack.value?.let { playedOnlineHistory.addLast(it) }
                 resolvedOnlineTracks[trackToPlay.uri] = trackToPlay
                 currentPlayingOnlineTrack.value = trackToPlay
                 playback.play(trackToPlay, listOf(trackToPlay))
@@ -863,12 +865,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val player = playback.controllerInstance
             if (player != null && player.hasNextMediaItem() && player.currentMediaItemIndex < player.mediaItemCount - 1) {
+                currentPlayingOnlineTrack.value?.let { playedOnlineHistory.addLast(it) }
                 player.seekToNextMediaItem()
                 return@launch
             }
 
             val session = _activePlaylistSession.value
             if (session != null && session.currentIndex < session.allTracks.size - 1) {
+                currentPlayingOnlineTrack.value?.let { playedOnlineHistory.addLast(it) }
                 session.currentIndex++
                 val nextRecording = session.allTracks[session.currentIndex]
                 _onlineUpNextQueue.value = session.allTracks.drop(session.currentIndex + 1)
@@ -886,6 +890,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             val nextRecording = _onlineUpNextQueue.value.firstOrNull()
             if (nextRecording != null) {
+                currentPlayingOnlineTrack.value?.let { playedOnlineHistory.addLast(it) }
                 _onlineUpNextQueue.value = _onlineUpNextQueue.value.drop(1)
                 val resolved = withContext(Dispatchers.IO) {
                     resolveOnlineTrackStream(nextRecording)
@@ -908,6 +913,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun skipPrevious() {
         viewModelScope.launch {
+            val player = playback.controllerInstance
+            // If the song has been playing for more than 3 seconds, standard media player rule: restart track
+            val currentPos = player?.currentPosition ?: 0L
+            if (currentPos > 3000L) {
+                playback.seekTo(0L)
+                return@launch
+            }
+
+            // Check if player has a previous track in its current playlist queue
+            if (player != null && player.hasPreviousMediaItem() && player.currentMediaItemIndex > 0) {
+                player.seekToPreviousMediaItem()
+                return@launch
+            }
+
+            // Check if in an active online playlist session
             val session = _activePlaylistSession.value
             if (session != null && session.currentIndex > 0) {
                 session.currentIndex--
@@ -925,6 +945,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
+            // Check if we have history from played online / recommendation tracks
+            if (playedOnlineHistory.isNotEmpty()) {
+                val prevTrack = playedOnlineHistory.removeLast()
+                currentPlayingOnlineTrack.value = prevTrack
+                playback.play(prevTrack, listOf(prevTrack))
+                triggerPreFetchNextTrack()
+                return@launch
+            }
+
+            // Fallback to playback controller previous or seek to start
             playback.previous()
         }
     }

@@ -24,7 +24,7 @@ object AppIconManager {
             id = "default",
             titleRes = R.string.icon_default,
             defaultName = "Lyrune Default",
-            iconRes = R.mipmap.ic_launcher,
+            iconRes = R.drawable.ic_icon_default,
             componentName = "dev.auralis.studio.MainActivityDefault",
         ),
         AppIconOption(
