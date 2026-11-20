@@ -551,6 +551,8 @@
     <string name="lyrics_translation_desc">Show translated Arabic lyrics underneath original song captions</string>
     <string name="load_more">Load more</string>
     <string name="loading_more">Loading more results…</string>
+    <string name="add_custom_icon">Add Custom Icon</string>
+    <string name="custom_icon">Custom</string>
     <string name="save">Save</string>
     <string name="edit">Edit</string>
 </resources>

@@ -315,6 +315,8 @@ open class YouTubeCatalogProvider(
                 put("continuation", continuationToken)
             } else {
                 put("query", query)
+                // Filter strictly to VIDEOS (EgIQAQ%3D%3D is the InnerTube protobuf filter for type=video, preventing channel cards)
+                put("params", "EgIQAQ%3D%3D")
             }
         }
 

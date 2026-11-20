@@ -252,7 +252,7 @@ object CanonicalSearchRanker {
 
         var score = 0
 
-        // 1. Title matching
+        // 1. Title matching (Highest priority - searches for video/track title)
         val titleRatio = SearchNormalization.matchRatio(normTitle, normQuery)
         if (normTitle == normQuery) {
             score += 10_000
@@ -264,17 +264,34 @@ object CanonicalSearchRanker {
             score += 3_000
         }
 
-        // 2. Artist matching
+        // Cross-field multi-token match (Artist + Title or Title + Artist)
+        val queryWords = normQuery.split(' ').filter { it.isNotBlank() }
+        if (queryWords.size > 1) {
+            val combinedArtistTitle = "$normArtist $normTitle"
+            val combinedTitleArtist = "$normTitle $normArtist"
+            if (combinedArtistTitle.contains(normQuery) || combinedTitleArtist.contains(normQuery)) {
+                score += 7_000
+            }
+        }
+
+        // Individual title word match bonus so video title always outranks channel name
+        val titleTokens = normTitle.split(' ').filter { it.isNotBlank() }
+        val matchedTitleTokens = queryWords.count { qWord -> titleTokens.any { tWord -> tWord.contains(qWord) || qWord.contains(tWord) } }
+        if (matchedTitleTokens > 0) {
+            score += matchedTitleTokens * 1_200
+        }
+
+        // 2. Artist/Channel matching (Supplementary priority)
         if (normArtist.isNotEmpty()) {
             val artistRatio = SearchNormalization.matchRatio(normArtist, normQuery)
             if (normArtist == normQuery) {
-                score += 1_200
-            } else if (normArtist.startsWith(normQuery)) {
                 score += 800
+            } else if (normArtist.startsWith(normQuery)) {
+                score += 500
             } else if (normArtist.contains(normQuery)) {
-                score += 400
+                score += 300
             } else if (artistRatio >= 1.0f) {
-                score += 350
+                score += 250
             }
         }
 

@@ -559,6 +559,8 @@
     <string name="lyrics_translation_desc">عرض الترجمة العربية للكلمات مباشرة أسفل السطر الأصلي</string>
     <string name="load_more">تحميل المزيد</string>
     <string name="loading_more">جارٍ جلب المزيد من النتائج…</string>
+    <string name="add_custom_icon">إضافة أيقونة مخصصة</string>
+    <string name="custom_icon">مخصصة</string>
     <string name="save">حفظ</string>
     <string name="edit">تعديل</string>
 </resources>

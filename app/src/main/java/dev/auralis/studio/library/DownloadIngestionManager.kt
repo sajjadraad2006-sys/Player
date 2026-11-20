@@ -361,15 +361,36 @@ class DownloadIngestionManager(
                         .url(artUrl)
                         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
                         .build()
-                    artworkClient.newCall(artReq).execute().use { resp ->
-                        if (resp.isSuccessful) {
-                            resp.body?.byteStream()?.use { input ->
-                                coverFile.outputStream().use { output ->
-                                    input.copyTo(output)
+                    val artBytes = artworkClient.newCall(artReq).execute().use { resp ->
+                        if (resp.isSuccessful) resp.body?.bytes() else null
+                    }
+                    if (artBytes != null && artBytes.isNotEmpty()) {
+                        coverFile.writeBytes(artBytes)
+                        if (coverFile.length() > 0) {
+                            localArtworkPath = Uri.fromFile(coverFile).toString()
+                        }
+
+                        // PERSIST COMPANION COVER TO EXTERNAL STORAGE (Survives app uninstallation)
+                        val baseName = fileName.substringBeforeLast('.')
+                        val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+                        val lyruneDir = File(musicDir, "Lyrune").apply { if (!exists()) mkdirs() }
+                        val publicCover = File(lyruneDir, "$baseName.cover.jpg")
+                        runCatching {
+                            publicCover.writeBytes(artBytes)
+                            MediaScannerConnection.scanFile(context, arrayOf(publicCover.absolutePath), arrayOf("image/jpeg"), null)
+                        }
+
+                        // Also persist to custom SAF directory if applicable
+                        if (customFolderUri != null) {
+                            runCatching {
+                                val treeUri = Uri.parse(customFolderUri)
+                                val docTree = DocumentFile.fromTreeUri(context, treeUri)
+                                val coverDoc = docTree?.createFile("image/jpeg", "$baseName.cover.jpg")
+                                coverDoc?.let { doc ->
+                                    context.contentResolver.openOutputStream(doc.uri)?.use { out ->
+                                        out.write(artBytes)
+                                    }
                                 }
-                            }
-                            if (coverFile.length() > 0) {
-                                localArtworkPath = Uri.fromFile(coverFile).toString()
                             }
                         }
                     }
@@ -456,6 +477,16 @@ class DownloadIngestionManager(
         if (coverFile.exists()) {
             coverFile.delete()
         }
+
+        // Delete persistent public companion cover
+        val baseName = if (path.startsWith("content://")) {
+            entity.fileName.substringBeforeLast('.')
+        } else {
+            File(path).nameWithoutExtension
+        }
+        val lyruneDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Lyrune")
+        val companionCover = File(lyruneDir, "$baseName.cover.jpg")
+        if (companionCover.exists()) companionCover.delete()
 
         // Delete Room download entity
         downloadsDao.deleteById(entity.id)

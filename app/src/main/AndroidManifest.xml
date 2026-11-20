@@ -46,8 +46,8 @@
             android:name=".MainActivityAliasAzure"
             android:enabled="false"
             android:exported="true"
-            android:icon="@drawable/ic_icon_azure"
-            android:roundIcon="@drawable/ic_icon_azure"
+            android:icon="@mipmap/ic_launcher_azure"
+            android:roundIcon="@mipmap/ic_launcher_azure"
             android:label="@string/app_name"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -60,8 +60,8 @@
             android:name=".MainActivityAliasSilver"
             android:enabled="false"
             android:exported="true"
-            android:icon="@drawable/ic_icon_silver"
-            android:roundIcon="@drawable/ic_icon_silver"
+            android:icon="@mipmap/ic_launcher_silver"
+            android:roundIcon="@mipmap/ic_launcher_silver"
             android:label="@string/app_name"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -74,8 +74,8 @@
             android:name=".MainActivityAliasOrange"
             android:enabled="false"
             android:exported="true"
-            android:icon="@drawable/ic_icon_orange"
-            android:roundIcon="@drawable/ic_icon_orange"
+            android:icon="@mipmap/ic_launcher_orange"
+            android:roundIcon="@mipmap/ic_launcher_orange"
             android:label="@string/app_name"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -88,8 +88,8 @@
             android:name=".MainActivityAliasGolden"
             android:enabled="false"
             android:exported="true"
-            android:icon="@drawable/ic_icon_golden"
-            android:roundIcon="@drawable/ic_icon_golden"
+            android:icon="@mipmap/ic_launcher_golden"
+            android:roundIcon="@mipmap/ic_launcher_golden"
             android:label="@string/app_name"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -102,8 +102,8 @@
             android:name=".MainActivityAliasCyan"
             android:enabled="false"
             android:exported="true"
-            android:icon="@drawable/ic_icon_cyan"
-            android:roundIcon="@drawable/ic_icon_cyan"
+            android:icon="@mipmap/ic_launcher_cyan"
+            android:roundIcon="@mipmap/ic_launcher_cyan"
             android:label="@string/app_name"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -116,8 +116,8 @@
             android:name=".MainActivityAliasGradient"
             android:enabled="false"
             android:exported="true"
-            android:icon="@drawable/ic_icon_gradient"
-            android:roundIcon="@drawable/ic_icon_gradient"
+            android:icon="@mipmap/ic_launcher_gradient"
+            android:roundIcon="@mipmap/ic_launcher_gradient"
             android:label="@string/app_name"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -130,8 +130,8 @@
             android:name=".MainActivityAliasGreen"
             android:enabled="false"
             android:exported="true"
-            android:icon="@drawable/ic_icon_green"
-            android:roundIcon="@drawable/ic_icon_green"
+            android:icon="@mipmap/ic_launcher_green"
+            android:roundIcon="@mipmap/ic_launcher_green"
             android:label="@string/app_name"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -144,8 +144,8 @@
             android:name=".MainActivityAliasPink"
             android:enabled="false"
             android:exported="true"
-            android:icon="@drawable/ic_icon_pink"
-            android:roundIcon="@drawable/ic_icon_pink"
+            android:icon="@mipmap/ic_launcher_pink"
+            android:roundIcon="@mipmap/ic_launcher_pink"
             android:label="@string/app_name"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -158,8 +158,8 @@
             android:name=".MainActivityAliasPurple"
             android:enabled="false"
             android:exported="true"
-            android:icon="@drawable/ic_icon_purple"
-            android:roundIcon="@drawable/ic_icon_purple"
+            android:icon="@mipmap/ic_launcher_purple"
+            android:roundIcon="@mipmap/ic_launcher_purple"
             android:label="@string/app_name"
             android:targetActivity=".MainActivity">
             <intent-filter>

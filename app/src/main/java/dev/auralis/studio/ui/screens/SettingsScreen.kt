@@ -1,9 +1,22 @@
 package dev.auralis.studio.ui.screens
 
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.material.icons.filled.AddPhotoAlternate
+import coil.compose.AsyncImage
+import java.io.File
+import java.io.FileOutputStream
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -435,17 +448,146 @@ private fun AppearanceSection(
                     Spacer(Modifier.height(10.dp))
 
                     val context = LocalContext.current
+                    var customIconFile by remember {
+                        mutableStateOf(File(context.filesDir, "custom_app_icon.png").takeIf { it.exists() && it.length() > 0 })
+                    }
+                    val pickCustomIconLauncher = rememberLauncherForActivityResult(
+                        contract = ActivityResultContracts.GetContent()
+                    ) { uri: android.net.Uri? ->
+                        if (uri != null) {
+                            runCatching {
+                                context.contentResolver.openInputStream(uri)?.use { input ->
+                                    val outFile = File(context.filesDir, "custom_app_icon.png")
+                                    FileOutputStream(outFile).use { output ->
+                                        input.copyTo(output)
+                                    }
+                                    customIconFile = outFile
+                                    Toast.makeText(context, context.getString(R.string.custom_icon), Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    }
+
                     LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        contentPadding = PaddingValues(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        contentPadding = PaddingValues(vertical = 6.dp),
                     ) {
-                        items(AppIconManager.availableIcons, key = { it.id }) { iconOption ->
-                            val isSelected = iconOption.id == activeAppIconAlias
+                        // 1. Add Custom Icon Tile
+                        item(key = "add_custom_icon") {
+                            val addInteractionSource = remember { MutableInteractionSource() }
+                            val isAddPressed by addInteractionSource.collectIsPressedAsState()
+                            val addScaleX by animateFloatAsState(if (isAddPressed) 1.08f else 1f, spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMedium))
+                            val addScaleY by animateFloatAsState(if (isAddPressed) 0.92f else 1f, spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMedium))
+
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable {
+                                    .graphicsLayer { scaleX = addScaleX; scaleY = addScaleY }
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .clickable(interactionSource = addInteractionSource, indication = null) {
+                                        pickCustomIconLauncher.launch("image/*")
+                                    }
+                                    .padding(2.dp)
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(64.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(colors.primary.copy(alpha = 0.12f))
+                                        .border(
+                                            width = 1.5.dp,
+                                            color = colors.primary.copy(alpha = 0.6f),
+                                            shape = RoundedCornerShape(16.dp)
+                                        )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AddPhotoAlternate,
+                                        contentDescription = stringResource(R.string.add_custom_icon),
+                                        tint = colors.primary,
+                                        modifier = Modifier.size(28.dp),
+                                    )
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    text = stringResource(R.string.add_custom_icon),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = colors.primary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.width(68.dp),
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        }
+
+                        // 2. Custom Icon Card (if user has selected a custom photo)
+                        customIconFile?.let { cFile ->
+                            item(key = "custom_chosen_icon") {
+                                val customInteractionSource = remember { MutableInteractionSource() }
+                                val isCustomPressed by customInteractionSource.collectIsPressedAsState()
+                                val customScaleX by animateFloatAsState(if (isCustomPressed) 1.08f else 1f, spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMedium))
+                                val customScaleY by animateFloatAsState(if (isCustomPressed) 0.92f else 1f, spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMedium))
+
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .graphicsLayer { scaleX = customScaleX; scaleY = customScaleY }
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .clickable(interactionSource = customInteractionSource, indication = null) {
+                                            pickCustomIconLauncher.launch("image/*")
+                                        }
+                                        .padding(2.dp)
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .size(64.dp)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(colors.surfaceVariant)
+                                            .border(
+                                                width = 2.5.dp,
+                                                color = colors.primary,
+                                                shape = RoundedCornerShape(16.dp)
+                                            )
+                                    ) {
+                                        AsyncImage(
+                                            model = cFile,
+                                            contentDescription = stringResource(R.string.custom_icon),
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize(),
+                                        )
+                                    }
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        text = stringResource(R.string.custom_icon),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = colors.primary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.width(68.dp),
+                                        textAlign = TextAlign.Center,
+                                    )
+                                }
+                            }
+                        }
+
+                        // 3. Preset Adaptive Icons (Edge-to-edge, Zoomed in, Squash & Stretch UX motion)
+                        items(AppIconManager.availableIcons, key = { it.id }) { iconOption ->
+                            val isSelected = iconOption.id == activeAppIconAlias
+                            val itemInteractionSource = remember { MutableInteractionSource() }
+                            val isPressed by itemInteractionSource.collectIsPressedAsState()
+                            val scaleX by animateFloatAsState(if (isPressed) 1.08f else 1f, spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMedium))
+                            val scaleY by animateFloatAsState(if (isPressed) 0.92f else 1f, spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMedium))
+
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .graphicsLayer { this.scaleX = scaleX; this.scaleY = scaleY }
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .clickable(interactionSource = itemInteractionSource, indication = null) {
                                         if (!isSelected) {
                                             val changed = AppIconManager.setAppIcon(context, iconOption.id)
                                             if (changed) {
@@ -454,46 +596,54 @@ private fun AppearanceSection(
                                             }
                                         }
                                     }
-                                    .padding(4.dp)
+                                    .padding(2.dp)
                             ) {
                                 Box(
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier
-                                        .size(54.dp)
-                                        .clip(RoundedCornerShape(14.dp))
+                                        .size(64.dp)
+                                        .clip(RoundedCornerShape(16.dp))
                                         .background(if (isSelected) colors.primary.copy(alpha = 0.15f) else colors.surfaceVariant)
                                         .border(
                                             width = if (isSelected) 2.5.dp else 1.dp,
-                                            color = if (isSelected) colors.primary else colors.outline.copy(alpha = 0.3f),
-                                            shape = RoundedCornerShape(14.dp)
+                                            color = if (isSelected) colors.primary else colors.outline.copy(alpha = 0.25f),
+                                            shape = RoundedCornerShape(16.dp)
                                         )
                                 ) {
-                                    Image(
-                                        painter = painterResource(iconOption.iconRes),
+                                    androidx.compose.foundation.Image(
+                                        painter = androidx.compose.ui.res.painterResource(iconOption.iconRes),
                                         contentDescription = stringResource(iconOption.titleRes),
+                                        contentScale = ContentScale.Crop,
                                         modifier = Modifier
-                                            .size(40.dp)
-                                            .clip(RoundedCornerShape(10.dp)),
+                                            .fillMaxSize()
+                                            .clip(RoundedCornerShape(16.dp)),
                                     )
                                     if (isSelected) {
                                         Box(
                                             modifier = Modifier
                                                 .fillMaxSize()
-                                                .background(colors.primary.copy(alpha = 0.25f)),
+                                                .background(colors.primary.copy(alpha = 0.22f)),
                                             contentAlignment = Alignment.TopEnd
                                         ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = null,
-                                                tint = colors.primary,
+                                            Box(
                                                 modifier = Modifier
-                                                    .size(16.dp)
-                                                    .padding(2.dp)
-                                            )
+                                                    .padding(4.dp)
+                                                    .size(20.dp)
+                                                    .clip(CircleShape)
+                                                    .background(colors.primary),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    tint = colors.onPrimary,
+                                                    modifier = Modifier.size(13.dp)
+                                                )
+                                            }
                                         }
                                     }
                                 }
-                                Spacer(Modifier.height(4.dp))
+                                Spacer(Modifier.height(6.dp))
                                 Text(
                                     text = stringResource(iconOption.titleRes),
                                     style = MaterialTheme.typography.labelSmall,
@@ -501,7 +651,7 @@ private fun AppearanceSection(
                                     color = if (isSelected) colors.primary else colors.onSurfaceVariant,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.width(64.dp),
+                                    modifier = Modifier.width(68.dp),
                                     textAlign = TextAlign.Center,
                                 )
                             }

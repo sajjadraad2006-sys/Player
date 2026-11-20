@@ -111,6 +111,7 @@ class MediaStoreMusicRepository(private val context: Context) {
                         }
 
                         val id = cursor.getLong(idIndex)
+                        val persistentCover = resolvePersistentCoverUri(filePath, displayName)
                         songs += Track(
                             id = id,
                             uri = ContentUris.withAppendedId(collection, id).toString(),
@@ -125,6 +126,7 @@ class MediaStoreMusicRepository(private val context: Context) {
                             sizeBytes = cursor.getLong(sizeIndex),
                             trackNumber = cursor.getInt(trackIndex).takeIf { it > 0 },
                             year = cursor.getInt(yearIndex).takeIf { it > 0 },
+                            customArtworkUri = persistentCover,
                         )
                     }
                 }
@@ -133,6 +135,42 @@ class MediaStoreMusicRepository(private val context: Context) {
                 songs
             }
         }
+    }
+
+    private fun resolvePersistentCoverUri(filePath: String?, displayName: String): String? {
+        val lyruneDir = java.io.File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MUSIC), "Lyrune")
+        val baseName = displayName.substringBeforeLast('.').ifBlank { displayName }
+
+        // 1. Check companion cover in Lyrune public folder (persists across reinstall)
+        if (lyruneDir.exists() && baseName.isNotBlank()) {
+            val candidates = listOf(
+                java.io.File(lyruneDir, "$baseName.cover.jpg"),
+                java.io.File(lyruneDir, "$baseName.cover.png"),
+                java.io.File(lyruneDir, "$baseName.jpg"),
+                java.io.File(lyruneDir, "$baseName.png"),
+            )
+            val match = candidates.firstOrNull { it.exists() && it.length() > 200 }
+            if (match != null) return android.net.Uri.fromFile(match).toString()
+        }
+
+        // 2. Check sibling cover in audio file parent folder
+        if (!filePath.isNullOrBlank()) {
+            val file = java.io.File(filePath)
+            val parent = file.parentFile
+            if (parent != null && parent.exists()) {
+                val fBase = file.nameWithoutExtension
+                val candidates = listOf(
+                    java.io.File(parent, "$fBase.cover.jpg"),
+                    java.io.File(parent, "$fBase.cover.png"),
+                    java.io.File(parent, "$fBase.jpg"),
+                    java.io.File(parent, "cover.jpg"),
+                    java.io.File(parent, "folder.jpg"),
+                )
+                val match = candidates.firstOrNull { it.exists() && it.length() > 200 }
+                if (match != null) return android.net.Uri.fromFile(match).toString()
+            }
+        }
+        return null
     }
 
     fun track(uri: String): Track? {
