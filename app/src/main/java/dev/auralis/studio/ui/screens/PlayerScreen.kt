@@ -20,8 +20,14 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Slider
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -392,70 +398,90 @@ fun PlayerScreen(
                 }
             }
 
-            // ── Explicit view selector: no ambiguous dots/icons ──────────────
+            // ── Clean Floating Segmented View Selector Dock ──────────────
             val logicalPage = if (isLtr) pagerState.currentPage else PAGE_COUNT - 1 - pagerState.currentPage
-            Row(
-                Modifier
+            Box(
+                modifier = Modifier
                     .fillMaxWidth()
                     .swipeUpToTrigger { onOpenRecommendations() }
-                    .padding(horizontal = 20.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment     = Alignment.CenterVertically,
+                    .padding(horizontal = 24.dp, vertical = 4.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                listOf(
-                    PAGE_LYRICS to stringResource(R.string.lyrics),
-                    PAGE_PLAYER to stringResource(R.string.now_playing),
-                    PAGE_VISUALIZER to stringResource(R.string.spectrum),
-                ).forEach { (page, label) ->
-                    AuralisFilterChip(
-                        selected = logicalPage == page,
-                        onClick = {
-                            scope.launch {
-                                pagerState.animateScrollToPage(if (isLtr) page else PAGE_COUNT - 1 - page)
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = colors.surfaceContainerHighest.copy(alpha = 0.65f),
+                    border = BorderStroke(
+                        1.dp,
+                        Brush.verticalGradient(
+                            listOf(Color.White.copy(alpha = 0.18f), Color.White.copy(alpha = 0.03f)),
+                        ),
+                    ),
+                    modifier = Modifier.height(36.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        listOf(
+                            PAGE_LYRICS to stringResource(R.string.lyrics),
+                            PAGE_PLAYER to stringResource(R.string.now_playing),
+                            PAGE_VISUALIZER to stringResource(R.string.spectrum),
+                        ).forEach { (page, label) ->
+                            val isSelected = logicalPage == page
+                            Surface(
+                                onClick = {
+                                    scope.launch {
+                                        pagerState.animateScrollToPage(if (isLtr) page else PAGE_COUNT - 1 - page)
+                                    }
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (isSelected) colors.primary.copy(alpha = 0.22f) else Color.Transparent,
+                                modifier = Modifier.fillMaxHeight(),
+                            ) {
+                                Box(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) colors.primary else colors.onSurfaceVariant.copy(alpha = 0.75f),
+                                    )
+                                }
                             }
-                        },
-                        label = label,
-                        modifier = Modifier.padding(horizontal = 4.dp),
-                    )
+                        }
+                    }
                 }
             }
 
-            // Pull-down / swipe recommendations grabber bar (supports tap AND swipe up gesture)
+            // Pull-down / swipe recommendations subtle hint
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .swipeUpToTrigger { onOpenRecommendations() }
                     .clickable { onOpenRecommendations() }
-                    .padding(bottom = 2.dp),
+                    .padding(bottom = 4.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(colors.surfaceVariant.copy(alpha = 0.35f))
-                        .padding(horizontal = 14.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
                 ) {
                     Icon(
                         imageVector = Icons.Default.KeyboardArrowUp,
                         contentDescription = null,
-                        tint = colors.primary,
-                        modifier = Modifier.size(15.dp),
+                        tint = colors.primary.copy(alpha = 0.75f),
+                        modifier = Modifier.size(14.dp),
                     )
-                    Spacer(Modifier.width(3.dp))
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = null,
-                        tint = colors.primary,
-                        modifier = Modifier.size(13.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(2.dp))
                     Text(
                         text = stringResource(R.string.smart_recommendations),
                         style = MaterialTheme.typography.labelSmall,
-                        color = colors.onSurfaceVariant,
-                        fontSize = 11.sp,
+                        color = colors.onSurfaceVariant.copy(alpha = 0.70f),
+                        fontSize = 10.5.sp,
                     )
                 }
             }
@@ -1051,6 +1077,111 @@ private fun PlayerPage(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LyricsOffsetSheet(
+    currentOffsetMs: Long,
+    onOffsetChange: (Long) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = colors.surfaceContainerHighest,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp, top = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.lyrics_sync),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = colors.onSurface,
+            )
+
+            Text(
+                text = if (currentOffsetMs == 0L) "0 ms (${stringResource(R.string.synced_badge)})"
+                else "${if (currentOffsetMs > 0) "+" else ""}$currentOffsetMs ms",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.ExtraBold,
+                color = if (currentOffsetMs != 0L) colors.primary else colors.onSurface,
+            )
+
+            Slider(
+                value = currentOffsetMs.toFloat().coerceIn(-5000f, 5000f),
+                onValueChange = { onOffsetChange(it.toLong()) },
+                valueRange = -5000f..5000f,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            // Fine adjustments (- / +)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                FilledTonalIconButton(
+                    onClick = { onOffsetChange((currentOffsetMs - 100L).coerceIn(-10000L, 10000L)) },
+                    modifier = Modifier.size(44.dp),
+                ) {
+                    Text("-", fontWeight = FontWeight.Bold, fontSize = 22.sp)
+                }
+
+                Text(
+                    stringResource(R.string.lyrics_offset_value, currentOffsetMs),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.onSurfaceVariant,
+                )
+
+                FilledTonalIconButton(
+                    onClick = { onOffsetChange((currentOffsetMs + 100L).coerceIn(-10000L, 10000L)) },
+                    modifier = Modifier.size(44.dp),
+                ) {
+                    Text("+", fontWeight = FontWeight.Bold, fontSize = 22.sp)
+                }
+            }
+
+            // Quick jumps
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                listOf(
+                    -1000L to "-1s",
+                    -500L to "-500ms",
+                    -100L to "-100ms",
+                    0L to stringResource(R.string.reset),
+                    100L to "+100ms",
+                    500L to "+500ms",
+                    1000L to "+1s",
+                ).forEach { (delta, label) ->
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = {
+                            if (delta == 0L) onOffsetChange(0L)
+                            else onOffsetChange((currentOffsetMs + delta).coerceIn(-10000L, 10000L))
+                        },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 6.dp),
+                    ) {
+                        Text(
+                            text = label,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            fontWeight = if (delta == 0L) FontWeight.Bold else FontWeight.Normal,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Lyrics Page (left)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1077,6 +1208,7 @@ private fun LyricsPage(
     val lyrics = (state as? LyricsUiState.Found)?.lyrics ?: SyncedLyrics.EMPTY
     var manualQuery by remember { mutableStateOf("") }
     var showCandidatesSheet by remember { mutableStateOf(false) }
+    var showOffsetSheet by remember { mutableStateOf(false) }
     var showShareLyricsDialog by remember { mutableStateOf(false) }
     var showTranslation by rememberSaveable(lyrics.lines) {
         mutableStateOf(true)
@@ -1225,6 +1357,14 @@ private fun LyricsPage(
         }
     }
 
+    if (showOffsetSheet) {
+        LyricsOffsetSheet(
+            currentOffsetMs = lyrics.offsetMs,
+            onOffsetChange = onOffsetChange,
+            onDismiss = { showOffsetSheet = false },
+        )
+    }
+
     if (state !is LyricsUiState.Found) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
@@ -1285,128 +1425,9 @@ private fun LyricsPage(
         Box(Modifier.fillMaxSize()) {
             LazyColumn(
                 state = listState,
-                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 140.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 76.dp, bottom = 140.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                if (lyrics.synced) {
-                    item(key = "offset") {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(colors.surfaceVariant.copy(alpha = 0.35f))
-                                .padding(vertical = 10.dp, horizontal = 12.dp),
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
-                            ) {
-                                IconButton(
-                                    onClick = { onOffsetChange(lyrics.offsetMs - 500L) },
-                                    modifier = Modifier.size(32.dp),
-                                ) {
-                                    Text("-", fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = colors.primary)
-                                }
-
-                                Spacer(Modifier.width(10.dp))
-
-                                Text(
-                                    text = stringResource(R.string.lyrics_offset_value, lyrics.offsetMs),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = colors.onSurface,
-                                )
-
-                                Spacer(Modifier.width(10.dp))
-
-                                IconButton(
-                                    onClick = { onOffsetChange(lyrics.offsetMs + 500L) },
-                                    modifier = Modifier.size(32.dp),
-                                ) {
-                                    Text("+", fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = colors.primary)
-                                }
-                            }
-
-                            Spacer(Modifier.height(6.dp))
-
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs - 1000L) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                                    Text("-1s", fontSize = 11.sp)
-                                }
-                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs - 500L) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                                    Text("-500ms", fontSize = 11.sp)
-                                }
-                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs - 100L) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                                    Text("-100ms", fontSize = 11.sp)
-                                }
-                                TextButton(onClick = { onOffsetChange(0L) }, contentPadding = PaddingValues(horizontal = 8.dp)) {
-                                    Text(stringResource(R.string.reset), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs + 100L) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                                    Text("+100ms", fontSize = 11.sp)
-                                }
-                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs + 500L) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                                    Text("+500ms", fontSize = 11.sp)
-                                }
-                                TextButton(onClick = { onOffsetChange(lyrics.offsetMs + 1000L) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                                    Text("+1s", fontSize = 11.sp)
-                                }
-                            }
-
-                            Spacer(Modifier.height(4.dp))
-
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
-                            ) {
-                                TextButton(
-                                    onClick = {
-                                        onLoadCandidates()
-                                        showCandidatesSheet = true
-                                    },
-                                ) {
-                                    Text(stringResource(R.string.choose_lyrics_version), style = MaterialTheme.typography.labelSmall)
-                                }
-                                Spacer(Modifier.width(8.dp))
-                                val hasTranslations = lyrics.lines.any { !it.translation.isNullOrBlank() }
-                                IconButton(
-                                    onClick = {
-                                        if (!hasTranslations) {
-                                            showTranslation = true
-                                            onRequestTranslation()
-                                        } else {
-                                            showTranslation = !showTranslation
-                                        }
-                                    },
-                                    modifier = Modifier.size(36.dp),
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Translate,
-                                        contentDescription = stringResource(R.string.lyrics_translation_title),
-                                        tint = if (showTranslation) colors.primary else colors.onSurfaceVariant.copy(alpha = 0.5f),
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                }
-                                Spacer(Modifier.width(8.dp))
-                                IconButton(
-                                    onClick = { showShareLyricsDialog = true },
-                                    modifier = Modifier.size(36.dp),
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Share,
-                                        contentDescription = stringResource(R.string.share),
-                                        tint = colors.primary,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
                 itemsIndexed(lyrics.lines, key = { i, line -> "$i:${line.timeMs}" }) { index, line ->
                     val isActive = index == activeIndex
                     val theme = dev.auralis.studio.designsystem.LocalThemeSettings.current
@@ -1588,6 +1609,115 @@ private fun LyricsPage(
                     }
                 }
             }
+
+            // Floating Frosted Micro-Toolbar
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 12.dp),
+                shape = RoundedCornerShape(24.dp),
+                color = colors.surfaceContainerHigh.copy(alpha = 0.85f),
+                border = BorderStroke(
+                    1.dp,
+                    Brush.linearGradient(
+                        listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.04f)),
+                    ),
+                ),
+                shadowElevation = 6.dp,
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (lyrics.synced) {
+                        Surface(
+                            onClick = { showOffsetSheet = true },
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (lyrics.offsetMs != 0L) colors.primary.copy(alpha = 0.18f) else Color.Transparent,
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Timer,
+                                    contentDescription = stringResource(R.string.lyrics_sync),
+                                    tint = if (lyrics.offsetMs != 0L) colors.primary else colors.onSurfaceVariant,
+                                    modifier = Modifier.size(15.dp),
+                                )
+                                Text(
+                                    text = if (lyrics.offsetMs == 0L) stringResource(R.string.lyrics_sync) else "${if (lyrics.offsetMs > 0) "+" else ""}${lyrics.offsetMs}ms",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = if (lyrics.offsetMs != 0L) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (lyrics.offsetMs != 0L) colors.primary else colors.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+
+                    Surface(
+                        onClick = {
+                            onLoadCandidates()
+                            showCandidatesSheet = true
+                        },
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color.Transparent,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.FormatListBulleted,
+                                contentDescription = stringResource(R.string.lyrics_version_btn),
+                                tint = colors.onSurfaceVariant,
+                                modifier = Modifier.size(15.dp),
+                            )
+                            Text(
+                                text = stringResource(R.string.lyrics_version_btn),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.onSurfaceVariant,
+                            )
+                        }
+                    }
+
+                    val hasTranslations = lyrics.lines.any { !it.translation.isNullOrBlank() }
+                    IconButton(
+                        onClick = {
+                            if (!hasTranslations) {
+                                showTranslation = true
+                                onRequestTranslation()
+                            } else {
+                                showTranslation = !showTranslation
+                            }
+                        },
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Translate,
+                            contentDescription = stringResource(R.string.lyrics_translation_title),
+                            tint = if (showTranslation) colors.primary else colors.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { showShareLyricsDialog = true },
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = stringResource(R.string.share),
+                            tint = colors.primary,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+            }
+
             AnimatedVisibility(
                 visible = lyrics.synced && !autoFollow && activeIndex >= 0,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(20.dp),

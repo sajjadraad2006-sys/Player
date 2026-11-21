@@ -392,13 +392,15 @@ fun HomeScreen(
 
             // ── Main Content Area ──────────────────────────────────────────
             if (selectedCategory == null) {
+                val isCleanShelvesMode = layoutSettings.style == HomeLayoutStyle.CLEAN_APPLE_MUSIC || layoutSettings.style == HomeLayoutStyle.DISCOVER_SHELVES
+
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 96.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    // ── Dynamic Greeting Header Banner ──
-                    if (layoutSettings.showGreetingHeader) {
+                    // Only show legacy greeting banner & quick actions in CLASSIC/GRID/STUDIO layouts
+                    if (!isCleanShelvesMode && layoutSettings.showGreetingHeader) {
                         item(key = "greeting_banner") {
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
@@ -467,141 +469,226 @@ fun HomeScreen(
                         }
                     }
 
-                    // ── Mood & Vibe Discovery Explorer ──
-                    item(key = "mood_mosaic_explorer") {
-                        dev.auralis.studio.ui.components.MoodMosaicSection(
-                            onPlayMoodMix = { mood ->
-                                val matched = tracks.filter { mood.matchesTrack(it) }
-                                val queue = if (matched.isNotEmpty()) matched.shuffled() else tracks.shuffled()
-                                queue.firstOrNull()?.let { onPlay(it, queue) }
-                            },
-                        )
+                    if (!isCleanShelvesMode) {
+                        // ── Mood & Vibe Discovery Explorer for legacy layouts ──
+                        item(key = "mood_mosaic_explorer") {
+                            dev.auralis.studio.ui.components.MoodMosaicSection(
+                                onPlayMoodMix = { mood ->
+                                    val matched = tracks.filter { mood.matchesTrack(it) }
+                                    val queue = if (matched.isNotEmpty()) matched.shuffled() else tracks.shuffled()
+                                    queue.firstOrNull()?.let { onPlay(it, queue) }
+                                },
+                            )
+                        }
                     }
 
                     when (layoutSettings.style) {
                         HomeLayoutStyle.CLEAN_APPLE_MUSIC -> {
-                            // ── Apple Music: Featured Hero Shelf ──
-                            item(key = "apple_feat_header") {
-                                AppleSectionIndicator(
-                                    title = stringResource(R.string.made_for_you),
-                                    actionLabel = stringResource(R.string.play_all),
-                                    onAction = {
-                                        val queue = if (favoriteTracks.isNotEmpty()) favoriteTracks else tracks
-                                        queue.firstOrNull()?.let { onPlay(it, queue) }
-                                    },
-                                )
-                            }
-                            item(key = "apple_feat_shelf") {
-                                AppleHeroFeaturedSection(
-                                    tracks = if (favoriteTracks.isNotEmpty()) favoriteTracks else tracks,
-                                    allTracks = tracks,
-                                    onPlay = onPlay,
-                                )
-                            }
-
-                            // ── Apple Music: Heavy Rotation (2-row stacked shelf) ──
-                            item(key = "apple_heavy_header") {
-                                AppleSectionIndicator(
-                                    title = stringResource(R.string.heavy_rotation),
-                                    actionLabel = "${tracks.size} ${stringResource(R.string.filter_songs)}",
-                                    onAction = { selectedCategory = HomeCategory.SONGS },
-                                )
-                            }
-                            item(key = "apple_heavy_shelf") {
-                                AppleHeavyRotationShelf(
-                                    tracks = if (historyTracks.isNotEmpty()) historyTracks else tracks,
-                                    allTracks = tracks,
-                                    currentTrack = currentTrack,
-                                    onPlay = onPlay,
-                                )
-                            }
-
-                            // ── Apple Music: Artists for your taste ──
-                            item(key = "apple_taste_artists_header") {
-                                AppleSectionIndicator(
-                                    title = stringResource(R.string.taste_artists),
-                                )
-                            }
-                            item(key = "apple_taste_artists_shelf") {
-                                AppleTasteArtistsShelf(
-                                    tracks = tracks,
-                                    onSelectArtist = { artistName ->
-                                        val artistTracks = tracks.filter { it.artist == artistName }
-                                        if (artistTracks.isNotEmpty()) {
-                                            onPlay(artistTracks.first(), artistTracks)
-                                        }
-                                    },
-                                )
-                            }
-
-                            // ── Apple Music: Playlists Shelf ──
-                            if (layoutSettings.showPlaylists && playlists.isNotEmpty()) {
-                                item(key = "apple_playlists_header") {
+                            if (tracks.isEmpty()) {
+                                item(key = "apple_empty_state") {
+                                    AppleEmptyLibraryPanel(
+                                        isScanning = isScanning,
+                                        onRefresh = onRefresh,
+                                        onChooseFolder = onChooseFolder,
+                                    )
+                                }
+                            } else {
+                                // ── Apple Music: Featured Hero Shelf ──
+                                item(key = "apple_feat_header") {
                                     AppleSectionIndicator(
-                                        title = stringResource(R.string.filter_playlists),
-                                        actionLabel = stringResource(R.string.create_playlist),
-                                        onAction = { showCreatePlaylistDialog = true },
+                                        title = stringResource(R.string.made_for_you),
+                                        actionLabel = stringResource(R.string.play_all),
+                                        onAction = {
+                                            val queue = if (favoriteTracks.isNotEmpty()) favoriteTracks else tracks
+                                            queue.firstOrNull()?.let { onPlay(it, queue) }
+                                        },
                                     )
                                 }
-                                item(key = "apple_playlists_shelf") {
-                                    ApplePlaylistsShelf(
-                                        playlists = playlists,
-                                        onSelectPlaylist = { selectedPlaylist = it },
-                                        onCreatePlaylist = { showCreatePlaylistDialog = true },
+                                item(key = "apple_feat_shelf") {
+                                    AppleHeroFeaturedSection(
+                                        tracks = if (favoriteTracks.isNotEmpty()) favoriteTracks else tracks,
+                                        allTracks = tracks,
+                                        onPlay = onPlay,
                                     )
                                 }
-                            }
-                        }
-                        HomeLayoutStyle.DISCOVER_SHELVES -> {
-                            // ── Discover: Top Picks ──
-                            item(key = "discover_top_picks_header") {
-                                AppleSectionIndicator(
-                                    title = stringResource(R.string.top_picks),
-                                    actionLabel = stringResource(R.string.shuffle),
-                                    onAction = {
-                                        val shuffled = tracks.shuffled()
-                                        shuffled.firstOrNull()?.let { onPlay(it, shuffled) }
-                                    },
-                                )
-                            }
-                            item(key = "discover_top_picks_shelf") {
-                                AppleHeroFeaturedSection(
-                                    tracks = if (favoriteTracks.isNotEmpty()) favoriteTracks else tracks,
-                                    allTracks = tracks,
-                                    onPlay = onPlay,
-                                )
-                            }
 
-                            // ── Discover: Recently Played Shelf ──
-                            if (historyTracks.isNotEmpty()) {
-                                item(key = "discover_recents_header") {
-                                    AppleSectionIndicator(title = stringResource(R.string.recently_played))
+                                // ── Apple Music: Heavy Rotation (2-row stacked shelf) ──
+                                item(key = "apple_heavy_header") {
+                                    AppleSectionIndicator(
+                                        title = stringResource(R.string.heavy_rotation),
+                                        actionLabel = "${tracks.size} ${stringResource(R.string.filter_songs)}",
+                                        onAction = { selectedCategory = HomeCategory.SONGS },
+                                    )
                                 }
-                                item(key = "discover_recents_shelf") {
+                                item(key = "apple_heavy_shelf") {
                                     AppleHeavyRotationShelf(
-                                        tracks = historyTracks,
+                                        tracks = if (historyTracks.isNotEmpty()) historyTracks else tracks,
                                         allTracks = tracks,
                                         currentTrack = currentTrack,
                                         onPlay = onPlay,
                                     )
                                 }
-                            }
 
-                            // ── Discover: Playlists ──
-                            if (layoutSettings.showPlaylists && playlists.isNotEmpty()) {
-                                item(key = "discover_playlists_header") {
+                                // ── Apple Music: Artists for your taste ──
+                                item(key = "apple_taste_artists_header") {
                                     AppleSectionIndicator(
-                                        title = stringResource(R.string.filter_playlists),
-                                        actionLabel = stringResource(R.string.create_playlist),
-                                        onAction = { showCreatePlaylistDialog = true },
+                                        title = stringResource(R.string.taste_artists),
                                     )
                                 }
-                                item(key = "discover_playlists_shelf") {
-                                    ApplePlaylistsShelf(
-                                        playlists = playlists,
-                                        onSelectPlaylist = { selectedPlaylist = it },
-                                        onCreatePlaylist = { showCreatePlaylistDialog = true },
+                                item(key = "apple_taste_artists_shelf") {
+                                    AppleTasteArtistsShelf(
+                                        tracks = tracks,
+                                        onSelectArtist = { artistName ->
+                                            val artistTracks = tracks.filter { it.artist == artistName }
+                                            if (artistTracks.isNotEmpty()) {
+                                                onPlay(artistTracks.first(), artistTracks)
+                                            }
+                                        },
                                     )
+                                }
+
+                                // ── Apple Music: Playlists Shelf ──
+                                if (layoutSettings.showPlaylists && playlists.isNotEmpty()) {
+                                    item(key = "apple_playlists_header") {
+                                        AppleSectionIndicator(
+                                            title = stringResource(R.string.filter_playlists),
+                                            actionLabel = stringResource(R.string.create_playlist),
+                                            onAction = { showCreatePlaylistDialog = true },
+                                        )
+                                    }
+                                    item(key = "apple_playlists_shelf") {
+                                        ApplePlaylistsShelf(
+                                            playlists = playlists,
+                                            onSelectPlaylist = { selectedPlaylist = it },
+                                            onCreatePlaylist = { showCreatePlaylistDialog = true },
+                                        )
+                                    }
+                                }
+
+                                // ── Apple Music: Recently Added Shelf ──
+                                if (recentlyAddedTracks.isNotEmpty()) {
+                                    item(key = "apple_recent_header") {
+                                        AppleSectionIndicator(
+                                            title = stringResource(R.string.recently_added),
+                                            actionLabel = stringResource(R.string.all_songs),
+                                            onAction = { selectedCategory = HomeCategory.SONGS },
+                                        )
+                                    }
+                                    item(key = "apple_recent_shelf") {
+                                        AppleRecentlyAddedShelf(
+                                            tracks = recentlyAddedTracks,
+                                            allTracks = tracks,
+                                            onPlay = onPlay,
+                                        )
+                                    }
+                                }
+
+                                // ── Apple Music: Mood & Vibe Discovery ──
+                                item(key = "apple_mood_explorer") {
+                                    dev.auralis.studio.ui.components.MoodMosaicSection(
+                                        onPlayMoodMix = { mood ->
+                                            val matched = tracks.filter { mood.matchesTrack(it) }
+                                            val queue = if (matched.isNotEmpty()) matched.shuffled() else tracks.shuffled()
+                                            queue.firstOrNull()?.let { onPlay(it, queue) }
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                        HomeLayoutStyle.DISCOVER_SHELVES -> {
+                            if (tracks.isEmpty()) {
+                                item(key = "discover_empty_state") {
+                                    AppleEmptyLibraryPanel(
+                                        isScanning = isScanning,
+                                        onRefresh = onRefresh,
+                                        onChooseFolder = onChooseFolder,
+                                    )
+                                }
+                            } else {
+                                // ── Discover: Top Picks ──
+                                item(key = "discover_top_picks_header") {
+                                    AppleSectionIndicator(
+                                        title = stringResource(R.string.top_picks),
+                                        actionLabel = stringResource(R.string.shuffle),
+                                        onAction = {
+                                            val shuffled = tracks.shuffled()
+                                            shuffled.firstOrNull()?.let { onPlay(it, shuffled) }
+                                        },
+                                    )
+                                }
+                                item(key = "discover_top_picks_shelf") {
+                                    AppleHeroFeaturedSection(
+                                        tracks = if (favoriteTracks.isNotEmpty()) favoriteTracks else tracks,
+                                        allTracks = tracks,
+                                        onPlay = onPlay,
+                                    )
+                                }
+
+                                // ── Discover: Recently Played Shelf ──
+                                if (historyTracks.isNotEmpty()) {
+                                    item(key = "discover_recents_header") {
+                                        AppleSectionIndicator(title = stringResource(R.string.recently_played))
+                                    }
+                                    item(key = "discover_recents_shelf") {
+                                        AppleHeavyRotationShelf(
+                                            tracks = historyTracks,
+                                            allTracks = tracks,
+                                            currentTrack = currentTrack,
+                                            onPlay = onPlay,
+                                        )
+                                    }
+                                }
+
+                                // ── Discover: Artists for your taste ──
+                                item(key = "discover_taste_artists_header") {
+                                    AppleSectionIndicator(title = stringResource(R.string.taste_artists))
+                                }
+                                item(key = "discover_taste_artists_shelf") {
+                                    AppleTasteArtistsShelf(
+                                        tracks = tracks,
+                                        onSelectArtist = { artistName ->
+                                            val artistTracks = tracks.filter { it.artist == artistName }
+                                            if (artistTracks.isNotEmpty()) {
+                                                onPlay(artistTracks.first(), artistTracks)
+                                            }
+                                        },
+                                    )
+                                }
+
+                                // ── Discover: Playlists ──
+                                if (layoutSettings.showPlaylists && playlists.isNotEmpty()) {
+                                    item(key = "discover_playlists_header") {
+                                        AppleSectionIndicator(
+                                            title = stringResource(R.string.filter_playlists),
+                                            actionLabel = stringResource(R.string.create_playlist),
+                                            onAction = { showCreatePlaylistDialog = true },
+                                        )
+                                    }
+                                    item(key = "discover_playlists_shelf") {
+                                        ApplePlaylistsShelf(
+                                            playlists = playlists,
+                                            onSelectPlaylist = { selectedPlaylist = it },
+                                            onCreatePlaylist = { showCreatePlaylistDialog = true },
+                                        )
+                                    }
+                                }
+
+                                // ── Discover: Recently Added ──
+                                if (recentlyAddedTracks.isNotEmpty()) {
+                                    item(key = "discover_recent_header") {
+                                        AppleSectionIndicator(
+                                            title = stringResource(R.string.recently_added),
+                                            actionLabel = stringResource(R.string.all_songs),
+                                            onAction = { selectedCategory = HomeCategory.SONGS },
+                                        )
+                                    }
+                                    item(key = "discover_recent_shelf") {
+                                        AppleRecentlyAddedShelf(
+                                            tracks = recentlyAddedTracks,
+                                            allTracks = tracks,
+                                            onPlay = onPlay,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -783,7 +870,7 @@ fun HomeScreen(
                     }
 
                     // ── Recently Played Section ──────────────────────────────
-                    if (layoutSettings.showRecentlyPlayed && historyTracks.isNotEmpty() && layoutSettings.style != HomeLayoutStyle.MINIMAL_STREAM && layoutSettings.style != HomeLayoutStyle.CLEAN_APPLE_MUSIC && layoutSettings.style != HomeLayoutStyle.DISCOVER_SHELVES) {
+                    if (layoutSettings.showRecentlyPlayed && historyTracks.isNotEmpty() && !isCleanShelvesMode && layoutSettings.style != HomeLayoutStyle.MINIMAL_STREAM) {
                         item(key = "recently_played_header") {
                             Text(
                                 text = stringResource(R.string.recently_played),
@@ -828,7 +915,7 @@ fun HomeScreen(
                     }
 
                     // ── Smart Recommendations Section ─────────────────────────
-                    if (layoutSettings.showRecommendations && recommendations.isNotEmpty() && layoutSettings.style != HomeLayoutStyle.MINIMAL_STREAM) {
+                    if (layoutSettings.showRecommendations && recommendations.isNotEmpty() && !isCleanShelvesMode && layoutSettings.style != HomeLayoutStyle.MINIMAL_STREAM) {
                         item(key = "recommendations_header") {
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
@@ -908,7 +995,7 @@ fun HomeScreen(
                     }
 
                     // ── Songs List Section ────────────────────────────────────
-                    if (layoutSettings.showRecentTracks) {
+                    if (layoutSettings.showRecentTracks && !isCleanShelvesMode) {
                         item(key = "recently_added_header") {
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
@@ -2410,6 +2497,164 @@ fun ApplePlaylistsShelf(
         }
     }
 }
+
+@Composable
+fun AppleRecentlyAddedShelf(
+    tracks: List<Track>,
+    allTracks: List<Track>,
+    onPlay: (Track, List<Track>) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    val displayTracks = remember(tracks, allTracks) {
+        if (tracks.isNotEmpty()) tracks.take(14) else allTracks.take(14)
+    }
+    if (displayTracks.isEmpty()) return
+
+    LazyRow(
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        items(displayTracks, key = { "apple_recent_${it.id}_${it.uri}" }) { trk ->
+            val tileShape = RoundedCornerShape(16.dp)
+            Column(
+                modifier = Modifier
+                    .width(152.dp)
+                    .clickable { onPlay(trk, displayTracks) },
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(152.dp)
+                        .shadow(8.dp, tileShape, spotColor = Color.Black.copy(alpha = 0.30f))
+                        .clip(tileShape)
+                        .background(colors.surfaceContainerHigh)
+                        .border(
+                            1.dp,
+                            Brush.linearGradient(
+                                listOf(Color.White.copy(alpha = 0.24f), Color.White.copy(alpha = 0.03f)),
+                            ),
+                            tileShape,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    TrackArtwork(trk, Modifier.fillMaxSize())
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.25f)),
+                                ),
+                            ),
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = trk.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = trk.artist.ifBlank { trk.album }.ifBlank { stringResource(R.string.unknown_artist) },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant.copy(alpha = 0.75f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AppleEmptyLibraryPanel(
+    isScanning: Boolean,
+    onRefresh: () -> Unit,
+    onChooseFolder: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    val panelShape = RoundedCornerShape(24.dp)
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 24.dp),
+        shape = panelShape,
+        color = colors.surfaceContainerHigh.copy(alpha = 0.85f),
+        shadowElevation = 8.dp,
+        border = BorderStroke(
+            1.dp,
+            Brush.verticalGradient(
+                listOf(Color.White.copy(alpha = 0.25f), Color.White.copy(alpha = 0.04f)),
+            ),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(68.dp)
+                    .clip(CircleShape)
+                    .background(colors.primary.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MusicNote,
+                    contentDescription = null,
+                    tint = colors.primary,
+                    modifier = Modifier.size(36.dp),
+                )
+            }
+            Text(
+                text = stringResource(R.string.welcome_to_lyrune),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = colors.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.library_empty_permission),
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    onClick = onChooseFolder,
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.choose_folder))
+                }
+                androidx.compose.material3.OutlinedButton(
+                    onClick = onRefresh,
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    if (isScanning) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.scan_again))
+                }
+            }
+        }
+    }
+}
+
 
 
 

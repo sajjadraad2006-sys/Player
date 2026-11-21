@@ -614,4 +614,6 @@
     <string name="mood_late_night">أجواء ليلية</string>
     <string name="start_radio_mix">بدء راديو فوري</string>
     <string name="instant_mix_generated">تم إنشاء المزيج الذكي</string>
+    <string name="lyrics_sync">ضبط التزامن</string>
+    <string name="lyrics_version_btn">النسخة</string>
 </resources>

@@ -606,4 +606,6 @@
     <string name="mood_late_night">Late Night Vibes</string>
     <string name="start_radio_mix">Start Instant Radio</string>
     <string name="instant_mix_generated">Generated instant smart mix</string>
+    <string name="lyrics_sync">Sync offset</string>
+    <string name="lyrics_version_btn">Version</string>
 </resources>

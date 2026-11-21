@@ -120,6 +120,7 @@ fun MiniPlayer(
     val controls = LocalAuralisControlColors.current
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
+    val isRtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
 
     // Smooth drag offsets inside graphicsLayer to avoid recomposition
     val dragX = remember(track.id, track.uri) { Animatable(0f) }
@@ -153,16 +154,18 @@ fun MiniPlayer(
                 detectDragGestures(
                     onDragCancel = { settleDrag() },
                     onDragEnd = {
+                        val nextTriggered = if (isRtl) dragX.value > thresholdPx else dragX.value < -thresholdPx
+                        val prevTriggered = if (isRtl) dragX.value < -thresholdPx else dragX.value > thresholdPx
                         when {
                             dragY.value < -45f -> {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 onOpen()
                             }
-                            dragX.value < -thresholdPx -> {
+                            nextTriggered -> {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 onNext()
                             }
-                            dragX.value > thresholdPx -> {
+                            prevTriggered -> {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 onPrevious()
                             }
