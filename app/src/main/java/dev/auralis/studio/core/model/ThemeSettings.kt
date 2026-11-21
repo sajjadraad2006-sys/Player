@@ -23,6 +23,38 @@ enum class AnimationStyle {
     REDUCED,
 }
 
+enum class LyricsDisplayStyle {
+    APPLE_MUSIC_BLUR,
+    KARAOKE_GLOW,
+    DYNAMIC_CARD,
+    CLASSIC_CLEAN,
+}
+
+enum class LyricsTextSize {
+    COMPACT,
+    STANDARD,
+    LARGE,
+    EXTRA_LARGE,
+}
+
+enum class PlayerVisualStyle {
+    MODERN_GLASS,
+    WAVEFORM_HERO,
+    VINYL_STUDIO,
+    CINEMATIC_BLUR,
+}
+
+enum class SeekbarStyle {
+    WAVY,
+    WAVEFORM_BAR,
+    MINIMAL_LINE,
+}
+
+enum class NavigationBarStyle {
+    LIQUID_BUBBLE,
+    CLASSIC_DOCK,
+}
+
 enum class HomeLayoutStyle {
     STUDIO_HUB,
     GRID_CARDS,
@@ -58,6 +90,14 @@ data class ThemeSettings(
     val backgroundDim: Float = 0.55f,
     val backgroundArtwork: Boolean = true,
     val hapticFeedback: Boolean = true,
+    val lyricsStyle: LyricsDisplayStyle = LyricsDisplayStyle.APPLE_MUSIC_BLUR,
+    val lyricsTextSize: LyricsTextSize = LyricsTextSize.STANDARD,
+    val playerStyle: PlayerVisualStyle = PlayerVisualStyle.MODERN_GLASS,
+    val seekbarStyle: SeekbarStyle = SeekbarStyle.WAVY,
+    val navBarStyle: NavigationBarStyle = NavigationBarStyle.LIQUID_BUBBLE,
+    val lyricsGlowActive: Boolean = true,
+    val lyricsBlurInactive: Boolean = true,
+    val lyricsWordByWordAnimation: Boolean = true,
 ) {
     /** Derived corner radius based on CornerStyle, overriding manual slider. */
     val effectiveCornerRadius: Float get() = when (cornerStyle) {

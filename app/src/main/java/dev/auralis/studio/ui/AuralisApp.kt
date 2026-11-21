@@ -267,6 +267,7 @@ fun AuralisApp(viewModel: MainViewModel = viewModel()) {
                             AuralisBottomNavBar(
                                 currentDestination = destination,
                                 onNavigate = { destinationName = it.name },
+                                style = theme.navBarStyle,
                             )
                         }
                     },
@@ -629,71 +630,22 @@ private fun FirstLaunchWelcomeDialog(
 private fun AuralisBottomNavBar(
     currentDestination: MainDestination,
     onNavigate: (MainDestination) -> Unit,
+    style: dev.auralis.studio.core.model.NavigationBarStyle = dev.auralis.studio.core.model.NavigationBarStyle.LIQUID_BUBBLE,
     modifier: Modifier = Modifier,
 ) {
     val items = listOf(
-        Triple(MainDestination.HOME, Icons.Default.Home, R.string.home),
-        Triple(MainDestination.LIBRARY, Icons.Default.LibraryMusic, R.string.library),
-        Triple(MainDestination.SEARCH, Icons.Default.Search, R.string.search),
-        Triple(MainDestination.AUDIO_LAB, Icons.Default.Tune, R.string.audio_lab),
-        Triple(MainDestination.SETTINGS, Icons.Default.Settings, R.string.settings),
+        dev.auralis.studio.ui.components.NavigationBarItemSpec(MainDestination.HOME, Icons.Default.Home, R.string.home),
+        dev.auralis.studio.ui.components.NavigationBarItemSpec(MainDestination.LIBRARY, Icons.Default.LibraryMusic, R.string.library),
+        dev.auralis.studio.ui.components.NavigationBarItemSpec(MainDestination.SEARCH, Icons.Default.Search, R.string.search),
+        dev.auralis.studio.ui.components.NavigationBarItemSpec(MainDestination.AUDIO_LAB, Icons.Default.Tune, R.string.audio_lab),
+        dev.auralis.studio.ui.components.NavigationBarItemSpec(MainDestination.SETTINGS, Icons.Default.Settings, R.string.settings),
     )
-
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 6.dp),
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp).copy(alpha = 0.95f),
-        tonalElevation = 6.dp,
-        shadowElevation = 8.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 6.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceAround,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            items.forEach { (dest, icon, labelRes) ->
-                val selected = currentDestination == dest
-                val scale by animateFloatAsState(
-                    targetValue = if (selected) 1.05f else 1.0f,
-                    animationSpec = spring(dampingRatio = 0.65f, stiffness = 400f),
-                    label = "nav_item_scale",
-                )
-
-                Surface(
-                    onClick = { onNavigate(dest) },
-                    shape = RoundedCornerShape(20.dp),
-                    color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f) else Color.Transparent,
-                    modifier = Modifier.scale(scale),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = stringResource(labelRes),
-                            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                            modifier = Modifier.size(22.dp),
-                        )
-                        if (selected) {
-                            Text(
-                                text = stringResource(labelRes),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                maxLines = 1,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
+    dev.auralis.studio.ui.components.LiquidFloatingNavBar(
+        items = items,
+        currentDestination = currentDestination,
+        onNavigate = onNavigate,
+        style = style,
+        modifier = modifier,
+    )
 }
 

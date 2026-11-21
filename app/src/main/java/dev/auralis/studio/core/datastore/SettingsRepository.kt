@@ -86,6 +86,14 @@ class SettingsRepository(private val context: Context) {
         val appDisplayName = stringPreferencesKey("app_display_name")
         val activeAppIconAlias = stringPreferencesKey("active_app_icon_alias")
         val youtubeLyricsTranslation = booleanPreferencesKey("youtube_lyrics_translation")
+        val lyricsStyle = stringPreferencesKey("lyrics_style")
+        val lyricsTextSize = stringPreferencesKey("lyrics_text_size")
+        val playerStyle = stringPreferencesKey("player_style")
+        val seekbarStyle = stringPreferencesKey("seekbar_style")
+        val navBarStyle = stringPreferencesKey("nav_bar_style")
+        val lyricsGlow = booleanPreferencesKey("lyrics_glow")
+        val lyricsBlurInactive = booleanPreferencesKey("lyrics_blur_inactive")
+        val lyricsWordByWord = booleanPreferencesKey("lyrics_word_by_word")
     }
 
     val appDisplayName: Flow<String> = context.settingsDataStore.data.map { preferences ->
@@ -252,6 +260,14 @@ class SettingsRepository(private val context: Context) {
             p[Keys.backgroundDim] = settings.backgroundDim
             p[Keys.backgroundArtwork] = settings.backgroundArtwork
             p[Keys.hapticFeedback] = settings.hapticFeedback
+            p[Keys.lyricsStyle] = settings.lyricsStyle.name
+            p[Keys.lyricsTextSize] = settings.lyricsTextSize.name
+            p[Keys.playerStyle] = settings.playerStyle.name
+            p[Keys.seekbarStyle] = settings.seekbarStyle.name
+            p[Keys.navBarStyle] = settings.navBarStyle.name
+            p[Keys.lyricsGlow] = settings.lyricsGlowActive
+            p[Keys.lyricsBlurInactive] = settings.lyricsBlurInactive
+            p[Keys.lyricsWordByWord] = settings.lyricsWordByWordAnimation
         }
     }
 
@@ -322,6 +338,14 @@ class SettingsRepository(private val context: Context) {
         backgroundDim = this[Keys.backgroundDim] ?: 0.55f,
         backgroundArtwork = this[Keys.backgroundArtwork] ?: true,
         hapticFeedback = this[Keys.hapticFeedback] ?: true,
+        lyricsStyle = enumValue(this[Keys.lyricsStyle], dev.auralis.studio.core.model.LyricsDisplayStyle.APPLE_MUSIC_BLUR),
+        lyricsTextSize = enumValue(this[Keys.lyricsTextSize], dev.auralis.studio.core.model.LyricsTextSize.STANDARD),
+        playerStyle = enumValue(this[Keys.playerStyle], dev.auralis.studio.core.model.PlayerVisualStyle.MODERN_GLASS),
+        seekbarStyle = enumValue(this[Keys.seekbarStyle], dev.auralis.studio.core.model.SeekbarStyle.WAVY),
+        navBarStyle = enumValue(this[Keys.navBarStyle], dev.auralis.studio.core.model.NavigationBarStyle.LIQUID_BUBBLE),
+        lyricsGlowActive = this[Keys.lyricsGlow] ?: true,
+        lyricsBlurInactive = this[Keys.lyricsBlurInactive] ?: true,
+        lyricsWordByWordAnimation = this[Keys.lyricsWordByWord] ?: true,
     )
 
     private inline fun <reified T : Enum<T>> enumValue(value: String?, fallback: T): T =

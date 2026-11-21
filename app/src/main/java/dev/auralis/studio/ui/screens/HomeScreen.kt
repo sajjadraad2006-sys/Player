@@ -463,6 +463,17 @@ fun HomeScreen(
                         }
                     }
 
+                    // ── Mood & Vibe Discovery Explorer ──
+                    item(key = "mood_mosaic_explorer") {
+                        dev.auralis.studio.ui.components.MoodMosaicSection(
+                            onPlayMoodMix = { mood ->
+                                val matched = tracks.filter { mood.matchesTrack(it) }
+                                val queue = if (matched.isNotEmpty()) matched.shuffled() else tracks.shuffled()
+                                queue.firstOrNull()?.let { onPlay(it, queue) }
+                            },
+                        )
+                    }
+
                     when (layoutSettings.style) {
                         HomeLayoutStyle.GRID_CARDS -> {
                             // ── Classic 6-Card Category Grid (User Requested Screenshot Style) ──

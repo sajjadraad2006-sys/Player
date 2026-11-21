@@ -812,6 +812,100 @@ private fun AppearanceSection(
                 }
             }
         }
+
+        // ── Player Interface & Visual Style ──────────────────────────────────
+        item {
+            SettingsCard(stringResource(R.string.player_visual_style)) {
+                Text(stringResource(R.string.player_visual_style_desc), style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.65f))
+                Spacer(Modifier.height(6.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(dev.auralis.studio.core.model.PlayerVisualStyle.entries) { style ->
+                        FilterChip(
+                            selected = theme.playerStyle == style,
+                            onClick  = { onThemeChange(theme.copy(playerStyle = style)) },
+                            label    = { Text(playerStyleLabel(style)) },
+                        )
+                    }
+                }
+            }
+        }
+
+        // ── Seekbar Track Style ──────────────────────────────────────────────
+        item {
+            SettingsCard(stringResource(R.string.seekbar_style)) {
+                Text(stringResource(R.string.seekbar_style_desc), style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.65f))
+                Spacer(Modifier.height(6.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(dev.auralis.studio.core.model.SeekbarStyle.entries) { style ->
+                        FilterChip(
+                            selected = theme.seekbarStyle == style,
+                            onClick  = { onThemeChange(theme.copy(seekbarStyle = style)) },
+                            label    = { Text(seekbarStyleLabel(style)) },
+                        )
+                    }
+                }
+            }
+        }
+
+        // ── Navigation Bar Style ─────────────────────────────────────────────
+        item {
+            SettingsCard(stringResource(R.string.nav_bar_style)) {
+                Text(stringResource(R.string.nav_bar_style_desc), style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.65f))
+                Spacer(Modifier.height(6.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(dev.auralis.studio.core.model.NavigationBarStyle.entries) { style ->
+                        FilterChip(
+                            selected = theme.navBarStyle == style,
+                            onClick  = { onThemeChange(theme.copy(navBarStyle = style)) },
+                            label    = { Text(navBarStyleLabel(style)) },
+                        )
+                    }
+                }
+            }
+        }
+
+        // ── Lyrics Animation & Display Style ─────────────────────────────────
+        item {
+            SettingsCard(stringResource(R.string.lyrics_style)) {
+                Text(stringResource(R.string.lyrics_style_desc), style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.65f))
+                Spacer(Modifier.height(6.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(dev.auralis.studio.core.model.LyricsDisplayStyle.entries) { style ->
+                        FilterChip(
+                            selected = theme.lyricsStyle == style,
+                            onClick  = { onThemeChange(theme.copy(lyricsStyle = style)) },
+                            label    = { Text(lyricsStyleLabel(style)) },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.lyrics_word_by_word), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+                        Text(stringResource(R.string.lyrics_word_by_word_desc), style = MaterialTheme.typography.bodySmall, color = colors.onSurface.copy(0.6f))
+                    }
+                    Switch(
+                        checked         = theme.lyricsWordByWordAnimation,
+                        onCheckedChange = { onThemeChange(theme.copy(lyricsWordByWordAnimation = it)) },
+                    )
+                }
+            }
+        }
+
+        // ── Lyrics Font Size ─────────────────────────────────────────────────
+        item {
+            SettingsCard(stringResource(R.string.lyrics_text_size)) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(dev.auralis.studio.core.model.LyricsTextSize.entries) { size ->
+                        FilterChip(
+                            selected = theme.lyricsTextSize == size,
+                            onClick  = { onThemeChange(theme.copy(lyricsTextSize = size)) },
+                            label    = { Text(lyricsTextSizeLabel(size)) },
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1411,6 +1505,43 @@ private fun cornerLabel(style: CornerStyle): String = stringResource(
         CornerStyle.ROUND -> R.string.round
     },
 )
+
+@Composable
+private fun playerStyleLabel(style: dev.auralis.studio.core.model.PlayerVisualStyle): String = when (style) {
+    dev.auralis.studio.core.model.PlayerVisualStyle.MODERN_GLASS -> stringResource(R.string.player_style_modern_glass)
+    dev.auralis.studio.core.model.PlayerVisualStyle.WAVEFORM_HERO -> stringResource(R.string.player_style_waveform_hero)
+    dev.auralis.studio.core.model.PlayerVisualStyle.VINYL_STUDIO -> stringResource(R.string.player_style_vinyl_studio)
+    dev.auralis.studio.core.model.PlayerVisualStyle.CINEMATIC_BLUR -> stringResource(R.string.player_style_cinematic_blur)
+}
+
+@Composable
+private fun seekbarStyleLabel(style: dev.auralis.studio.core.model.SeekbarStyle): String = when (style) {
+    dev.auralis.studio.core.model.SeekbarStyle.WAVY -> stringResource(R.string.seekbar_wavy)
+    dev.auralis.studio.core.model.SeekbarStyle.WAVEFORM_BAR -> stringResource(R.string.seekbar_waveform_bar)
+    dev.auralis.studio.core.model.SeekbarStyle.MINIMAL_LINE -> stringResource(R.string.seekbar_minimal_line)
+}
+
+@Composable
+private fun navBarStyleLabel(style: dev.auralis.studio.core.model.NavigationBarStyle): String = when (style) {
+    dev.auralis.studio.core.model.NavigationBarStyle.LIQUID_BUBBLE -> stringResource(R.string.nav_bar_liquid_bubble)
+    dev.auralis.studio.core.model.NavigationBarStyle.CLASSIC_DOCK -> stringResource(R.string.nav_bar_classic_dock)
+}
+
+@Composable
+private fun lyricsStyleLabel(style: dev.auralis.studio.core.model.LyricsDisplayStyle): String = when (style) {
+    dev.auralis.studio.core.model.LyricsDisplayStyle.APPLE_MUSIC_BLUR -> stringResource(R.string.lyrics_apple_music_blur)
+    dev.auralis.studio.core.model.LyricsDisplayStyle.KARAOKE_GLOW -> stringResource(R.string.lyrics_karaoke_glow)
+    dev.auralis.studio.core.model.LyricsDisplayStyle.DYNAMIC_CARD -> stringResource(R.string.lyrics_dynamic_card)
+    dev.auralis.studio.core.model.LyricsDisplayStyle.CLASSIC_CLEAN -> stringResource(R.string.lyrics_classic_clean)
+}
+
+@Composable
+private fun lyricsTextSizeLabel(size: dev.auralis.studio.core.model.LyricsTextSize): String = when (size) {
+    dev.auralis.studio.core.model.LyricsTextSize.COMPACT -> stringResource(R.string.lyrics_size_compact)
+    dev.auralis.studio.core.model.LyricsTextSize.STANDARD -> stringResource(R.string.lyrics_size_standard)
+    dev.auralis.studio.core.model.LyricsTextSize.LARGE -> stringResource(R.string.lyrics_size_large)
+    dev.auralis.studio.core.model.LyricsTextSize.EXTRA_LARGE -> stringResource(R.string.lyrics_size_extra_large)
+}
 
 @Composable
 private fun AccentColorSettingCard(

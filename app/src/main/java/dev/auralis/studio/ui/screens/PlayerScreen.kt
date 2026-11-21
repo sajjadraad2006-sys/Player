@@ -72,6 +72,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -334,6 +335,7 @@ fun PlayerScreen(
                 when (page) {
                     PAGE_LYRICS     -> LyricsPage(
                         state                  = lyricsState,
+                        track                  = track,
                         positionMs             = state.positionMs,
                         lyricsClock            = lyricsClock,
                         lyricsCandidates       = lyricsCandidates,
@@ -351,6 +353,7 @@ fun PlayerScreen(
                         state               = state,
                         track               = track,
                         tracks              = tracks,
+                        visualizerBands     = visualizerBands,
                         queueVisible        = queueVisible,
                         pointA              = pointA,
                         pointB              = pointB,
@@ -465,6 +468,7 @@ private fun PlayerPage(
     state: PlaybackUiState,
     track: Track?,
     tracks: List<Track>,
+    visualizerBands: FloatArray? = null,
     queueVisible: Boolean,
     pointA: Long,
     pointB: Long,
@@ -491,12 +495,13 @@ private fun PlayerPage(
 ) {
     val colors = MaterialTheme.colorScheme
     val tokens = LocalAuralisTokens.current
+    val theme = dev.auralis.studio.designsystem.LocalThemeSettings.current
 
     LazyColumn(
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        // Artwork — large, 82% width
+        // Artwork — large with customizable player style
         item {
             Box(
                 Modifier.fillMaxWidth(),
@@ -510,12 +515,37 @@ private fun PlayerPage(
                     },
                     label = "player_art_change",
                 ) { currentTrack ->
-                    TrackArtwork(
-                        currentTrack,
-                        Modifier
-                            .fillMaxWidth(0.82f)
-                            .aspectRatio(1f),
-                    )
+                    when (theme.playerStyle) {
+                        dev.auralis.studio.core.model.PlayerVisualStyle.VINYL_STUDIO -> {
+                            dev.auralis.studio.ui.components.VinylTurntable(
+                                artworkUri = currentTrack?.artworkUri,
+                                isPlaying = state.isPlaying,
+                                modifier = Modifier.fillMaxWidth(0.92f),
+                            )
+                        }
+                        dev.auralis.studio.core.model.PlayerVisualStyle.WAVEFORM_HERO -> {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.84f)
+                                    .aspectRatio(1f)
+                                    .clip(RoundedCornerShape(tokens.artworkCorner.dp))
+                                    .border(1.5.dp, colors.secondary.copy(alpha = 0.50f), RoundedCornerShape(tokens.artworkCorner.dp)),
+                            ) {
+                                TrackArtwork(currentTrack, Modifier.fillMaxSize())
+                            }
+                        }
+                        else -> {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.84f)
+                                    .aspectRatio(1f)
+                                    .clip(RoundedCornerShape(tokens.artworkCorner.dp))
+                                    .border(1.2.dp, colors.primary.copy(alpha = 0.35f), RoundedCornerShape(tokens.artworkCorner.dp)),
+                            ) {
+                                TrackArtwork(currentTrack, Modifier.fillMaxSize())
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -563,11 +593,14 @@ private fun PlayerPage(
         // Progress slider
         item {
             Column {
-                AuralisSlider(
+                dev.auralis.studio.ui.components.WavySeekBar(
                     value         = state.positionMs.coerceAtMost(state.durationMs).toFloat(),
                     onValueChange = { onSeek(it.toLong()) },
                     valueRange    = 0f..state.durationMs.coerceAtLeast(1).toFloat(),
                     enabled       = state.durationMs > 0,
+                    isPlaying     = state.isPlaying,
+                    style         = theme.seekbarStyle,
+                    waveformBands = visualizerBands,
                 )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(
@@ -897,6 +930,7 @@ private fun LyricsPage(
     lyricsClock: dev.auralis.studio.lyrics.LyricsClock?,
     lyricsCandidates: List<dev.auralis.studio.lyrics.LrclibTrack>,
     isSearchingCandidates: Boolean = false,
+    track: Track? = null,
     onSeek: (Long) -> Unit,
     onRetry: () -> Unit,
     onImport: () -> Unit,
@@ -911,6 +945,7 @@ private fun LyricsPage(
     val lyrics = (state as? LyricsUiState.Found)?.lyrics ?: SyncedLyrics.EMPTY
     var manualQuery by remember { mutableStateOf("") }
     var showCandidatesSheet by remember { mutableStateOf(false) }
+    var showShareLyricsDialog by remember { mutableStateOf(false) }
     var showTranslation by rememberSaveable(lyrics.lines) {
         mutableStateOf(true)
     }
@@ -1224,25 +1259,64 @@ private fun LyricsPage(
                                         modifier = Modifier.size(18.dp),
                                     )
                                 }
+                                Spacer(Modifier.width(8.dp))
+                                IconButton(
+                                    onClick = { showShareLyricsDialog = true },
+                                    modifier = Modifier.size(36.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Share,
+                                        contentDescription = stringResource(R.string.share),
+                                        tint = colors.primary,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
                             }
                         }
                     }
                 }
                 itemsIndexed(lyrics.lines, key = { i, line -> "$i:${line.timeMs}" }) { index, line ->
                     val isActive = index == activeIndex
-                    val scale by animateFloatAsState(if (isActive) 1.035f else 1f, tween(80), label = "lyric_scale")
+                    val theme = dev.auralis.studio.designsystem.LocalThemeSettings.current
+                    val isAppleBlur = theme.lyricsStyle == dev.auralis.studio.core.model.LyricsDisplayStyle.APPLE_MUSIC_BLUR
+                    val isKaraokeGlow = theme.lyricsStyle == dev.auralis.studio.core.model.LyricsDisplayStyle.KARAOKE_GLOW
+                    val isDynamicCard = theme.lyricsStyle == dev.auralis.studio.core.model.LyricsDisplayStyle.DYNAMIC_CARD
+
+                    val targetScale = if (isActive) {
+                        if (isAppleBlur) 1.065f else 1.04f
+                    } else {
+                        if (isAppleBlur && theme.lyricsBlurInactive) 0.96f else 1.0f
+                    }
+                    val scale by animateFloatAsState(targetScale, tween(120), label = "lyric_scale")
+
+                    val lineAlpha = if (isActive) 1.0f else if (isAppleBlur && theme.lyricsBlurInactive) 0.38f else 0.65f
+
+                    val (activeFontSize, inactiveFontSize, activeLineHeight, inactiveLineHeight) = when (theme.lyricsTextSize) {
+                        dev.auralis.studio.core.model.LyricsTextSize.COMPACT -> listOf(18.sp, 15.sp, 26.sp, 22.sp)
+                        dev.auralis.studio.core.model.LyricsTextSize.STANDARD -> listOf(21.sp, 17.sp, 30.sp, 25.sp)
+                        dev.auralis.studio.core.model.LyricsTextSize.LARGE -> listOf(25.sp, 20.sp, 36.sp, 29.sp)
+                        dev.auralis.studio.core.model.LyricsTextSize.EXTRA_LARGE -> listOf(30.sp, 24.sp, 42.sp, 34.sp)
+                    }
+
+                    val textShadow = if (isActive && isKaraokeGlow && theme.lyricsGlowActive) {
+                        androidx.compose.ui.graphics.Shadow(
+                            color = colors.primary.copy(alpha = 0.85f),
+                            blurRadius = 14f,
+                        )
+                    } else null
+
                     val lineColor by animateColorAsState(
                         when {
                             isActive -> colors.primary
-                            index < activeIndex -> colors.onSurface.copy(alpha = 0.44f)
-                            else -> colors.onSurface.copy(alpha = 0.72f)
+                            index < activeIndex -> colors.onSurface.copy(alpha = 0.38f)
+                            else -> colors.onSurface.copy(alpha = lineAlpha)
                         },
-                        tween(80),
+                        tween(100),
                         label = "lyric_color",
                     )
 
                     val adjustedPos = smoothPositionMs - lyrics.offsetMs
-                    val annotatedText = if (isActive && line.hasWordTiming) {
+                    val annotatedText = if (isActive && line.hasWordTiming && theme.lyricsWordByWordAnimation) {
                         androidx.compose.ui.text.buildAnnotatedString {
                             val words = line.words!!
                             for (wIdx in words.indices) {
@@ -1264,50 +1338,66 @@ private fun LyricsPage(
                         }
                     } else null
 
-                    if (annotatedText != null) {
-                        Text(
-                            text = annotatedText,
-                            style = MaterialTheme.typography.bodyLarge.copy(
-                                fontSize = 20.sp,
-                                lineHeight = 29.sp,
-                                textDirection = TextDirection.Content,
-                            ),
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .scale(scale)
-                                .then(
-                                    if (lyrics.synced && line.timeMs >= 0) {
-                                        Modifier.pointerInput(line.timeMs, lyrics.offsetMs) {
-                                             detectTapGestures { onSeek(lyrics.seekPositionFor(line)) }
-                                        }
-                                    } else Modifier,
-                                )
-                                .padding(vertical = 6.dp),
-                        )
-                    } else {
-                        Text(
-                            text = line.text,
-                            style = MaterialTheme.typography.bodyLarge.copy(
-                                fontSize = if (isActive) 20.sp else 17.sp,
-                                fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
-                                lineHeight = if (isActive) 29.sp else 25.sp,
-                                textDirection = TextDirection.Content,
-                            ),
-                            color = lineColor,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .scale(scale)
-                                .then(
-                                    if (lyrics.synced && line.timeMs >= 0) {
-                                        Modifier.pointerInput(line.timeMs, lyrics.offsetMs) {
-                                            detectTapGestures { onSeek(lyrics.seekPositionFor(line)) }
-                                        }
-                                    } else Modifier,
-                                )
-                                .padding(vertical = 6.dp),
-                        )
+                    val cardModifier = if (isActive && isDynamicCard) {
+                        Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(colors.primaryContainer.copy(alpha = 0.30f))
+                            .border(1.dp, colors.primary.copy(alpha = 0.40f), RoundedCornerShape(16.dp))
+                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                    } else Modifier
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .scale(scale)
+                            .then(cardModifier),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (annotatedText != null) {
+                            Text(
+                                text = annotatedText,
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontSize = activeFontSize,
+                                    lineHeight = activeLineHeight,
+                                    textDirection = TextDirection.Content,
+                                    shadow = textShadow,
+                                ),
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .then(
+                                        if (lyrics.synced && line.timeMs >= 0) {
+                                            Modifier.pointerInput(line.timeMs, lyrics.offsetMs) {
+                                                 detectTapGestures { onSeek(lyrics.seekPositionFor(line)) }
+                                            }
+                                        } else Modifier,
+                                    )
+                                    .padding(vertical = 4.dp),
+                            )
+                        } else {
+                            Text(
+                                text = line.text,
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontSize = if (isActive) activeFontSize else inactiveFontSize,
+                                    fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                                    lineHeight = if (isActive) activeLineHeight else inactiveLineHeight,
+                                    textDirection = TextDirection.Content,
+                                    shadow = textShadow,
+                                ),
+                                color = lineColor,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .then(
+                                        if (lyrics.synced && line.timeMs >= 0) {
+                                            Modifier.pointerInput(line.timeMs, lyrics.offsetMs) {
+                                                detectTapGestures { onSeek(lyrics.seekPositionFor(line)) }
+                                            }
+                                        } else Modifier,
+                                    )
+                                    .padding(vertical = 4.dp),
+                            )
+                        }
                     }
 
                     if (showTranslation && !line.translation.isNullOrBlank()) {
@@ -1344,6 +1434,15 @@ private fun LyricsPage(
                     onClick = { autoFollow = true },
                 ) { Text(stringResource(R.string.return_to_current_line)) }
             }
+        }
+
+        if (showShareLyricsDialog) {
+            dev.auralis.studio.ui.components.ShareLyricsDialog(
+                track = track,
+                lyrics = lyrics,
+                initialLineIndex = activeIndex.coerceAtLeast(0),
+                onDismiss = { showShareLyricsDialog = false },
+            )
         }
     }
 }
