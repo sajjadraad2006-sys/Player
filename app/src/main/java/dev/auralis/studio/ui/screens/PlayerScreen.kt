@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -523,15 +524,89 @@ private fun PlayerPage(
                                 modifier = Modifier.fillMaxWidth(0.92f),
                             )
                         }
+                        dev.auralis.studio.core.model.PlayerVisualStyle.CINEMATIC_BLUR -> {
+                            val breathScale by rememberInfiniteTransition(label = "cinematic_breath").animateFloat(
+                                initialValue = 0.95f,
+                                targetValue = if (state.isPlaying) 1.05f else 0.98f,
+                                animationSpec = infiniteRepeatable(
+                                    animation = tween(2800, easing = LinearEasing),
+                                    repeatMode = RepeatMode.Reverse,
+                                ),
+                                label = "cinematic_glow",
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.88f)
+                                    .aspectRatio(1f),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .scale(breathScale)
+                                        .clip(RoundedCornerShape(tokens.artworkCorner.dp + 12.dp))
+                                        .blur(36.dp)
+                                        .graphicsLayer { alpha = if (state.isPlaying) 0.70f else 0.35f }
+                                ) {
+                                    TrackArtwork(currentTrack, Modifier.fillMaxSize())
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize(0.90f)
+                                        .clip(RoundedCornerShape(tokens.artworkCorner.dp))
+                                        .border(1.5.dp, colors.primary.copy(alpha = 0.45f), RoundedCornerShape(tokens.artworkCorner.dp)),
+                                ) {
+                                    TrackArtwork(currentTrack, Modifier.fillMaxSize())
+                                }
+                            }
+                        }
                         dev.auralis.studio.core.model.PlayerVisualStyle.WAVEFORM_HERO -> {
                             Box(
                                 modifier = Modifier
-                                    .fillMaxWidth(0.84f)
+                                    .fillMaxWidth(0.86f)
                                     .aspectRatio(1f)
                                     .clip(RoundedCornerShape(tokens.artworkCorner.dp))
                                     .border(1.5.dp, colors.secondary.copy(alpha = 0.50f), RoundedCornerShape(tokens.artworkCorner.dp)),
+                                contentAlignment = Alignment.BottomCenter,
                             ) {
                                 TrackArtwork(currentTrack, Modifier.fillMaxSize())
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp)
+                                        .background(
+                                            Brush.verticalGradient(
+                                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))
+                                            )
+                                        )
+                                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                                    contentAlignment = Alignment.BottomCenter,
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().height(32.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.Bottom,
+                                    ) {
+                                        val bands = visualizerBands ?: FloatArray(24) { 0.2f }
+                                        val displayCount = 24
+                                        for (bIdx in 0 until displayCount) {
+                                            val bandVal = bands.getOrNull(bIdx % bands.size) ?: 0.15f
+                                            val barHeightFrac = if (state.isPlaying) bandVal.coerceIn(0.12f, 1.0f) else 0.10f
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .padding(horizontal = 1.dp)
+                                                    .fillMaxHeight(barHeightFrac)
+                                                    .clip(RoundedCornerShape(2.dp))
+                                                    .background(
+                                                        Brush.verticalGradient(
+                                                            listOf(colors.primary, colors.secondary)
+                                                        )
+                                                    )
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                         else -> {
@@ -592,10 +667,18 @@ private fun PlayerPage(
 
         // Progress slider
         item {
+            var localScrubPosition by remember { mutableStateOf<Long?>(null) }
+            val currentPos = (localScrubPosition ?: state.positionMs).coerceAtMost(state.durationMs).coerceAtLeast(0L)
             Column {
                 dev.auralis.studio.ui.components.WavySeekBar(
-                    value         = state.positionMs.coerceAtMost(state.durationMs).toFloat(),
-                    onValueChange = { onSeek(it.toLong()) },
+                    value         = currentPos.toFloat(),
+                    onValueChange = { localScrubPosition = it.toLong() },
+                    onValueChangeFinished = {
+                        localScrubPosition?.let { targetMs ->
+                            onSeek(targetMs)
+                            localScrubPosition = null
+                        }
+                    },
                     valueRange    = 0f..state.durationMs.coerceAtLeast(1).toFloat(),
                     enabled       = state.durationMs > 0,
                     isPlaying     = state.isPlaying,
@@ -604,13 +687,13 @@ private fun PlayerPage(
                 )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(
-                        DateUtils.formatElapsedTime(state.positionMs / 1_000),
+                        DateUtils.formatElapsedTime(currentPos / 1_000),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Medium,
                         color = colors.onBackground,
                     )
                     Text(
-                        "−" + DateUtils.formatElapsedTime((state.durationMs - state.positionMs).coerceAtLeast(0) / 1_000),
+                        "−" + DateUtils.formatElapsedTime((state.durationMs - currentPos).coerceAtLeast(0) / 1_000),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Medium,
                         color = colors.onBackground.copy(alpha = 0.75f),
@@ -1316,18 +1399,43 @@ private fun LyricsPage(
                     )
 
                     val adjustedPos = smoothPositionMs - lyrics.offsetMs
-                    val annotatedText = if (isActive && line.hasWordTiming && theme.lyricsWordByWordAnimation) {
+                    val nextLine = lyrics.lines.getOrNull(index + 1)
+                    val effectiveWords: List<dev.auralis.studio.core.model.LyricsWord>? = if (line.hasWordTiming) {
+                        line.words
+                    } else if (isActive && lyrics.synced && theme.lyricsWordByWordAnimation && line.text.isNotBlank()) {
+                        val lineDurationMs = if (nextLine != null && nextLine.timeMs > line.timeMs) {
+                            (nextLine.timeMs - line.timeMs).coerceIn(800L, 12000L)
+                        } else 3500L
+                        val rawTokens = line.text.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+                        if (rawTokens.isNotEmpty()) {
+                            val totalChars = rawTokens.sumOf { it.length }.coerceAtLeast(1)
+                            var runningStart = line.timeMs
+                            rawTokens.mapIndexed { wIdx, token ->
+                                val wDur = if (wIdx == rawTokens.lastIndex) {
+                                    (line.timeMs + lineDurationMs - runningStart).coerceAtLeast(120L)
+                                } else {
+                                    (token.length.toFloat() / totalChars * lineDurationMs).toLong().coerceAtLeast(120L)
+                                }
+                                val wStart = runningStart
+                                val wEnd = wStart + wDur
+                                runningStart = wEnd
+                                val separator = if (wIdx < rawTokens.lastIndex) " " else ""
+                                dev.auralis.studio.core.model.LyricsWord(startTimeMs = wStart, endTimeMs = wEnd, text = token + separator)
+                            }
+                        } else null
+                    } else null
+
+                    val annotatedText = if (isActive && effectiveWords != null && theme.lyricsWordByWordAnimation) {
                         androidx.compose.ui.text.buildAnnotatedString {
-                            val words = line.words!!
-                            for (wIdx in words.indices) {
-                                val word = words[wIdx]
-                                val nextWordStart = words.getOrNull(wIdx + 1)?.startTimeMs
+                            for (wIdx in effectiveWords.indices) {
+                                val word = effectiveWords[wIdx]
+                                val nextWordStart = effectiveWords.getOrNull(wIdx + 1)?.startTimeMs
                                     ?: if (word.endTimeMs > 0) word.endTimeMs else (word.startTimeMs + 2000L)
                                 val isWordCurrent = adjustedPos >= word.startTimeMs && adjustedPos < nextWordStart
                                 val isWordPassed = adjustedPos >= nextWordStart
                                 val wordColor = when {
                                     isWordCurrent -> colors.primary
-                                    isWordPassed -> colors.primary.copy(alpha = 0.85f)
+                                    isWordPassed -> colors.primary.copy(alpha = 0.88f)
                                     else -> colors.onSurface.copy(alpha = 0.40f)
                                 }
                                 val wordWeight = if (isWordCurrent) FontWeight.Bold else FontWeight.SemiBold

@@ -93,4 +93,71 @@ class ThemeCustomizationFeaturesTest {
         assertTrue(MoodVibe.ACOUSTIC.matchesTrack(acousticTrack))
         assertTrue(MoodVibe.LATE_NIGHT.matchesTrack(chillTrack))
     }
+
+    @Test
+    fun `liquid navigation bar slot index accounts for RTL mirroring`() {
+        val itemCount = 5
+        fun computeSlot(selectedIndex: Int, isRtl: Boolean): Int {
+            return if (isRtl && itemCount > 0) (itemCount - 1 - selectedIndex).coerceAtLeast(0) else selectedIndex
+        }
+
+        // In LTR, Home (0) stays at slot 0, Settings (4) stays at slot 4
+        assertEquals(0, computeSlot(0, isRtl = false))
+        assertEquals(2, computeSlot(2, isRtl = false))
+        assertEquals(4, computeSlot(4, isRtl = false))
+
+        // In RTL, Home (0) mirrors to physical slot 4, Settings (4) mirrors to physical slot 0
+        assertEquals(4, computeSlot(0, isRtl = true))
+        assertEquals(2, computeSlot(2, isRtl = true))
+        assertEquals(0, computeSlot(4, isRtl = true))
+    }
+
+    @Test
+    fun `lyrics line without word timestamps generates monotonically increasing synthetic words`() {
+        val lineText = "Every night in my dreams I see you"
+        val lineStartMs = 10_000L
+        val lineDurationMs = 5_000L
+        val rawTokens = lineText.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+        val totalChars = rawTokens.sumOf { it.length }.coerceAtLeast(1)
+
+        var runningStart = lineStartMs
+        val syntheticWords = rawTokens.mapIndexed { wIdx, token ->
+            val wDur = if (wIdx == rawTokens.lastIndex) {
+                (lineStartMs + lineDurationMs - runningStart).coerceAtLeast(120L)
+            } else {
+                (token.length.toFloat() / totalChars * lineDurationMs).toLong().coerceAtLeast(120L)
+            }
+            val wStart = runningStart
+            val wEnd = wStart + wDur
+            runningStart = wEnd
+            val separator = if (wIdx < rawTokens.lastIndex) " " else ""
+            LyricsWord(startTimeMs = wStart, endTimeMs = wEnd, text = token + separator)
+        }
+
+        assertEquals(8, syntheticWords.size)
+        assertTrue(syntheticWords.first().startTimeMs >= lineStartMs)
+        for (i in 0 until syntheticWords.size - 1) {
+            assertTrue(
+                "Word $i end (${syntheticWords[i].endTimeMs}) should equal next word start (${syntheticWords[i + 1].startTimeMs})",
+                syntheticWords[i].endTimeMs == syntheticWords[i + 1].startTimeMs,
+            )
+            assertTrue(syntheticWords[i].text.endsWith(" "))
+        }
+        assertFalse(syntheticWords.last().text.endsWith(" "))
+        assertTrue(syntheticWords.last().endTimeMs >= lineStartMs + lineDurationMs)
+    }
+
+    @Test
+    fun `seekbar fraction calculation handles edge boundaries gracefully`() {
+        val range = 0f..240_000f
+        val rangeSpan = (range.endInclusive - range.start).coerceAtLeast(0.001f)
+
+        fun fraction(value: Float): Float = ((value - range.start) / rangeSpan).coerceIn(0f, 1f)
+
+        assertEquals(0f, fraction(0f), 0.0001f)
+        assertEquals(0.5f, fraction(120_000f), 0.0001f)
+        assertEquals(1f, fraction(240_000f), 0.0001f)
+        assertEquals(0f, fraction(-500f), 0.0001f)
+        assertEquals(1f, fraction(300_000f), 0.0001f)
+    }
 }

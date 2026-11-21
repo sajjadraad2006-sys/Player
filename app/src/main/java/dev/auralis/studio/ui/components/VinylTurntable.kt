@@ -1,10 +1,6 @@
 package dev.auralis.studio.ui.components
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -18,7 +14,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,14 +29,17 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import kotlinx.coroutines.isActive
 
 /**
  * Realistic Studio Vinyl Turntable component with rotating grooved vinyl record,
- * center label artwork, and reactive tonearm needle.
+ * center label artwork, and reactive tonearm needle that accurately pivots on its base.
  */
 @Composable
 fun VinylTurntable(
@@ -43,20 +47,25 @@ fun VinylTurntable(
     isPlaying: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "vinyl_spin_infinite")
-    val spinAngle by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 6000, easing = LinearEasing),
-        ),
-        label = "vinyl_spin",
-    )
-    val effectiveRotation = if (isPlaying) spinAngle else 0f
+    var rotationAngle by remember { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(isPlaying) {
+        if (!isPlaying) return@LaunchedEffect
+        var lastFrameNanos = -1L
+        while (isActive) {
+            withFrameNanos { frameNanos ->
+                if (lastFrameNanos > 0L) {
+                    val dt = (frameNanos - lastFrameNanos) / 1_000_000_000f
+                    rotationAngle = (rotationAngle + dt * 60f) % 360f
+                }
+                lastFrameNanos = frameNanos
+            }
+        }
+    }
 
     val tonearmAngle by animateFloatAsState(
         targetValue = if (isPlaying) 28f else 0f,
-        animationSpec = tween(durationMillis = 400),
+        animationSpec = tween(durationMillis = 420),
         label = "tonearm_angle",
     )
 
@@ -80,7 +89,7 @@ fun VinylTurntable(
         Box(
             modifier = Modifier
                 .fillMaxSize(0.92f)
-                .rotate(effectiveRotation)
+                .rotate(rotationAngle)
                 .clip(CircleShape)
                 .background(
                     Brush.radialGradient(
@@ -155,11 +164,14 @@ fun VinylTurntable(
             }
         }
 
-        // Tonearm
+        // Tonearm with authentic physical pivot origin at its base (0.88, 0.12)
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .rotate(tonearmAngle),
+                .graphicsLayer {
+                    rotationZ = tonearmAngle
+                    transformOrigin = TransformOrigin(0.88f, 0.12f)
+                },
         ) {
             val pivotX = size.width * 0.88f
             val pivotY = size.height * 0.12f

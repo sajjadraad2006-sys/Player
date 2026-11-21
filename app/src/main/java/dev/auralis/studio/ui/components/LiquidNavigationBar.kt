@@ -137,8 +137,10 @@ fun <T> LiquidFloatingNavBar(
                 val slotWidthPx = if (itemCount > 0) totalWidthPx / itemCount else 0f
                 val slotWidthDp = maxWidth / itemCount
 
+                val isRtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
+                val targetSlot = if (isRtl && itemCount > 0) (itemCount - 1 - selectedIndex).coerceAtLeast(0) else selectedIndex
                 val animatedIndicatorX by animateFloatAsState(
-                    targetValue = selectedIndex * slotWidthPx,
+                    targetValue = targetSlot * slotWidthPx,
                     animationSpec = spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow),
                     label = "nav_bubble_slide",
                 )
