@@ -56,15 +56,17 @@ enum class NavigationBarStyle {
 }
 
 enum class HomeLayoutStyle {
+    CLEAN_APPLE_MUSIC,
     STUDIO_HUB,
     GRID_CARDS,
+    DISCOVER_SHELVES,
     MINIMAL_STREAM,
     VINYL_TURNTABLE,
     IMMERSIVE_CAROUSEL,
 }
 
 data class HomeLayoutSettings(
-    val style: HomeLayoutStyle = HomeLayoutStyle.GRID_CARDS,
+    val style: HomeLayoutStyle = HomeLayoutStyle.CLEAN_APPLE_MUSIC,
     val showQuickCategories: Boolean = true,
     val showPlaylists: Boolean = true,
     val showRecentlyPlayed: Boolean = true,

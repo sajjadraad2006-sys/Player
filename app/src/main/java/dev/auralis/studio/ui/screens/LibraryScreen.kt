@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -71,6 +72,7 @@ import dev.auralis.studio.core.database.DownloadStatus
 import dev.auralis.studio.core.database.PlaylistEntity
 import dev.auralis.studio.core.model.Track
 import dev.auralis.studio.ui.components.GlassCard
+import dev.auralis.studio.ui.components.TrackArtwork
 import dev.auralis.studio.ui.components.TrackRow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -493,13 +495,19 @@ private fun GroupList(
                         .padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    val shape = if (icon == Icons.Default.Person) CircleShape else RoundedCornerShape(12.dp)
+                    val firstTrack = groupTracks.firstOrNull()
                     Box(
                         Modifier
-                            .size(46.dp)
-                            .clip(RoundedCornerShape(10.dp)),
+                            .size(48.dp)
+                            .clip(shape),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(icon, contentDescription = null, tint = colors.primary, modifier = Modifier.size(24.dp))
+                        if (firstTrack != null) {
+                            TrackArtwork(firstTrack, Modifier.fillMaxSize())
+                        } else {
+                            Icon(icon, contentDescription = null, tint = colors.primary, modifier = Modifier.size(24.dp))
+                        }
                     }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {

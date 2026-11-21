@@ -1,5 +1,6 @@
 package dev.auralis.studio.ui.screens
 
+import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -18,6 +19,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -475,6 +479,132 @@ fun HomeScreen(
                     }
 
                     when (layoutSettings.style) {
+                        HomeLayoutStyle.CLEAN_APPLE_MUSIC -> {
+                            // ── Apple Music: Featured Hero Shelf ──
+                            item(key = "apple_feat_header") {
+                                AppleSectionIndicator(
+                                    title = stringResource(R.string.made_for_you),
+                                    actionLabel = stringResource(R.string.play_all),
+                                    onAction = {
+                                        val queue = if (favoriteTracks.isNotEmpty()) favoriteTracks else tracks
+                                        queue.firstOrNull()?.let { onPlay(it, queue) }
+                                    },
+                                )
+                            }
+                            item(key = "apple_feat_shelf") {
+                                AppleHeroFeaturedSection(
+                                    tracks = if (favoriteTracks.isNotEmpty()) favoriteTracks else tracks,
+                                    allTracks = tracks,
+                                    onPlay = onPlay,
+                                )
+                            }
+
+                            // ── Apple Music: Heavy Rotation (2-row stacked shelf) ──
+                            item(key = "apple_heavy_header") {
+                                AppleSectionIndicator(
+                                    title = stringResource(R.string.heavy_rotation),
+                                    actionLabel = "${tracks.size} ${stringResource(R.string.filter_songs)}",
+                                    onAction = { selectedCategory = HomeCategory.SONGS },
+                                )
+                            }
+                            item(key = "apple_heavy_shelf") {
+                                AppleHeavyRotationShelf(
+                                    tracks = if (historyTracks.isNotEmpty()) historyTracks else tracks,
+                                    allTracks = tracks,
+                                    currentTrack = currentTrack,
+                                    onPlay = onPlay,
+                                )
+                            }
+
+                            // ── Apple Music: Artists for your taste ──
+                            item(key = "apple_taste_artists_header") {
+                                AppleSectionIndicator(
+                                    title = stringResource(R.string.taste_artists),
+                                )
+                            }
+                            item(key = "apple_taste_artists_shelf") {
+                                AppleTasteArtistsShelf(
+                                    tracks = tracks,
+                                    onSelectArtist = { artistName ->
+                                        val artistTracks = tracks.filter { it.artist == artistName }
+                                        if (artistTracks.isNotEmpty()) {
+                                            onPlay(artistTracks.first(), artistTracks)
+                                        }
+                                    },
+                                )
+                            }
+
+                            // ── Apple Music: Playlists Shelf ──
+                            if (layoutSettings.showPlaylists && playlists.isNotEmpty()) {
+                                item(key = "apple_playlists_header") {
+                                    AppleSectionIndicator(
+                                        title = stringResource(R.string.filter_playlists),
+                                        actionLabel = stringResource(R.string.create_playlist),
+                                        onAction = { showCreatePlaylistDialog = true },
+                                    )
+                                }
+                                item(key = "apple_playlists_shelf") {
+                                    ApplePlaylistsShelf(
+                                        playlists = playlists,
+                                        onSelectPlaylist = { selectedPlaylist = it },
+                                        onCreatePlaylist = { showCreatePlaylistDialog = true },
+                                    )
+                                }
+                            }
+                        }
+                        HomeLayoutStyle.DISCOVER_SHELVES -> {
+                            // ── Discover: Top Picks ──
+                            item(key = "discover_top_picks_header") {
+                                AppleSectionIndicator(
+                                    title = stringResource(R.string.top_picks),
+                                    actionLabel = stringResource(R.string.shuffle),
+                                    onAction = {
+                                        val shuffled = tracks.shuffled()
+                                        shuffled.firstOrNull()?.let { onPlay(it, shuffled) }
+                                    },
+                                )
+                            }
+                            item(key = "discover_top_picks_shelf") {
+                                AppleHeroFeaturedSection(
+                                    tracks = if (favoriteTracks.isNotEmpty()) favoriteTracks else tracks,
+                                    allTracks = tracks,
+                                    onPlay = onPlay,
+                                )
+                            }
+
+                            // ── Discover: Recently Played Shelf ──
+                            if (historyTracks.isNotEmpty()) {
+                                item(key = "discover_recents_header") {
+                                    AppleSectionIndicator(title = stringResource(R.string.recently_played))
+                                }
+                                item(key = "discover_recents_shelf") {
+                                    AppleHeavyRotationShelf(
+                                        tracks = historyTracks,
+                                        allTracks = tracks,
+                                        currentTrack = currentTrack,
+                                        onPlay = onPlay,
+                                    )
+                                }
+                            }
+
+                            // ── Discover: Playlists ──
+                            if (layoutSettings.showPlaylists && playlists.isNotEmpty()) {
+                                item(key = "discover_playlists_header") {
+                                    AppleSectionIndicator(
+                                        title = stringResource(R.string.filter_playlists),
+                                        actionLabel = stringResource(R.string.create_playlist),
+                                        onAction = { showCreatePlaylistDialog = true },
+                                    )
+                                }
+                                item(key = "discover_playlists_shelf") {
+                                    ApplePlaylistsShelf(
+                                        playlists = playlists,
+                                        onSelectPlaylist = { selectedPlaylist = it },
+                                        onCreatePlaylist = { showCreatePlaylistDialog = true },
+                                    )
+                                }
+                            }
+                        }
                         HomeLayoutStyle.GRID_CARDS -> {
                             // ── Classic 6-Card Category Grid (User Requested Screenshot Style) ──
                             if (layoutSettings.showQuickCategories) {
@@ -589,7 +719,7 @@ fun HomeScreen(
                     }
 
                     // ── Playlists Section ─────────────────────────────────────
-                    if (layoutSettings.showPlaylists && layoutSettings.style != HomeLayoutStyle.MINIMAL_STREAM) {
+                    if (layoutSettings.showPlaylists && layoutSettings.style != HomeLayoutStyle.MINIMAL_STREAM && layoutSettings.style != HomeLayoutStyle.CLEAN_APPLE_MUSIC && layoutSettings.style != HomeLayoutStyle.DISCOVER_SHELVES) {
                         item(key = "playlists_header") {
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
@@ -653,7 +783,7 @@ fun HomeScreen(
                     }
 
                     // ── Recently Played Section ──────────────────────────────
-                    if (layoutSettings.showRecentlyPlayed && historyTracks.isNotEmpty() && layoutSettings.style != HomeLayoutStyle.MINIMAL_STREAM) {
+                    if (layoutSettings.showRecentlyPlayed && historyTracks.isNotEmpty() && layoutSettings.style != HomeLayoutStyle.MINIMAL_STREAM && layoutSettings.style != HomeLayoutStyle.CLEAN_APPLE_MUSIC && layoutSettings.style != HomeLayoutStyle.DISCOVER_SHELVES) {
                         item(key = "recently_played_header") {
                             Text(
                                 text = stringResource(R.string.recently_played),
@@ -1022,6 +1152,8 @@ private fun CustomizeHomeDialog(
                         HomeLayoutStyle.entries.forEach { style ->
                             val selected = settings.style == style
                             val title = when (style) {
+                                HomeLayoutStyle.CLEAN_APPLE_MUSIC -> stringResource(R.string.layout_clean_apple_music)
+                                HomeLayoutStyle.DISCOVER_SHELVES -> stringResource(R.string.layout_discover_shelves)
                                 HomeLayoutStyle.STUDIO_HUB -> stringResource(R.string.layout_studio_hub)
                                 HomeLayoutStyle.GRID_CARDS -> stringResource(R.string.layout_grid_cards)
                                 HomeLayoutStyle.MINIMAL_STREAM -> stringResource(R.string.layout_minimal_stream)
@@ -1859,6 +1991,420 @@ private fun PlaylistDetailView(
                         onAddToPlaylist = { pId -> onAddToPlaylist(pId, track.uri) },
                         onRemove = { onRemoveFromPlaylist(track.uri) },
                     )
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Clean Apple Music & Discover Layout Components (Inspired by Cubic & BitChord)
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun AppleSectionIndicator(
+    title: String,
+    modifier: Modifier = Modifier,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
+    val colors = MaterialTheme.colorScheme
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .width(28.dp)
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(colors.primary, colors.secondary),
+                    ),
+                ),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.ExtraBold,
+                color = colors.onBackground,
+            )
+            if (actionLabel != null && onAction != null) {
+                TextButton(onClick = onAction) {
+                    Text(
+                        text = actionLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.primary,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AppleHeroFeaturedSection(
+    tracks: List<Track>,
+    allTracks: List<Track>,
+    onPlay: (Track, List<Track>) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    val featuredTracks = remember(tracks, allTracks) {
+        if (tracks.isNotEmpty()) tracks.take(10) else allTracks.take(10)
+    }
+    if (featuredTracks.isEmpty()) return
+
+    LazyRow(
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        items(featuredTracks, key = { "apple_feat_${it.id}_${it.uri}" }) { trk ->
+            val cardShape = RoundedCornerShape(22.dp)
+            Box(
+                modifier = Modifier
+                    .width(190.dp)
+                    .clip(cardShape)
+                    .shadow(10.dp, cardShape, spotColor = Color.Black.copy(alpha = 0.35f))
+                    .background(colors.surfaceContainerHigh.copy(alpha = 0.90f))
+                    .border(
+                        1.dp,
+                        Brush.verticalGradient(
+                            listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.04f)),
+                        ),
+                        cardShape,
+                    )
+                    .clickable { onPlay(trk, featuredTracks) }
+                    .padding(8.dp),
+            ) {
+                Column {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(170.dp)
+                            .clip(RoundedCornerShape(16.dp)),
+                    ) {
+                        TrackArtwork(trk, Modifier.fillMaxSize())
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.45f)),
+                                    ),
+                                ),
+                        )
+                        Surface(
+                            onClick = { onPlay(trk, featuredTracks) },
+                            shape = CircleShape,
+                            color = colors.primary,
+                            contentColor = colors.onPrimary,
+                            shadowElevation = 6.dp,
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(8.dp)
+                                .size(40.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp),
+                                    tint = colors.onPrimary,
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = trk.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = colors.onSurface,
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = trk.artist.ifBlank { trk.album }.ifBlank { stringResource(R.string.unknown_artist) },
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                        color = colors.onSurfaceVariant.copy(alpha = 0.78f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AppleHeavyRotationShelf(
+    tracks: List<Track>,
+    allTracks: List<Track>,
+    currentTrack: Track?,
+    onPlay: (Track, List<Track>) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    val rotationTracks = remember(tracks, allTracks) {
+        if (tracks.isNotEmpty()) tracks.take(12) else allTracks.take(12)
+    }
+    if (rotationTracks.isEmpty()) return
+
+    val chunks = remember(rotationTracks) { rotationTracks.chunked(2) }
+
+    LazyRow(
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        items(chunks.size) { chunkIdx ->
+            val chunk = chunks[chunkIdx]
+            Column(
+                modifier = Modifier
+                    .width(280.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(colors.surfaceContainerHigh.copy(alpha = 0.55f))
+                    .border(
+                        1.dp,
+                        Brush.verticalGradient(
+                            listOf(Color.White.copy(alpha = 0.15f), Color.White.copy(alpha = 0.02f)),
+                        ),
+                        RoundedCornerShape(18.dp),
+                    )
+                    .padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                chunk.forEach { trk ->
+                    val isPlaying = currentTrack?.uri == trk.uri
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onPlay(trk, rotationTracks) }
+                            .padding(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(10.dp)),
+                        ) {
+                            TrackArtwork(trk, Modifier.fillMaxSize())
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = trk.title,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.SemiBold,
+                                color = if (isPlaying) colors.primary else colors.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = trk.artist.ifBlank { trk.album }.ifBlank { stringResource(R.string.unknown_artist) },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant.copy(alpha = 0.75f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = DateUtils.formatElapsedTime(trk.durationMs / 1000),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant.copy(alpha = 0.60f),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AppleTasteArtistsShelf(
+    tracks: List<Track>,
+    onSelectArtist: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    val artists = remember(tracks) {
+        tracks.map { it.artist.trim() }
+            .filter { it.isNotBlank() && !it.equals("<unknown>", ignoreCase = true) }
+            .distinct()
+            .take(14)
+    }
+    if (artists.isEmpty()) return
+
+    LazyRow(
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        items(artists, key = { "artist_$it" }) { artistName ->
+            val sampleTrack = remember(artistName) { tracks.firstOrNull { it.artist == artistName } }
+            Column(
+                modifier = Modifier
+                    .width(82.dp)
+                    .clickable { onSelectArtist(artistName) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(74.dp)
+                        .clip(CircleShape)
+                        .border(
+                            2.dp,
+                            Brush.linearGradient(
+                                listOf(colors.primary.copy(alpha = 0.8f), colors.secondary.copy(alpha = 0.5f)),
+                            ),
+                            CircleShape,
+                        )
+                        .shadow(6.dp, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (sampleTrack != null) {
+                        TrackArtwork(sampleTrack, Modifier.fillMaxSize())
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = null,
+                            tint = colors.primary,
+                            modifier = Modifier.size(36.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = artistName,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.onBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ApplePlaylistsShelf(
+    playlists: List<PlaylistEntity>,
+    onSelectPlaylist: (PlaylistEntity) -> Unit,
+    onCreatePlaylist: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    LazyRow(
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            Box(
+                modifier = Modifier
+                    .size(width = 136.dp, height = 136.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(colors.surfaceContainerHigh.copy(alpha = 0.6f))
+                    .border(
+                        1.dp,
+                        Brush.verticalGradient(
+                            listOf(colors.primary.copy(alpha = 0.45f), colors.outline.copy(alpha = 0.15f)),
+                        ),
+                        RoundedCornerShape(18.dp),
+                    )
+                    .clickable(onClick = onCreatePlaylist),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Surface(
+                        shape = CircleShape,
+                        color = colors.primary.copy(alpha = 0.15f),
+                        modifier = Modifier.size(44.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Add, contentDescription = null, tint = colors.primary, modifier = Modifier.size(24.dp))
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.create_playlist),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.primary,
+                    )
+                }
+            }
+        }
+        items(playlists, key = { "apple_pl_${it.id}" }) { pl ->
+            Box(
+                modifier = Modifier
+                    .size(width = 136.dp, height = 136.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(
+                        Brush.linearGradient(
+                            listOf(
+                                colors.surfaceContainerHighest,
+                                colors.surfaceContainerHigh,
+                            ),
+                        ),
+                    )
+                    .border(
+                        1.dp,
+                        Brush.verticalGradient(
+                            listOf(Color.White.copy(alpha = 0.20f), Color.White.copy(alpha = 0.03f)),
+                        ),
+                        RoundedCornerShape(18.dp),
+                    )
+                    .clickable { onSelectPlaylist(pl) }
+                    .padding(12.dp),
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.QueueMusic,
+                        contentDescription = null,
+                        tint = colors.primary,
+                        modifier = Modifier.size(28.dp),
+                    )
+                    Column {
+                        Text(
+                            text = pl.name,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = stringResource(R.string.filter_playlists),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant.copy(alpha = 0.70f),
+                        )
+                    }
                 }
             }
         }

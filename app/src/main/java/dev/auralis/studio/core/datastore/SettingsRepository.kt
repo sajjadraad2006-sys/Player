@@ -130,7 +130,7 @@ class SettingsRepository(private val context: Context) {
 
     val homeLayoutSettings: Flow<HomeLayoutSettings> = context.settingsDataStore.data.map { p ->
         HomeLayoutSettings(
-            style = enumValue(p[Keys.homeLayoutStyle], HomeLayoutStyle.GRID_CARDS),
+            style = enumValue(p[Keys.homeLayoutStyle], HomeLayoutStyle.CLEAN_APPLE_MUSIC),
             showQuickCategories = p[Keys.homeShowCategories] ?: true,
             showPlaylists = p[Keys.homeShowPlaylists] ?: true,
             showRecentlyPlayed = p[Keys.homeShowRecentlyPlayed] ?: true,

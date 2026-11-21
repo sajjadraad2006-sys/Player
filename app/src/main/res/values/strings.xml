@@ -472,6 +472,8 @@
     <string name="home_layout">Home screen layout</string>
     <string name="home_layout_desc">Customize interface style and visible sections</string>
     <string name="layout_studio_hub">Modern Studio Hub</string>
+    <string name="layout_clean_apple_music">Clean Apple Music</string>
+    <string name="layout_discover_shelves">Discover Shelves</string>
     <string name="layout_grid_cards">Classic 6-Card Grid</string>
     <string name="layout_minimal_stream">Minimal Stream</string>
     <string name="show_quick_categories">Quick category cards</string>
@@ -490,6 +492,11 @@
     <string name="category_most_play">MOST PLAY</string>
     <string name="layout_vinyl_turntable">Vinyl Turntable</string>
     <string name="layout_immersive_carousel">Cover Flow 3D</string>
+    <string name="made_for_you">Made For You</string>
+    <string name="top_picks">Top Picks</string>
+    <string name="heavy_rotation">Heavy Rotation</string>
+    <string name="taste_artists">Artists for Your Taste</string>
+    <string name="quick_picks">Quick Picks</string>
     <string name="recommended_for_you">Recommended for you</string>
     <string name="based_on_track">Based on %1$s</string>
     <string name="show_recommendations">Smart recommendations</string>

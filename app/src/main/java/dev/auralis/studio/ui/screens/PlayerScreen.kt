@@ -105,6 +105,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -289,9 +290,10 @@ fun PlayerScreen(
             ) {
                 IconButton(onClick = onBack) {
                     Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
+                        Icons.Default.KeyboardArrowDown,
                         contentDescription = stringResource(R.string.close),
                         tint = colors.onBackground,
+                        modifier = Modifier.size(30.dp),
                     )
                 }
                 // Page label
@@ -610,14 +612,43 @@ private fun PlayerPage(
                             }
                         }
                         else -> {
+                            val artShape = RoundedCornerShape(26.dp)
                             Box(
                                 modifier = Modifier
-                                    .fillMaxWidth(0.84f)
-                                    .aspectRatio(1f)
-                                    .clip(RoundedCornerShape(tokens.artworkCorner.dp))
-                                    .border(1.2.dp, colors.primary.copy(alpha = 0.35f), RoundedCornerShape(tokens.artworkCorner.dp)),
+                                    .fillMaxWidth(0.86f)
+                                    .aspectRatio(1f),
+                                contentAlignment = Alignment.Center,
                             ) {
-                                TrackArtwork(currentTrack, Modifier.fillMaxSize())
+                                // Subtle ambient glow behind artwork
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize(0.95f)
+                                        .scale(1.04f)
+                                        .clip(RoundedCornerShape(32.dp))
+                                        .blur(28.dp)
+                                        .graphicsLayer { alpha = if (state.isPlaying) 0.50f else 0.20f },
+                                ) {
+                                    TrackArtwork(currentTrack, Modifier.fillMaxSize())
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .shadow(16.dp, artShape, spotColor = colors.primary.copy(alpha = 0.35f))
+                                        .clip(artShape)
+                                        .border(
+                                            1.2.dp,
+                                            Brush.verticalGradient(
+                                                listOf(
+                                                    Color.White.copy(alpha = 0.35f),
+                                                    Color.White.copy(alpha = 0.05f),
+                                                    colors.primary.copy(alpha = 0.25f),
+                                                ),
+                                            ),
+                                            artShape,
+                                        ),
+                                ) {
+                                    TrackArtwork(currentTrack, Modifier.fillMaxSize())
+                                }
                             }
                         }
                     }
@@ -640,6 +671,24 @@ private fun PlayerPage(
                     Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    // Lossless / Studio Audio Badge
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(colors.primaryContainer.copy(alpha = 0.35f))
+                            .border(0.5.dp, colors.primary.copy(alpha = 0.40f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            text = "LOSSLESS · 24-BIT / 48kHz",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primary,
+                            fontSize = 9.5.sp,
+                            letterSpacing = 0.5.sp,
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
                     Text(
                         currentTrack?.title ?: stringResource(R.string.nothing_playing),
                         style    = MaterialTheme.typography.headlineMedium,
@@ -647,7 +696,7 @@ private fun PlayerPage(
                         overflow = TextOverflow.Ellipsis,
                         textAlign = TextAlign.Center,
                         color    = colors.onBackground,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
@@ -1454,11 +1503,16 @@ private fun LyricsPage(
                             .padding(horizontal = 14.dp, vertical = 6.dp)
                     } else Modifier
 
+                    val blurModifier = if (!isActive && isAppleBlur && theme.lyricsBlurInactive) {
+                        Modifier.blur(2.5.dp)
+                    } else Modifier
+
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .scale(scale)
-                            .then(cardModifier),
+                            .then(cardModifier)
+                            .then(blurModifier),
                         contentAlignment = Alignment.Center,
                     ) {
                         if (annotatedText != null) {

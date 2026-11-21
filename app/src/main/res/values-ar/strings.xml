@@ -480,6 +480,8 @@
     <string name="home_layout">تخطيط الواجهة الرئيسية</string>
     <string name="home_layout_desc">تخصيص نمط الواجهة والأقسام المعروضة</string>
     <string name="layout_studio_hub">الاستوديو الحديث</string>
+    <string name="layout_clean_apple_music">واجهة آبل ميوزك الأنيقة</string>
+    <string name="layout_discover_shelves">أرفف الاكتشاف الحديثة</string>
     <string name="layout_grid_cards">شبكة البطاقات الكلاسيكية</string>
     <string name="layout_minimal_stream">قائمة مدمجة ومباشرة</string>
     <string name="show_quick_categories">بطاقات الفئات السريعة</string>
@@ -498,6 +500,11 @@
     <string name="category_most_play">الأكثر تشغيلاً</string>
     <string name="layout_vinyl_turntable">مشغل الفينيل الكلاسيكي</string>
     <string name="layout_immersive_carousel">تدفق الأغلفة ثلاثي الأبعاد</string>
+    <string name="made_for_you">مختارات خاصة بك</string>
+    <string name="top_picks">أبرز الاختيارات</string>
+    <string name="heavy_rotation">تشغيل مكثف</string>
+    <string name="taste_artists">فنانون لذوقك</string>
+    <string name="quick_picks">مختارات سريعة</string>
     <string name="recommended_for_you">مقترح لك</string>
     <string name="based_on_track">بناءً على %1$s</string>
     <string name="show_recommendations">الاقتراحات الذكية</string>

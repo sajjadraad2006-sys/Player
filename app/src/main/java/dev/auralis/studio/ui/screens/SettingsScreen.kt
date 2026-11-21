@@ -1721,6 +1721,18 @@ private fun HomeLayoutSection(
                 Spacer(Modifier.height(8.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
+                        selected = homeLayout.style == dev.auralis.studio.core.model.HomeLayoutStyle.CLEAN_APPLE_MUSIC,
+                        onClick = { onHomeLayoutChange(homeLayout.copy(style = dev.auralis.studio.core.model.HomeLayoutStyle.CLEAN_APPLE_MUSIC)) },
+                        label = { Text(stringResource(R.string.layout_clean_apple_music)) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    FilterChip(
+                        selected = homeLayout.style == dev.auralis.studio.core.model.HomeLayoutStyle.DISCOVER_SHELVES,
+                        onClick = { onHomeLayoutChange(homeLayout.copy(style = dev.auralis.studio.core.model.HomeLayoutStyle.DISCOVER_SHELVES)) },
+                        label = { Text(stringResource(R.string.layout_discover_shelves)) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    FilterChip(
                         selected = homeLayout.style == dev.auralis.studio.core.model.HomeLayoutStyle.STUDIO_HUB,
                         onClick = { onHomeLayoutChange(homeLayout.copy(style = dev.auralis.studio.core.model.HomeLayoutStyle.STUDIO_HUB)) },
                         label = { Text(stringResource(R.string.layout_studio_hub)) },
